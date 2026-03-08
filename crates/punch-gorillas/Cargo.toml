@@ -1,0 +1,22 @@
+[package]
+name = "punch-gorillas"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Autonomous agent (Gorilla) system for the Punch Agent Combat System"
+
+[dependencies]
+punch-types = { path = "../punch-types" }
+punch-runtime = { path = "../punch-runtime" }
+punch-memory = { path = "../punch-memory" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }

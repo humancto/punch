@@ -1,0 +1,191 @@
+# ============================================================================
+# Punch Configuration
+# The Agent Combat System — Deploy autonomous AI agent squads from a single binary.
+# ============================================================================
+#
+# Copy this file to ~/.punch/config.toml and customize to your needs.
+#
+#   cp punch.toml.example ~/.punch/config.toml
+#
+# Environment variables can be referenced with the `_env` suffix pattern.
+# Punch will resolve them at startup.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Arena (HTTP API) settings
+# ---------------------------------------------------------------------------
+
+# Address and port for The Arena to listen on
+api_listen = "127.0.0.1:4200"
+
+# Enable WebSocket support for real-time agent streaming
+websocket_enabled = true
+
+# CORS allowed origins (use ["*"] for development only)
+cors_origins = ["http://localhost:3000", "https://yourdomain.com"]
+
+# ---------------------------------------------------------------------------
+# Default LLM model configuration
+# ---------------------------------------------------------------------------
+
+[default_model]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Optional: set a fallback model if the primary is unavailable
+# [fallback_model]
+# provider = "openai"
+# model = "gpt-4o"
+# api_key_env = "OPENAI_API_KEY"
+
+# ---------------------------------------------------------------------------
+# Memory substrate
+# ---------------------------------------------------------------------------
+
+[memory]
+# Path to the SQLite database for persistent memory
+sqlite_path = "~/.punch/data/punch.db"
+
+# Memory decay rate — controls how quickly old memories fade
+# Lower values = memories persist longer. Range: 0.0 (never decay) to 1.0 (immediate decay)
+decay_rate = 0.05
+
+# Maximum number of memories to keep per bout before compaction triggers
+max_memories_per_bout = 10000
+
+# Enable encryption at rest (AES-256-GCM)
+encrypt_at_rest = true
+
+# ---------------------------------------------------------------------------
+# Memory compaction
+# ---------------------------------------------------------------------------
+
+[compaction]
+# Trigger compaction when context window usage exceeds this percentage
+threshold = 80
+
+# Always keep the N most recent messages regardless of compaction
+keep_recent = 20
+
+# Compaction strategy: "summarize" (LLM-based) or "truncate" (simple cutoff)
+strategy = "summarize"
+
+# ---------------------------------------------------------------------------
+# Scheduler & quotas
+# ---------------------------------------------------------------------------
+
+[scheduler]
+# Default requests-per-minute limit per fighter
+default_rpm = 60
+
+# Default tokens-per-minute limit per fighter
+default_tpm = 100000
+
+# Quota refresh interval in seconds
+refresh_interval_secs = 60
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+[logging]
+# Log level: trace, debug, info, warn, error
+level = "info"
+
+# Format: "pretty" (human-readable) or "json" (structured)
+format = "pretty"
+
+# Log file path (omit to log to stdout only)
+# file = "~/.punch/logs/punch.log"
+
+# ---------------------------------------------------------------------------
+# Channel adapters
+# ---------------------------------------------------------------------------
+
+# Telegram bot integration
+[telegram]
+bot_token_env = "TELEGRAM_BOT_TOKEN"
+# allowed_chat_ids = [123456789]   # Restrict to specific chats
+# webhook_url = "https://yourdomain.com/hooks/telegram"
+
+# Discord bot integration
+[discord]
+bot_token_env = "DISCORD_BOT_TOKEN"
+# allowed_guild_ids = ["123456789"]
+# command_prefix = "!"
+
+# Slack bot integration
+# [slack]
+# bot_token_env = "SLACK_BOT_TOKEN"
+# app_token_env = "SLACK_APP_TOKEN"
+# signing_secret_env = "SLACK_SIGNING_SECRET"
+
+# ---------------------------------------------------------------------------
+# MCP (Model Context Protocol) servers
+# ---------------------------------------------------------------------------
+
+[[mcp_servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+# [[mcp_servers]]
+# name = "github"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-github"]
+# env = { GITHUB_TOKEN_ENV = "GITHUB_TOKEN" }
+
+# [[mcp_servers]]
+# name = "postgres"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-postgres"]
+# env = { DATABASE_URL_ENV = "DATABASE_URL" }
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+
+[security]
+# Enable Ed25519 request signing for inter-component messages
+request_signing = true
+
+# Enable Argon2id key derivation for the master key
+argon2_key_derivation = true
+
+# Auto-rotate session tokens (interval in hours)
+token_rotation_hours = 24
+
+# Enable gorilla containment zones (isolated execution environments)
+gorilla_containment = true
+
+# Enable cross-troop privilege firewall
+troop_privilege_firewall = true
+
+# ---------------------------------------------------------------------------
+# Gorilla global settings
+# ---------------------------------------------------------------------------
+
+[gorillas]
+# Maximum number of gorillas that can be unleashed simultaneously
+max_concurrent = 5
+
+# Default timeout per gorilla execution cycle (in seconds)
+default_timeout_secs = 300
+
+# Directory for custom gorilla manifests
+custom_manifest_dir = "~/.punch/gorillas"
+
+# ---------------------------------------------------------------------------
+# Fighter global settings
+# ---------------------------------------------------------------------------
+
+[fighters]
+# Maximum number of concurrent fighters
+max_concurrent = 20
+
+# Default weight class for new fighters
+default_weight_class = "middleweight"
+
+# Template search paths
+template_dirs = ["~/.punch/templates", "./templates"]

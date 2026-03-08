@@ -1,0 +1,89 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/punch-cli",
+    "crates/punch-types",
+    "crates/punch-memory",
+    "crates/punch-kernel",
+    "crates/punch-runtime",
+    "crates/punch-api",
+    "crates/punch-channels",
+    "crates/punch-skills",
+    "crates/punch-gorillas",
+    "crates/punch-extensions",
+    "crates/punch-wire",
+    "crates/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["HumanCTO <team@humancto.com>"]
+license = "MIT"
+repository = "https://github.com/humancto/punch"
+homepage = "https://punch.sh"
+description = "Punch — The Agent Combat System. Deploy autonomous AI agent squads from a single binary."
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.44", features = ["full"] }
+# HTTP
+axum = { version = "0.8", features = ["ws", "macros"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream", "multipart"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "fs"] }
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "vtab", "backup", "blob"] }
+# CLI
+clap = { version = "4", features = ["derive", "env", "unicode", "wrap_help"] }
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+# Crypto
+sha2 = "0.10"
+hmac = "0.12"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.8"
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+dashmap = "6"
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+# Error handling
+thiserror = "2"
+anyhow = "1"
+# Templating & text
+regex = "1"
+# Process
+nix = { version = "0.29", features = ["signal", "process"] }
+# Notify (file watching)
+notify = "7"
+# Glob
+glob = "0.3"
+# Base64
+base64 = "0.22"
+# URL
+url = "2"
+# Bytes
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

@@ -1,0 +1,22 @@
+[package]
+name = "punch-wire"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "P2P networking protocol for the Punch Agent Combat System"
+
+[dependencies]
+punch-types = { path = "../punch-types" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hmac = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+bytes = { workspace = true }

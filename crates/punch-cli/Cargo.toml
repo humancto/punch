@@ -1,0 +1,31 @@
+[package]
+name = "punch-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "CLI binary for Punch — The Agent Combat System"
+
+[[bin]]
+name = "punch"
+path = "src/main.rs"
+
+[dependencies]
+punch-types = { path = "../punch-types" }
+punch-memory = { path = "../punch-memory" }
+punch-kernel = { path = "../punch-kernel" }
+punch-runtime = { path = "../punch-runtime" }
+punch-api = { path = "../punch-api" }
+
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = "6"

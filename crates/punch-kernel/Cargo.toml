@@ -1,0 +1,29 @@
+[package]
+name = "punch-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The Ring — central kernel and orchestrator for the Punch Agent Combat System"
+
+[dependencies]
+punch-types = { path = "../punch-types" }
+punch-memory = { path = "../punch-memory" }
+punch-runtime = { path = "../punch-runtime" }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

@@ -1,0 +1,20 @@
+[package]
+name = "punch-api"
+version.workspace = true
+edition.workspace = true
+description = "The Arena — HTTP API server for the Punch Agent Combat System"
+
+[dependencies]
+punch-types = { path = "../punch-types" }
+punch-kernel = { path = "../punch-kernel" }
+punch-memory = { path = "../punch-memory" }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
