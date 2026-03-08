@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::middleware;
 use axum::response::Response;
-use axum::Router;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
@@ -14,8 +14,8 @@ use tracing::info;
 use punch_kernel::Ring;
 use punch_types::{PunchConfig, PunchResult};
 
-use crate::routes;
 use crate::AppState;
+use crate::routes;
 
 /// Start The Arena — the HTTP API server.
 ///
@@ -62,10 +62,7 @@ async fn security_headers(
         axum::http::header::X_CONTENT_TYPE_OPTIONS,
         "nosniff".parse().unwrap(),
     );
-    headers.insert(
-        axum::http::header::X_FRAME_OPTIONS,
-        "DENY".parse().unwrap(),
-    );
+    headers.insert(axum::http::header::X_FRAME_OPTIONS, "DENY".parse().unwrap());
     headers.insert(
         axum::http::header::CACHE_CONTROL,
         "no-store".parse().unwrap(),

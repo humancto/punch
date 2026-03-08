@@ -172,7 +172,7 @@ impl Scheduler {
 
         // Remove fighters that have no records left.
         self.quotas.retain(|_, v| {
-            let quota = v.lock().expect("quota lock poisoned");
+            let quota = v.get_mut().expect("quota lock poisoned");
             !quota.records.is_empty()
         });
 

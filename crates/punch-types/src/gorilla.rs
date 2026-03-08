@@ -32,14 +32,20 @@ pub struct GorillaManifest {
     pub name: String,
     /// Description of the Gorilla's autonomous purpose.
     pub description: String,
-    /// Cron-style schedule expression (e.g. "*/5 * * * *").
+    /// Cron-style schedule expression (e.g. "*/5 * * * *" or "every 5m").
     pub schedule: String,
     /// Moves (tools) this Gorilla requires to operate.
+    #[serde(default)]
     pub moves_required: Vec<String>,
     /// JSON Schema describing the Gorilla's configurable settings.
+    #[serde(alias = "settings")]
     pub settings_schema: Option<serde_json::Value>,
     /// Metric keys exposed on the Gorilla's dashboard.
+    #[serde(default)]
     pub dashboard_metrics: Vec<String>,
+    /// System prompt for the gorilla's autonomous behavior.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
 }
 
 /// Current operational status of a Gorilla.
@@ -71,7 +77,7 @@ impl std::fmt::Display for GorillaStatus {
 }
 
 /// Runtime metrics for a Gorilla.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GorillaMetrics {
     /// Total tasks completed successfully.
     pub tasks_completed: u64,
@@ -79,14 +85,4 @@ pub struct GorillaMetrics {
     pub uptime_secs: u64,
     /// Timestamp of the last execution ("rampage").
     pub last_rampage: Option<DateTime<Utc>>,
-}
-
-impl Default for GorillaMetrics {
-    fn default() -> Self {
-        Self {
-            tasks_completed: 0,
-            uptime_secs: 0,
-            last_rampage: None,
-        }
-    }
 }

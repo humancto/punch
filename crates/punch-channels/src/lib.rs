@@ -142,10 +142,12 @@ impl ChannelBridge {
         text: &str,
     ) -> PunchResult<()> {
         let adapters = self.adapters.read().await;
-        let adapter = adapters.get(adapter_name).ok_or_else(|| PunchError::Channel {
-            channel: adapter_name.to_string(),
-            message: "adapter not found".to_string(),
-        })?;
+        let adapter = adapters
+            .get(adapter_name)
+            .ok_or_else(|| PunchError::Channel {
+                channel: adapter_name.to_string(),
+                message: "adapter not found".to_string(),
+            })?;
         adapter.send_message(channel_id, text).await
     }
 

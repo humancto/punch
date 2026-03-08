@@ -44,21 +44,21 @@ pub fn load_config(override_path: Option<&str>) -> Result<PunchConfig, String> {
 /// Load the .env file from ~/.punch/.env if it exists.
 pub fn load_dotenv() {
     let env_path = punch_home().join(".env");
-    if env_path.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&env_path) {
-            for line in contents.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                if let Some((key, value)) = line.split_once('=') {
-                    let key = key.trim();
-                    let value = value.trim().trim_matches('"');
-                    if std::env::var(key).is_err() {
-                        // SAFETY: We only call this during single-threaded CLI
-                        // startup, before spawning any async tasks.
-                        unsafe { std::env::set_var(key, value) };
-                    }
+    if env_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&env_path)
+    {
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim().trim_matches('"');
+                if std::env::var(key).is_err() {
+                    // SAFETY: We only call this during single-threaded CLI
+                    // startup, before spawning any async tasks.
+                    unsafe { std::env::set_var(key, value) };
                 }
             }
         }

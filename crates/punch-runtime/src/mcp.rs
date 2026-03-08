@@ -4,8 +4,8 @@
 //! tool discovery and invocation over JSON-RPC 2.0.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -162,10 +162,7 @@ impl McpClient {
 
             tools.push(ToolDefinition {
                 name: namespaced,
-                description: tool["description"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                description: tool["description"].as_str().unwrap_or("").to_string(),
                 input_schema: tool
                     .get("inputSchema")
                     .cloned()
@@ -196,9 +193,7 @@ impl McpClient {
             "arguments": input,
         });
 
-        let response = self
-            .send_request("tools/call", params)
-            .await?;
+        let response = self.send_request("tools/call", params).await?;
 
         let result = response.get("result").cloned().ok_or_else(|| {
             // Check for error.
@@ -262,11 +257,7 @@ impl McpClient {
     }
 
     /// Send a JSON-RPC 2.0 notification (no id, no response expected).
-    async fn send_notification(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> PunchResult<()> {
+    async fn send_notification(&self, method: &str, params: serde_json::Value) -> PunchResult<()> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -296,13 +287,10 @@ impl McpClient {
                 server: self.server_name.clone(),
                 message: format!("failed to write to stdin: {}", e),
             })?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| PunchError::Mcp {
-                server: self.server_name.clone(),
-                message: format!("failed to write newline: {}", e),
-            })?;
+        stdin.write_all(b"\n").await.map_err(|e| PunchError::Mcp {
+            server: self.server_name.clone(),
+            message: format!("failed to write newline: {}", e),
+        })?;
         stdin.flush().await.map_err(|e| PunchError::Mcp {
             server: self.server_name.clone(),
             message: format!("failed to flush stdin: {}", e),

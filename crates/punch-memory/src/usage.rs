@@ -68,28 +68,62 @@ impl MemorySubstrate {
 
         let conn = self.conn.lock().await;
 
-        let result = conn.query_row(
-            "SELECT COALESCE(SUM(input_tokens), 0),
+        let result = conn
+            .query_row(
+                "SELECT COALESCE(SUM(input_tokens), 0),
                     COALESCE(SUM(output_tokens), 0),
                     COALESCE(SUM(cost_usd), 0.0),
                     COUNT(*)
              FROM usage_events
              WHERE fighter_id = ?1 AND created_at >= ?2",
-            rusqlite::params![fighter_str, since_str],
-            |row| {
-                let total_input_tokens: u64 = row.get(0)?;
-                let total_output_tokens: u64 = row.get(1)?;
-                let total_cost_usd: f64 = row.get(2)?;
-                let event_count: u64 = row.get(3)?;
-                Ok(UsageSummary {
-                    total_input_tokens,
-                    total_output_tokens,
-                    total_cost_usd,
-                    event_count,
-                })
-            },
-        )
-        .map_err(|e| PunchError::Memory(format!("failed to get usage summary: {e}")))?;
+                rusqlite::params![fighter_str, since_str],
+                |row| {
+                    let total_input_tokens: u64 = row.get(0)?;
+                    let total_output_tokens: u64 = row.get(1)?;
+                    let total_cost_usd: f64 = row.get(2)?;
+                    let event_count: u64 = row.get(3)?;
+                    Ok(UsageSummary {
+                        total_input_tokens,
+                        total_output_tokens,
+                        total_cost_usd,
+                        event_count,
+                    })
+                },
+            )
+            .map_err(|e| PunchError::Memory(format!("failed to get usage summary: {e}")))?;
+
+        Ok(result)
+    }
+
+    /// Get an aggregated usage summary across ALL fighters since the given timestamp.
+    pub async fn get_total_usage_summary(&self, since: DateTime<Utc>) -> PunchResult<UsageSummary> {
+        let since_str = since.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let conn = self.conn.lock().await;
+
+        let result = conn
+            .query_row(
+                "SELECT COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0),
+                    COUNT(*)
+             FROM usage_events
+             WHERE created_at >= ?1",
+                rusqlite::params![since_str],
+                |row| {
+                    let total_input_tokens: u64 = row.get(0)?;
+                    let total_output_tokens: u64 = row.get(1)?;
+                    let total_cost_usd: f64 = row.get(2)?;
+                    let event_count: u64 = row.get(3)?;
+                    Ok(UsageSummary {
+                        total_input_tokens,
+                        total_output_tokens,
+                        total_cost_usd,
+                        event_count,
+                    })
+                },
+            )
+            .map_err(|e| PunchError::Memory(format!("failed to get total usage summary: {e}")))?;
 
         Ok(result)
     }

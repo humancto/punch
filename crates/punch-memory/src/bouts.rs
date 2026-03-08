@@ -127,11 +127,15 @@ impl MemorySubstrate {
                     let v: serde_json::Value = serde_json::from_str(&json)
                         .map_err(|e| PunchError::Bout(format!("corrupt message metadata: {e}")))?;
                     let tc = serde_json::from_value(
-                        v.get("tool_calls").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                        v.get("tool_calls")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Array(vec![])),
                     )
                     .unwrap_or_default();
                     let tr = serde_json::from_value(
-                        v.get("tool_results").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                        v.get("tool_results")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Array(vec![])),
                     )
                     .unwrap_or_default();
                     (tc, tr)
@@ -227,15 +231,16 @@ fn parse_timestamp(s: &str) -> PunchResult<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| {
-            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ")
-                .map(|ndt| ndt.and_utc())
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ").map(|ndt| ndt.and_utc())
         })
         .map_err(|e| PunchError::Bout(format!("invalid timestamp '{s}': {e}")))
 }
 
 #[cfg(test)]
 mod tests {
-    use punch_types::{FighterManifest, FighterStatus, Message, ModelConfig, Provider, Role, WeightClass};
+    use punch_types::{
+        FighterManifest, FighterStatus, Message, ModelConfig, Provider, Role, WeightClass,
+    };
 
     use crate::MemorySubstrate;
 

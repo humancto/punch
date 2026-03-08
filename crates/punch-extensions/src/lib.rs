@@ -134,7 +134,7 @@ impl CredentialVault {
             .map_err(|e| PunchError::Internal(format!("decryption failed: {e}")))?;
 
         String::from_utf8(plaintext)
-            .map(|s| Some(s))
+            .map(Some)
             .map_err(|e| PunchError::Internal(format!("decrypted value is not valid UTF-8: {e}")))
     }
 

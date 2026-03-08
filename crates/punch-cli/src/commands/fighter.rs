@@ -1,17 +1,306 @@
 //! `punch fighter` — Manage fighters (conversational agents).
 
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use punch_kernel::Ring;
 use punch_memory::MemorySubstrate;
 use punch_runtime::create_driver;
-use punch_types::{FighterId, FighterManifest, WeightClass};
 use punch_types::config::ModelConfig;
+use punch_types::{Capability, FighterId, FighterManifest, WeightClass};
+use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::cli::FighterCommands;
 use super::{load_config, load_dotenv, punch_home};
+use crate::cli::FighterCommands;
+
+// ---------------------------------------------------------------------------
+// Agent template types
+// ---------------------------------------------------------------------------
+
+/// Intermediate TOML-friendly struct for loading agent.toml files.
+/// Model is optional — it will be filled from global config if missing.
+#[derive(Debug, Clone, Deserialize)]
+struct AgentTemplate {
+    name: String,
+    description: String,
+    #[serde(default = "default_weight_class")]
+    weight_class: String,
+    system_prompt: String,
+    #[serde(default)]
+    model: Option<AgentModelConfig>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+/// Optional model override in agent.toml.
+#[derive(Debug, Clone, Deserialize)]
+struct AgentModelConfig {
+    provider: Option<String>,
+    model: Option<String>,
+    api_key_env: Option<String>,
+    base_url: Option<String>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+}
+
+fn default_weight_class() -> String {
+    "middleweight".to_string()
+}
+
+/// Resolve an AgentTemplate + global config into a FighterManifest.
+fn resolve_template(template: AgentTemplate, default_model: &ModelConfig) -> FighterManifest {
+    // Resolve model: start with global default, overlay template overrides.
+    let model = match template.model {
+        Some(agent_model) => {
+            let provider = agent_model
+                .provider
+                .and_then(|p| serde_json::from_value(serde_json::Value::String(p)).ok())
+                .unwrap_or_else(|| default_model.provider.clone());
+            ModelConfig {
+                provider,
+                model: agent_model
+                    .model
+                    .unwrap_or_else(|| default_model.model.clone()),
+                api_key_env: agent_model
+                    .api_key_env
+                    .or_else(|| default_model.api_key_env.clone()),
+                base_url: agent_model
+                    .base_url
+                    .or_else(|| default_model.base_url.clone()),
+                max_tokens: agent_model.max_tokens.or(default_model.max_tokens),
+                temperature: agent_model.temperature.or(default_model.temperature),
+            }
+        }
+        None => default_model.clone(),
+    };
+
+    // Parse weight class.
+    let weight_class = match template.weight_class.to_lowercase().as_str() {
+        "featherweight" => WeightClass::Featherweight,
+        "heavyweight" => WeightClass::Heavyweight,
+        "champion" => WeightClass::Champion,
+        _ => WeightClass::Middleweight,
+    };
+
+    // Parse capabilities from string list.
+    let capabilities = parse_capabilities(&template.capabilities);
+
+    FighterManifest {
+        name: template.name,
+        description: template.description,
+        model,
+        system_prompt: template.system_prompt,
+        capabilities,
+        weight_class,
+    }
+}
+
+/// Parse capability strings like "file_read", "shell_exec", "memory" into Capability enums.
+fn parse_capabilities(caps: &[String]) -> Vec<Capability> {
+    let mut result = Vec::new();
+    for cap in caps {
+        match cap.as_str() {
+            "read_file" | "file_read" => result.push(Capability::FileRead("**".to_string())),
+            "write_file" | "file_write" => result.push(Capability::FileWrite("**".to_string())),
+            "shell_exec" => result.push(Capability::ShellExec("*".to_string())),
+            "web_search" | "web_fetch" | "network" => {
+                result.push(Capability::Network("*".to_string()))
+            }
+            "memory" | "memory_store" | "memory_recall" => result.push(Capability::Memory),
+            "knowledge_graph" | "git_operations" => result.push(Capability::KnowledgeGraph),
+            "browser_control" => result.push(Capability::BrowserControl),
+            "agent_spawn" => result.push(Capability::AgentSpawn),
+            "agent_message" => result.push(Capability::AgentMessage),
+            "schedule" => result.push(Capability::Schedule),
+            "event_publish" => result.push(Capability::EventPublish),
+            _ => {
+                // Unknown capability, skip silently.
+            }
+        }
+    }
+    // Deduplicate.
+    result.dedup();
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Template loading
+// ---------------------------------------------------------------------------
+
+/// Search paths for agent.toml files, in priority order:
+/// 1. ./agents/{name}/agent.toml (project-local)
+/// 2. ~/.punch/agents/{name}/agent.toml (user global)
+fn find_agent_toml(template_name: &str) -> Option<PathBuf> {
+    // 1. Project-local agents directory.
+    let project_path = PathBuf::from("agents")
+        .join(template_name)
+        .join("agent.toml");
+    if project_path.exists() {
+        return Some(project_path);
+    }
+
+    // 2. User-global agents directory.
+    let global_path = punch_home()
+        .join("agents")
+        .join(template_name)
+        .join("agent.toml");
+    if global_path.exists() {
+        return Some(global_path);
+    }
+
+    None
+}
+
+/// Load a fighter template from disk or use a built-in default.
+fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterManifest, String> {
+    // 1. Try to load from agent.toml on disk.
+    if let Some(path) = find_agent_toml(template) {
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let agent_template: AgentTemplate = toml::from_str(&contents)
+            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+        return Ok(resolve_template(agent_template, default_model));
+    }
+
+    // 2. Legacy path: ~/.punch/fighters/<template>.toml
+    let legacy_path = punch_home()
+        .join("fighters")
+        .join(format!("{}.toml", template));
+    if legacy_path.exists() {
+        let contents = std::fs::read_to_string(&legacy_path)
+            .map_err(|e| format!("Failed to read template: {}", e))?;
+        // Try parsing as AgentTemplate first, then fall back to FighterManifest.
+        if let Ok(agent_template) = toml::from_str::<AgentTemplate>(&contents) {
+            return Ok(resolve_template(agent_template, default_model));
+        }
+        let manifest: FighterManifest =
+            toml::from_str(&contents).map_err(|e| format!("Failed to parse template: {}", e))?;
+        return Ok(manifest);
+    }
+
+    // 3. Built-in defaults.
+    let manifest = match template {
+        "default" | "punch" => FighterManifest {
+            name: "Punch".to_string(),
+            description: "The default all-rounder fighter.".to_string(),
+            model: default_model.clone(),
+            system_prompt:
+                "You are Punch, a capable AI assistant. Be helpful, concise, and direct."
+                    .to_string(),
+            capabilities: vec![],
+            weight_class: WeightClass::Middleweight,
+        },
+        "striker" => FighterManifest {
+            name: "Striker".to_string(),
+            description: "Expert full-stack software engineer.".to_string(),
+            model: default_model.clone(),
+            system_prompt: "You are Striker, an expert full-stack software engineer. You write \
+                 production-quality code across all major languages and frameworks. \
+                 Be thorough, handle errors, write tests."
+                .to_string(),
+            capabilities: vec![
+                Capability::FileRead("**".to_string()),
+                Capability::FileWrite("**".to_string()),
+                Capability::ShellExec("*".to_string()),
+                Capability::Network("*".to_string()),
+                Capability::Memory,
+            ],
+            weight_class: WeightClass::Heavyweight,
+        },
+        "scout" => FighterManifest {
+            name: "Scout".to_string(),
+            description: "Deep research agent for thorough investigation.".to_string(),
+            model: default_model.clone(),
+            system_prompt: "You are Scout, a deep research agent. Investigate topics thoroughly, \
+                 cross-reference sources, and produce well-cited reports. Be rigorous \
+                 and evidence-based."
+                .to_string(),
+            capabilities: vec![
+                Capability::Network("*".to_string()),
+                Capability::FileRead("**".to_string()),
+                Capability::FileWrite("**".to_string()),
+                Capability::Memory,
+            ],
+            weight_class: WeightClass::Middleweight,
+        },
+        "oracle" => FighterManifest {
+            name: "Oracle".to_string(),
+            description: "General-purpose conversational AI with broad knowledge.".to_string(),
+            model: default_model.clone(),
+            system_prompt: "You are Oracle, a knowledgeable and thoughtful AI assistant. You draw \
+                 on broad knowledge to give insightful, well-reasoned answers. Be clear, \
+                 concise, and helpful."
+                .to_string(),
+            capabilities: vec![Capability::Memory],
+            weight_class: WeightClass::Middleweight,
+        },
+        "coder" => FighterManifest {
+            name: "Coder".to_string(),
+            description: "A heavyweight coding specialist.".to_string(),
+            model: default_model.clone(),
+            system_prompt: "You are Coder, a programming expert. Write clean, efficient code. \
+                 Explain your reasoning. Always include error handling."
+                .to_string(),
+            capabilities: vec![
+                Capability::FileRead("**".to_string()),
+                Capability::FileWrite("**".to_string()),
+                Capability::ShellExec("*".to_string()),
+                Capability::Memory,
+            ],
+            weight_class: WeightClass::Heavyweight,
+        },
+        _ => {
+            return Err(format!(
+                "Unknown template '{}'. Available: default, striker, scout, oracle, coder\n  \
+                 Or create an agent template at: agents/{}/agent.toml\n  \
+                 Or place one at: {}",
+                template,
+                template,
+                punch_home()
+                    .join("agents")
+                    .join(template)
+                    .join("agent.toml")
+                    .display()
+            ));
+        }
+    };
+
+    Ok(manifest)
+}
+
+// ---------------------------------------------------------------------------
+// Daemon communication helpers
+// ---------------------------------------------------------------------------
+
+/// Try to read the daemon port from config. Returns the base URL if daemon appears reachable.
+fn daemon_url(config_path: Option<&str>) -> Option<String> {
+    let config = load_config(config_path).ok()?;
+    let url = format!("http://{}", config.api_listen);
+    let health_url = format!("{}/health", url);
+
+    // Run blocking HTTP check in a separate thread to avoid async runtime panic.
+    let url_clone = url.clone();
+    let handle = std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .ok()?;
+        client.get(&health_url).send().ok().and_then(|resp| {
+            if resp.status().is_success() {
+                Some(url_clone)
+            } else {
+                None
+            }
+        })
+    });
+    handle.join().ok().flatten()
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers
+// ---------------------------------------------------------------------------
 
 pub async fn run(command: FighterCommands, config_path: Option<String>) -> i32 {
     load_dotenv();
@@ -42,16 +331,19 @@ pub async fn run_quick_chat(message: Option<String>, config_path: Option<String>
         Err(code) => return code,
     };
 
-    // Spawn a default fighter for quick chat.
-    let manifest = FighterManifest {
-        name: "Punch".to_string(),
-        description: "Default Punch fighter for quick chat.".to_string(),
-        model: config.default_model.clone(),
-        system_prompt: "You are Punch, a helpful AI assistant with the heart of a champion. \
-            Be concise, direct, and helpful."
-            .to_string(),
-        capabilities: vec![],
-        weight_class: WeightClass::Middleweight,
+    // Spawn oracle template as default for quick chat.
+    let manifest = match load_template("oracle", &config.default_model) {
+        Ok(m) => m,
+        Err(_) => FighterManifest {
+            name: "Punch".to_string(),
+            description: "Default Punch fighter for quick chat.".to_string(),
+            model: config.default_model.clone(),
+            system_prompt: "You are Punch, a helpful AI assistant with the heart of a champion. \
+                 Be concise, direct, and helpful."
+                .to_string(),
+            capabilities: vec![],
+            weight_class: WeightClass::Middleweight,
+        },
     };
 
     let fighter_id = ring.spawn_fighter(manifest).await;
@@ -62,6 +354,12 @@ pub async fn run_quick_chat(message: Option<String>, config_path: Option<String>
             match ring.send_message(&fighter_id, msg).await {
                 Ok(result) => {
                     println!("{}", result.response);
+                    if result.usage.total() > 0 {
+                        eprintln!(
+                            "  [tokens: {} in / {} out]",
+                            result.usage.input_tokens, result.usage.output_tokens
+                        );
+                    }
                     0
                 }
                 Err(e) => {
@@ -86,12 +384,57 @@ async fn run_spawn(template: String, config_path: Option<String>) -> i32 {
         }
     };
 
+    // Try to spawn against running daemon first.
+    if let Some(base_url) = daemon_url(config_path.as_deref()) {
+        let manifest = match load_template(&template, &config.default_model) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("  [X] {}", e);
+                return 1;
+            }
+        };
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/fighters", base_url);
+        let body = serde_json::json!({ "manifest": manifest });
+
+        match client.post(&url).json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    let name = data["name"].as_str().unwrap_or(&template);
+                    let id = data["id"].as_str().unwrap_or("unknown");
+                    println!();
+                    println!("  Fighter spawned (via daemon)!");
+                    println!("  Name:  {}", name);
+                    println!("  ID:    {}", id);
+                    println!();
+                    println!(
+                        "  Start chatting: punch fighter chat {}",
+                        name.to_lowercase()
+                    );
+                    println!();
+                    return 0;
+                }
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                eprintln!("  [X] Daemon returned {}: {}", status, body);
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("  [X] Failed to reach daemon: {}", e);
+                return 1;
+            }
+        }
+    }
+
+    // No daemon running — create in-process ring.
     let ring = match create_ring(&config).await {
         Ok(r) => r,
         Err(code) => return code,
     };
 
-    // Load template from ~/.punch/fighters/<template>.toml or use built-in.
     let manifest = match load_template(&template, &config.default_model) {
         Ok(m) => m,
         Err(e) => {
@@ -101,21 +444,69 @@ async fn run_spawn(template: String, config_path: Option<String>) -> i32 {
     };
 
     let name = manifest.name.clone();
+    let wc = manifest.weight_class;
     let id = ring.spawn_fighter(manifest).await;
 
     println!();
     println!("  Fighter spawned!");
     println!("  Name:  {}", name);
     println!("  ID:    {}", id);
-    println!("  Class: middleweight");
+    println!("  Class: {}", wc);
     println!();
-    println!("  Start chatting: punch fighter chat {}", name.to_lowercase());
+    println!(
+        "  Start chatting: punch fighter chat {}",
+        name.to_lowercase()
+    );
     println!();
 
     0
 }
 
 async fn run_list(config_path: Option<String>) -> i32 {
+    // Try daemon first.
+    if let Some(base_url) = daemon_url(config_path.as_deref()) {
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/fighters", base_url);
+
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(fighters) = resp.json::<Vec<serde_json::Value>>().await {
+                    if fighters.is_empty() {
+                        println!();
+                        println!("  No fighters in the ring.");
+                        println!("  Spawn one: punch fighter spawn <template>");
+                        println!();
+                        return 0;
+                    }
+
+                    println!();
+                    println!(
+                        "  {:<36}  {:<16}  {:<14}  STATUS",
+                        "ID", "NAME", "WEIGHT CLASS"
+                    );
+                    println!("  {}", "-".repeat(86));
+
+                    for f in &fighters {
+                        println!(
+                            "  {:<36}  {:<16}  {:<14}  {}",
+                            f["id"].as_str().unwrap_or("-"),
+                            f["name"].as_str().unwrap_or("-"),
+                            f["weight_class"].as_str().unwrap_or("-"),
+                            f["status"].as_str().unwrap_or("-"),
+                        );
+                    }
+
+                    println!();
+                    println!("  Total: {} fighter(s) (via daemon)", fighters.len());
+                    println!();
+                    return 0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // No daemon — check if we should inform the user.
     let config = match load_config(config_path.as_deref()) {
         Ok(c) => c,
         Err(e) => {
@@ -123,6 +514,18 @@ async fn run_list(config_path: Option<String>) -> i32 {
             return 1;
         }
     };
+
+    // Check PID file to see if daemon *should* be running.
+    let pid_path = punch_home().join(".daemon.pid");
+    if pid_path.exists() {
+        eprintln!("  [X] Daemon PID file exists but daemon is not responding.");
+        eprintln!("      Try: punch stop && punch start");
+        return 1;
+    }
+
+    println!();
+    println!("  No daemon running. Showing in-process state.");
+    println!();
 
     let ring = match create_ring(&config).await {
         Ok(r) => r,
@@ -132,15 +535,16 @@ async fn run_list(config_path: Option<String>) -> i32 {
     let fighters = ring.list_fighters();
 
     if fighters.is_empty() {
-        println!();
         println!("  No fighters in the ring.");
         println!("  Spawn one: punch fighter spawn <template>");
         println!();
         return 0;
     }
 
-    println!();
-    println!("  {:<36}  {:<16}  {:<14}  {}", "ID", "NAME", "WEIGHT CLASS", "STATUS");
+    println!(
+        "  {:<36}  {:<16}  {:<14}  STATUS",
+        "ID", "NAME", "WEIGHT CLASS"
+    );
     println!("  {}", "-".repeat(86));
 
     for (id, manifest, status) in &fighters {
@@ -171,28 +575,42 @@ async fn run_chat(name: Option<String>, config_path: Option<String>) -> i32 {
         Err(code) => return code,
     };
 
-    // If a name is given, look up the fighter; otherwise spawn a default.
+    // If a name is given, look up the fighter; otherwise spawn oracle.
     let fighter_id = match name {
         Some(ref n) => {
+            // Try to load from template if the name matches a known template.
             let fighters = ring.list_fighters();
-            match fighters.iter().find(|(_, m, _)| m.name.eq_ignore_ascii_case(n)) {
+            match fighters
+                .iter()
+                .find(|(_, m, _)| m.name.eq_ignore_ascii_case(n))
+            {
                 Some((id, _, _)) => *id,
                 None => {
-                    eprintln!("  [X] Fighter '{}' not found.", n);
-                    return 1;
+                    // Try to spawn from template.
+                    match load_template(n, &config.default_model) {
+                        Ok(manifest) => ring.spawn_fighter(manifest).await,
+                        Err(_) => {
+                            eprintln!("  [X] Fighter '{}' not found and no matching template.", n);
+                            return 1;
+                        }
+                    }
                 }
             }
         }
         None => {
-            let manifest = FighterManifest {
-                name: "Punch".to_string(),
-                description: "Default Punch fighter.".to_string(),
-                model: config.default_model.clone(),
-                system_prompt: "You are Punch, a helpful AI assistant with the heart of a champion. \
-                    Be concise, direct, and helpful."
-                    .to_string(),
-                capabilities: vec![],
-                weight_class: WeightClass::Middleweight,
+            let manifest = match load_template("oracle", &config.default_model) {
+                Ok(m) => m,
+                Err(_) => FighterManifest {
+                    name: "Punch".to_string(),
+                    description: "Default Punch fighter.".to_string(),
+                    model: config.default_model.clone(),
+                    system_prompt:
+                        "You are Punch, a helpful AI assistant with the heart of a champion. \
+                         Be concise, direct, and helpful."
+                            .to_string(),
+                    capabilities: vec![],
+                    weight_class: WeightClass::Middleweight,
+                },
             };
             ring.spawn_fighter(manifest).await
         }
@@ -209,8 +627,11 @@ async fn run_chat_repl(ring: &Arc<Ring>, fighter_id: &FighterId) -> i32 {
 
     println!();
     println!("  Entering the ring with {}...", fighter_name);
-    println!("  Type your message and press Enter. Type /exit to leave.");
+    println!("  Commands: /exit /quit /tools /status /memory");
     println!();
+
+    print!("  you > ");
+    io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
     let reader = stdin.lock();
@@ -224,20 +645,85 @@ async fn run_chat_repl(ring: &Arc<Ring>, fighter_id: &FighterId) -> i32 {
         let input = line.trim().to_string();
 
         if input.is_empty() {
+            print!("  you > ");
+            io::stdout().flush().unwrap();
             continue;
         }
 
+        // Handle slash commands.
         if input == "/exit" || input == "/quit" || input == "/q" {
             println!("  Bell rings. Fight over.");
             break;
         }
 
-        print!("  {} > ", fighter_name);
-        io::stdout().flush().unwrap();
+        if input == "/tools" {
+            let entry = ring.get_fighter(fighter_id);
+            if let Some(entry) = entry {
+                let tools = punch_runtime::tools_for_capabilities(&entry.manifest.capabilities);
+                println!();
+                println!("  Available tools ({}):", tools.len());
+                for tool in &tools {
+                    println!("    - {} : {}", tool.name, tool.description);
+                }
+                if tools.is_empty() {
+                    println!("    (no tools — fighter has no capabilities)");
+                }
+                println!();
+            }
+            print!("  you > ");
+            io::stdout().flush().unwrap();
+            continue;
+        }
 
+        if input == "/status" {
+            let entry = ring.get_fighter(fighter_id);
+            if let Some(entry) = entry {
+                println!();
+                println!("  Fighter: {}", entry.manifest.name);
+                println!("  Status:  {}", entry.status);
+                println!("  Class:   {}", entry.manifest.weight_class);
+                println!(
+                    "  Model:   {} ({})",
+                    entry.manifest.model.model, entry.manifest.model.provider
+                );
+                println!(
+                    "  Bout:    {}",
+                    entry
+                        .current_bout
+                        .map(|b| b.0.to_string())
+                        .unwrap_or_else(|| "none".to_string())
+                );
+                println!();
+            }
+            print!("  you > ");
+            io::stdout().flush().unwrap();
+            continue;
+        }
+
+        if input == "/memory" {
+            // Try to recall recent memories.
+            println!();
+            println!("  (Memory recall is available via the memory_recall tool during chat.)");
+            println!();
+            print!("  you > ");
+            io::stdout().flush().unwrap();
+            continue;
+        }
+
+        // Send message to fighter.
         match ring.send_message(fighter_id, input).await {
             Ok(result) => {
-                println!("{}", result.response);
+                println!();
+                println!("  {} > {}", fighter_name, result.response);
+                if result.usage.total() > 0 {
+                    println!(
+                        "  [tokens: {} in / {} out | tools: {} | iterations: {}]",
+                        result.usage.input_tokens,
+                        result.usage.output_tokens,
+                        result.tool_calls_made,
+                        result.iterations
+                    );
+                }
                 println!();
             }
             Err(e) => {
@@ -315,9 +801,7 @@ async fn run_kill(id: String, config_path: Option<String>) -> i32 {
 }
 
 /// Create a Ring from config for CLI operations.
-async fn create_ring(
-    config: &punch_types::PunchConfig,
-) -> Result<Arc<Ring>, i32> {
+async fn create_ring(config: &punch_types::PunchConfig) -> Result<Arc<Ring>, i32> {
     let db_path_str = if config.memory.db_path.starts_with("~") {
         let home = dirs::home_dir().expect("could not determine home directory");
         config.memory.db_path.replace("~", &home.to_string_lossy())
@@ -347,63 +831,4 @@ async fn create_ring(
     };
 
     Ok(Arc::new(Ring::new(config.clone(), memory, driver)))
-}
-
-/// Load a fighter template from disk or use a built-in default.
-fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterManifest, String> {
-    // Check for a template file first.
-    let template_path = punch_home().join("fighters").join(format!("{}.toml", template));
-
-    if template_path.exists() {
-        let contents = std::fs::read_to_string(&template_path)
-            .map_err(|e| format!("Failed to read template: {}", e))?;
-        let manifest: FighterManifest =
-            toml::from_str(&contents).map_err(|e| format!("Failed to parse template: {}", e))?;
-        return Ok(manifest);
-    }
-
-    // Built-in templates.
-    let manifest = match template {
-        "default" | "punch" => FighterManifest {
-            name: "Punch".to_string(),
-            description: "The default all-rounder fighter.".to_string(),
-            model: default_model.clone(),
-            system_prompt: "You are Punch, a capable AI assistant. Be helpful, concise, and direct."
-                .to_string(),
-            capabilities: vec![],
-            weight_class: WeightClass::Middleweight,
-        },
-        "coder" => FighterManifest {
-            name: "Coder".to_string(),
-            description: "A heavyweight coding specialist.".to_string(),
-            model: default_model.clone(),
-            system_prompt:
-                "You are Coder, a programming expert. Write clean, efficient code. \
-                 Explain your reasoning. Always include error handling."
-                    .to_string(),
-            capabilities: vec![],
-            weight_class: WeightClass::Heavyweight,
-        },
-        "scout" => FighterManifest {
-            name: "Scout".to_string(),
-            description: "A fast featherweight for quick tasks.".to_string(),
-            model: default_model.clone(),
-            system_prompt:
-                "You are Scout, a fast and lightweight assistant. Give brief, \
-                 to-the-point answers. Prioritize speed over depth."
-                    .to_string(),
-            capabilities: vec![],
-            weight_class: WeightClass::Featherweight,
-        },
-        _ => {
-            return Err(format!(
-                "Unknown template '{}'. Available: default, coder, scout\n  \
-                 Or create a template at: {}",
-                template,
-                template_path.display()
-            ));
-        }
-    };
-
-    Ok(manifest)
 }

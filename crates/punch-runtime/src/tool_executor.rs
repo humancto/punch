@@ -13,8 +13,7 @@ use tracing::{debug, instrument};
 
 use punch_memory::MemorySubstrate;
 use punch_types::{
-    Capability, FighterId, PunchError, PunchResult, ToolResult,
-    capability::capability_matches,
+    Capability, FighterId, PunchError, PunchResult, ToolResult, capability::capability_matches,
 };
 
 /// Context passed to every tool execution.
@@ -130,12 +129,10 @@ async fn tool_file_read(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    let path_str = input["path"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "file_read".into(),
-            message: "missing 'path' parameter".into(),
-        })?;
+    let path_str = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "file_read".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
 
     let path = resolve_path(&context.working_dir, path_str)?;
     let path_display = path.display().to_string();
@@ -166,18 +163,14 @@ async fn tool_file_write(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    let path_str = input["path"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "file_write".into(),
-            message: "missing 'path' parameter".into(),
-        })?;
-    let content = input["content"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "file_write".into(),
-            message: "missing 'content' parameter".into(),
-        })?;
+    let path_str = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "file_write".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
+    let content = input["content"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "file_write".into(),
+        message: "missing 'content' parameter".into(),
+    })?;
 
     let path = resolve_path(&context.working_dir, path_str)?;
     let path_display = path.display().to_string();
@@ -185,13 +178,15 @@ async fn tool_file_write(
     require_capability(capabilities, &Capability::FileWrite(path_display.clone()))?;
 
     // Ensure parent directory exists.
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| PunchError::Tool {
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| PunchError::Tool {
                 tool: "file_write".into(),
                 message: format!("failed to create directory '{}': {}", parent.display(), e),
             })?;
-        }
     }
 
     match tokio::fs::write(&path, content).await {
@@ -199,7 +194,11 @@ async fn tool_file_write(
             debug!(path = %path_display, bytes = content.len(), "file written");
             Ok(ToolResult {
                 success: true,
-                output: serde_json::json!(format!("wrote {} bytes to {}", content.len(), path_display)),
+                output: serde_json::json!(format!(
+                    "wrote {} bytes to {}",
+                    content.len(),
+                    path_display
+                )),
                 error: None,
                 duration_ms: 0,
             })
@@ -222,10 +221,12 @@ async fn tool_file_list(
     let path = resolve_path(&context.working_dir, path_str)?;
 
     let mut entries = Vec::new();
-    let mut dir = tokio::fs::read_dir(&path).await.map_err(|e| PunchError::Tool {
-        tool: "file_list".into(),
-        message: format!("failed to list '{}': {}", path.display(), e),
-    })?;
+    let mut dir = tokio::fs::read_dir(&path)
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "file_list".into(),
+            message: format!("failed to list '{}': {}", path.display(), e),
+        })?;
 
     while let Some(entry) = dir.next_entry().await.map_err(|e| PunchError::Tool {
         tool: "file_list".into(),
@@ -253,14 +254,15 @@ async fn tool_shell_exec(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    let command_str = input["command"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "shell_exec".into(),
-            message: "missing 'command' parameter".into(),
-        })?;
+    let command_str = input["command"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "shell_exec".into(),
+        message: "missing 'command' parameter".into(),
+    })?;
 
-    require_capability(capabilities, &Capability::ShellExec(command_str.to_string()))?;
+    require_capability(
+        capabilities,
+        &Capability::ShellExec(command_str.to_string()),
+    )?;
 
     // Note: Shell execution is capability-gated. The command string comes from
     // the LLM and is validated via the ShellExec capability pattern before
@@ -299,9 +301,7 @@ async fn tool_shell_exec(
     })
 }
 
-async fn tool_web_search(
-    _input: &serde_json::Value,
-) -> PunchResult<ToolResult> {
+async fn tool_web_search(_input: &serde_json::Value) -> PunchResult<ToolResult> {
     Ok(ToolResult {
         success: false,
         output: serde_json::json!("web search not yet configured"),
@@ -314,12 +314,10 @@ async fn tool_web_fetch(
     input: &serde_json::Value,
     capabilities: &[Capability],
 ) -> PunchResult<ToolResult> {
-    let url_str = input["url"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "web_fetch".into(),
-            message: "missing 'url' parameter".into(),
-        })?;
+    let url_str = input["url"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "web_fetch".into(),
+        message: "missing 'url' parameter".into(),
+    })?;
 
     let parsed_url = url::Url::parse(url_str).map_err(|e| PunchError::Tool {
         tool: "web_fetch".into(),
@@ -330,18 +328,18 @@ async fn tool_web_fetch(
     if let Some(host) = parsed_url.host_str() {
         require_capability(capabilities, &Capability::Network(host.to_string()))?;
 
-        if let Ok(ip) = host.parse::<IpAddr>() {
-            if is_private_ip(&ip) {
-                return Ok(ToolResult {
-                    success: false,
-                    output: serde_json::json!(null),
-                    error: Some(format!(
-                        "SSRF protection: requests to private IP {} are blocked",
-                        ip
-                    )),
-                    duration_ms: 0,
-                });
-            }
+        if let Ok(ip) = host.parse::<IpAddr>()
+            && is_private_ip(&ip)
+        {
+            return Ok(ToolResult {
+                success: false,
+                output: serde_json::json!(null),
+                error: Some(format!(
+                    "SSRF protection: requests to private IP {} are blocked",
+                    ip
+                )),
+                duration_ms: 0,
+            });
         }
 
         // Also check resolved addresses for hostnames.
@@ -372,10 +370,14 @@ async fn tool_web_fetch(
             message: format!("failed to create HTTP client: {}", e),
         })?;
 
-    let response = client.get(url_str).send().await.map_err(|e| PunchError::Tool {
-        tool: "web_fetch".into(),
-        message: format!("request failed: {}", e),
-    })?;
+    let response = client
+        .get(url_str)
+        .send()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "web_fetch".into(),
+            message: format!("request failed: {}", e),
+        })?;
 
     let status = response.status().as_u16();
     let body = response.text().await.map_err(|e| PunchError::Tool {
@@ -385,7 +387,11 @@ async fn tool_web_fetch(
 
     // Truncate very large responses.
     let truncated = if body.len() > 100_000 {
-        format!("{}... [truncated, {} total bytes]", &body[..100_000], body.len())
+        format!(
+            "{}... [truncated, {} total bytes]",
+            &body[..100_000],
+            body.len()
+        )
     } else {
         body
     };
@@ -408,18 +414,14 @@ async fn tool_memory_store(
 ) -> PunchResult<ToolResult> {
     require_capability(capabilities, &Capability::Memory)?;
 
-    let key = input["key"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "memory_store".into(),
-            message: "missing 'key' parameter".into(),
-        })?;
-    let value = input["value"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "memory_store".into(),
-            message: "missing 'value' parameter".into(),
-        })?;
+    let key = input["key"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "memory_store".into(),
+        message: "missing 'key' parameter".into(),
+    })?;
+    let value = input["value"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "memory_store".into(),
+        message: "missing 'value' parameter".into(),
+    })?;
     let confidence = input["confidence"].as_f64().unwrap_or(0.9);
 
     context
@@ -442,12 +444,10 @@ async fn tool_memory_recall(
 ) -> PunchResult<ToolResult> {
     require_capability(capabilities, &Capability::Memory)?;
 
-    let query = input["query"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "memory_recall".into(),
-            message: "missing 'query' parameter".into(),
-        })?;
+    let query = input["query"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "memory_recall".into(),
+        message: "missing 'query' parameter".into(),
+    })?;
     let limit = input["limit"].as_u64().unwrap_or(10) as u32;
 
     let memories = context
@@ -481,12 +481,10 @@ async fn tool_knowledge_add_entity(
 ) -> PunchResult<ToolResult> {
     require_capability(capabilities, &Capability::KnowledgeGraph)?;
 
-    let name = input["name"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "knowledge_add_entity".into(),
-            message: "missing 'name' parameter".into(),
-        })?;
+    let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "knowledge_add_entity".into(),
+        message: "missing 'name' parameter".into(),
+    })?;
     let entity_type = input["entity_type"]
         .as_str()
         .ok_or_else(|| PunchError::Tool {
@@ -518,24 +516,18 @@ async fn tool_knowledge_add_relation(
 ) -> PunchResult<ToolResult> {
     require_capability(capabilities, &Capability::KnowledgeGraph)?;
 
-    let from = input["from"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "knowledge_add_relation".into(),
-            message: "missing 'from' parameter".into(),
-        })?;
-    let relation = input["relation"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "knowledge_add_relation".into(),
-            message: "missing 'relation' parameter".into(),
-        })?;
-    let to = input["to"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "knowledge_add_relation".into(),
-            message: "missing 'to' parameter".into(),
-        })?;
+    let from = input["from"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "knowledge_add_relation".into(),
+        message: "missing 'from' parameter".into(),
+    })?;
+    let relation = input["relation"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "knowledge_add_relation".into(),
+        message: "missing 'relation' parameter".into(),
+    })?;
+    let to = input["to"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "knowledge_add_relation".into(),
+        message: "missing 'to' parameter".into(),
+    })?;
     let properties = input
         .get("properties")
         .cloned()
@@ -561,12 +553,10 @@ async fn tool_knowledge_query(
 ) -> PunchResult<ToolResult> {
     require_capability(capabilities, &Capability::KnowledgeGraph)?;
 
-    let query = input["query"]
-        .as_str()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "knowledge_query".into(),
-            message: "missing 'query' parameter".into(),
-        })?;
+    let query = input["query"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "knowledge_query".into(),
+        message: "missing 'query' parameter".into(),
+    })?;
 
     let entities = context
         .memory
@@ -645,7 +635,9 @@ mod tests {
     #[test]
     fn test_require_capability_granted() {
         let caps = vec![Capability::FileRead("**".to_string())];
-        assert!(require_capability(&caps, &Capability::FileRead("src/main.rs".to_string())).is_ok());
+        assert!(
+            require_capability(&caps, &Capability::FileRead("src/main.rs".to_string())).is_ok()
+        );
     }
 
     #[test]
@@ -664,9 +656,7 @@ mod tests {
     #[test]
     fn test_require_capability_scoped_match() {
         let caps = vec![Capability::FileRead("src/**/*.rs".to_string())];
-        assert!(
-            require_capability(&caps, &Capability::FileRead("src/lib.rs".to_string())).is_ok()
-        );
+        assert!(require_capability(&caps, &Capability::FileRead("src/lib.rs".to_string())).is_ok());
         assert!(
             require_capability(&caps, &Capability::FileRead("tests/foo.rs".to_string())).is_err()
         );
@@ -675,9 +665,7 @@ mod tests {
     #[test]
     fn test_require_capability_shell_wildcard() {
         let caps = vec![Capability::ShellExec("*".to_string())];
-        assert!(
-            require_capability(&caps, &Capability::ShellExec("ls -la".to_string())).is_ok()
-        );
+        assert!(require_capability(&caps, &Capability::ShellExec("ls -la".to_string())).is_ok());
     }
 
     #[test]
@@ -697,8 +685,6 @@ mod tests {
         assert!(
             require_capability(&caps, &Capability::Network("api.example.com".to_string())).is_ok()
         );
-        assert!(
-            require_capability(&caps, &Capability::Network("evil.com".to_string())).is_err()
-        );
+        assert!(require_capability(&caps, &Capability::Network("evil.com".to_string())).is_err());
     }
 }

@@ -114,8 +114,9 @@ impl MemorySubstrate {
                 PunchError::KnowledgeGraph(format!("failed to read entity row: {e}"))
             })?;
 
-            let properties: serde_json::Value = serde_json::from_str(&props)
-                .map_err(|e| PunchError::KnowledgeGraph(format!("corrupt entity properties: {e}")))?;
+            let properties: serde_json::Value = serde_json::from_str(&props).map_err(|e| {
+                PunchError::KnowledgeGraph(format!("corrupt entity properties: {e}"))
+            })?;
 
             entities.push(KnowledgeEntity {
                 id,
@@ -244,7 +245,13 @@ mod tests {
             .await
             .unwrap();
         substrate
-            .add_relation(&fid, "Alice", "knows", "Bob", &serde_json::json!({"since": 2020}))
+            .add_relation(
+                &fid,
+                "Alice",
+                "knows",
+                "Bob",
+                &serde_json::json!({"since": 2020}),
+            )
             .await
             .unwrap();
 

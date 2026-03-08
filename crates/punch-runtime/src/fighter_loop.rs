@@ -3,6 +3,17 @@
 //! `run_fighter_loop` is the heart of the Punch runtime. It orchestrates the
 //! conversation between the user, the LLM, and the tools (moves), persisting
 //! messages to the memory substrate and enforcing loop guards.
+//!
+//! ## Production features
+//!
+//! - **Context window management**: Tracks estimated token count and trims
+//!   messages when approaching the context limit.
+//! - **Session repair**: Fixes orphaned tool results, empty messages,
+//!   duplicate results, and missing results on startup and after errors.
+//! - **Error recovery**: Handles empty responses, MaxTokens continuation,
+//!   and per-tool timeouts.
+//! - **Loop guard**: Graduated response (Allow → Warn → Block → CircuitBreak)
+//!   with ping-pong detection and poll-tool relaxation.
 
 use std::sync::Arc;
 
@@ -14,9 +25,17 @@ use punch_types::{
     ToolDefinition,
 };
 
+use crate::context_budget::ContextBudget;
 use crate::driver::{CompletionRequest, LlmDriver, StopReason, TokenUsage};
-use crate::guard::{LoopGuard, LoopGuardVerdict};
+use crate::guard::{GuardConfig, LoopGuard, LoopGuardVerdict};
+use crate::session_repair;
 use crate::tool_executor::{self, ToolExecutionContext};
+
+/// Maximum number of MaxTokens continuations before giving up.
+const MAX_CONTINUATION_LOOPS: usize = 5;
+
+/// Default per-tool timeout in seconds.
+const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 120;
 
 /// Parameters for the fighter loop.
 pub struct FighterLoopParams {
@@ -36,6 +55,10 @@ pub struct FighterLoopParams {
     pub available_tools: Vec<ToolDefinition>,
     /// Maximum loop iterations before forced termination (default: 50).
     pub max_iterations: Option<usize>,
+    /// Context window size in tokens (default: 200K).
+    pub context_window: Option<usize>,
+    /// Per-tool timeout in seconds (default: 120).
+    pub tool_timeout_secs: Option<u64>,
 }
 
 /// Result of a completed fighter loop run.
@@ -54,13 +77,14 @@ pub struct FighterLoopResult {
 /// Run the fighter loop: the core agent execution engine.
 ///
 /// This function:
-/// 1. Loads message history from the bout
+/// 1. Loads message history from the bout and repairs it
 /// 2. Recalls relevant memories
 /// 3. Builds the system prompt with context
-/// 4. Calls the LLM with available tools
-/// 5. If the LLM requests tool use, executes tools and loops
-/// 6. If the LLM ends its turn, saves messages and returns
-/// 7. Enforces loop guards against runaway iterations
+/// 4. Applies context budget management before each LLM call
+/// 5. Calls the LLM with available tools
+/// 6. If the LLM requests tool use, executes tools and loops
+/// 7. Handles empty responses, MaxTokens continuation, and errors
+/// 8. Enforces loop guards against runaway iterations
 #[instrument(
     skip(params),
     fields(
@@ -71,16 +95,29 @@ pub struct FighterLoopResult {
 )]
 pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterLoopResult> {
     let max_iterations = params.max_iterations.unwrap_or(50);
-    let mut guard = LoopGuard::new(max_iterations, 3);
+    let context_window = params.context_window.unwrap_or(200_000);
+    let tool_timeout = params
+        .tool_timeout_secs
+        .unwrap_or(DEFAULT_TOOL_TIMEOUT_SECS);
+
+    let budget = ContextBudget::new(context_window);
+    let mut guard = LoopGuard::with_config(GuardConfig {
+        max_iterations,
+        ..Default::default()
+    });
     let mut total_usage = TokenUsage::default();
     let mut tool_calls_made: usize = 0;
+    let mut continuation_count: usize = 0;
 
-    // 1. Load message history.
+    // 1. Load message history and repair.
     let mut messages = params.memory.load_messages(&params.bout_id).await?;
-    debug!(
-        history_len = messages.len(),
-        "loaded bout message history"
-    );
+    debug!(history_len = messages.len(), "loaded bout message history");
+
+    // Run session repair on loaded history.
+    let repair_stats = session_repair::repair_session(&mut messages);
+    if repair_stats.any_repairs() {
+        info!(repairs = %repair_stats, "repaired loaded message history");
+    }
 
     // 2. Append the user's new message and persist it.
     let user_msg = Message::new(Role::User, &params.user_message);
@@ -91,12 +128,8 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     messages.push(user_msg);
 
     // 3. Recall relevant memories and build an enriched system prompt.
-    let system_prompt = build_system_prompt(
-        &params.manifest,
-        &params.fighter_id,
-        &params.memory,
-    )
-    .await;
+    let system_prompt =
+        build_system_prompt(&params.manifest, &params.fighter_id, &params.memory).await;
 
     // Build the tool execution context.
     let tool_context = ToolExecutionContext {
@@ -107,6 +140,20 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
 
     // 4. Main loop.
     loop {
+        // --- Context Budget: check and trim before LLM call ---
+        if let Some(trim_action) = budget.check_trim_needed(&messages, &params.available_tools) {
+            budget.apply_trim(&mut messages, trim_action);
+
+            // Re-run session repair after trimming (may create orphans).
+            let post_trim_repair = session_repair::repair_session(&mut messages);
+            if post_trim_repair.any_repairs() {
+                debug!(repairs = %post_trim_repair, "repaired after context trim");
+            }
+        }
+
+        // Apply context guard (truncate oversized tool results).
+        budget.apply_context_guard(&mut messages);
+
         // Build the completion request.
         let request = CompletionRequest {
             model: params.manifest.model.model.clone(),
@@ -118,7 +165,13 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         };
 
         // Call the LLM.
-        let completion = params.driver.complete(request).await?;
+        let completion = match params.driver.complete(request).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!(error = %e, "LLM completion failed");
+                return Err(e);
+            }
+        };
         total_usage.accumulate(&completion.usage);
 
         debug!(
@@ -130,7 +183,42 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         );
 
         match completion.stop_reason {
-            StopReason::EndTurn | StopReason::MaxTokens => {
+            StopReason::EndTurn => {
+                // --- Empty response handling ---
+                if completion.message.content.is_empty() && completion.message.tool_calls.is_empty()
+                {
+                    if guard.iterations() == 0 {
+                        // Empty response on iteration 0: one-shot retry.
+                        warn!("empty response on first iteration, retrying once");
+                        guard.record_iteration();
+                        continue;
+                    }
+
+                    // Empty response after tool use: insert fallback.
+                    let has_prior_tools = messages.iter().any(|m| m.role == Role::Tool);
+
+                    if has_prior_tools {
+                        warn!("empty response after tool use, inserting fallback");
+                        let fallback_msg = Message::new(
+                            Role::Assistant,
+                            "I completed the requested operations. The tool results above \
+                             contain the output.",
+                        );
+                        params
+                            .memory
+                            .save_message(&params.bout_id, &fallback_msg)
+                            .await?;
+                        messages.push(fallback_msg.clone());
+
+                        return Ok(FighterLoopResult {
+                            response: fallback_msg.content,
+                            usage: total_usage,
+                            iterations: guard.iterations(),
+                            tool_calls_made,
+                        });
+                    }
+                }
+
                 // The fighter is done. Save and return the response.
                 params
                     .memory
@@ -155,7 +243,52 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 });
             }
 
+            StopReason::MaxTokens => {
+                // --- MaxTokens continuation ---
+                params
+                    .memory
+                    .save_message(&params.bout_id, &completion.message)
+                    .await?;
+                messages.push(completion.message.clone());
+
+                continuation_count += 1;
+
+                if continuation_count > MAX_CONTINUATION_LOOPS {
+                    warn!(
+                        continuation_count = continuation_count,
+                        "max continuation loops exceeded, returning partial response"
+                    );
+                    return Ok(FighterLoopResult {
+                        response: completion.message.content,
+                        usage: total_usage,
+                        iterations: guard.iterations(),
+                        tool_calls_made,
+                    });
+                }
+
+                info!(
+                    continuation = continuation_count,
+                    max = MAX_CONTINUATION_LOOPS,
+                    "MaxTokens hit, appending continuation prompt"
+                );
+
+                // Append a user message asking to continue.
+                let continue_msg =
+                    Message::new(Role::User, "Please continue from where you left off.");
+                params
+                    .memory
+                    .save_message(&params.bout_id, &continue_msg)
+                    .await?;
+                messages.push(continue_msg);
+
+                guard.record_iteration();
+                continue;
+            }
+
             StopReason::ToolUse => {
+                // Reset continuation count since we got a real tool use.
+                continuation_count = 0;
+
                 // Check the loop guard before executing tools.
                 let verdict = guard.record_tool_calls(&completion.message.tool_calls);
                 match verdict {
@@ -191,22 +324,38 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     .await?;
                 messages.push(completion.message.clone());
 
-                // Execute each tool call.
+                // Execute each tool call with per-tool timeout.
                 let mut tool_results = Vec::new();
 
                 for tc in &completion.message.tool_calls {
                     debug!(tool = %tc.name, id = %tc.id, "executing tool call");
 
-                    let result = tool_executor::execute_tool(
-                        &tc.name,
-                        &tc.input,
-                        &params.manifest.capabilities,
-                        &tool_context,
+                    // Check per-call guard verdict.
+                    let call_verdict = guard.evaluate_call(tc);
+                    if let crate::guard::GuardVerdict::Block(reason) = &call_verdict {
+                        warn!(tool = %tc.name, reason = %reason, "tool call blocked by guard");
+                        tool_results.push(ToolCallResult {
+                            id: tc.id.clone(),
+                            content: format!("Error: {}", reason),
+                            is_error: true,
+                        });
+                        tool_calls_made += 1;
+                        continue;
+                    }
+
+                    let result = tokio::time::timeout(
+                        std::time::Duration::from_secs(tool_timeout),
+                        tool_executor::execute_tool(
+                            &tc.name,
+                            &tc.input,
+                            &params.manifest.capabilities,
+                            &tool_context,
+                        ),
                     )
                     .await;
 
                     let tool_call_result = match result {
-                        Ok(tool_result) => {
+                        Ok(Ok(tool_result)) => {
                             let content = if tool_result.success {
                                 tool_result.output.to_string()
                             } else {
@@ -215,17 +364,49 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                                     .unwrap_or_else(|| "tool execution failed".to_string())
                             };
 
+                            // Record outcome for future blocking.
+                            guard.record_outcome(tc, &content);
+
+                            // Truncate result if it exceeds the per-result cap.
+                            let cap = budget.per_result_cap().min(budget.single_result_max());
+                            let content = if content.len() > cap {
+                                debug!(
+                                    tool = %tc.name,
+                                    original_len = content.len(),
+                                    cap = cap,
+                                    "truncating tool result"
+                                );
+                                ContextBudget::truncate_result(&content, cap)
+                            } else {
+                                content
+                            };
+
                             ToolCallResult {
                                 id: tc.id.clone(),
                                 content,
                                 is_error: !tool_result.success,
                             }
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             error!(tool = %tc.name, error = %e, "tool execution error");
                             ToolCallResult {
                                 id: tc.id.clone(),
                                 content: format!("Error: {}", e),
+                                is_error: true,
+                            }
+                        }
+                        Err(_) => {
+                            error!(
+                                tool = %tc.name,
+                                timeout_secs = tool_timeout,
+                                "tool execution timed out"
+                            );
+                            ToolCallResult {
+                                id: tc.id.clone(),
+                                content: format!(
+                                    "Error: tool '{}' timed out after {}s",
+                                    tc.name, tool_timeout
+                                ),
                                 is_error: true,
                             }
                         }

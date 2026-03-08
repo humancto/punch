@@ -11,8 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use punch_types::{
-    Message, ModelConfig, Provider, PunchError, PunchResult, Role, ToolCall,
-    ToolDefinition,
+    Message, ModelConfig, Provider, PunchError, PunchResult, Role, ToolCall, ToolDefinition,
 };
 
 // ---------------------------------------------------------------------------
@@ -249,14 +248,8 @@ impl AnthropicDriver {
                     }
                     Some("tool_use") => {
                         tool_calls.push(ToolCall {
-                            id: block["id"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
-                            name: block["name"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
+                            id: block["id"].as_str().unwrap_or_default().to_string(),
+                            name: block["name"].as_str().unwrap_or_default().to_string(),
                             input: block["input"].clone(),
                         });
                     }
@@ -362,11 +355,7 @@ pub struct OpenAiCompatibleDriver {
 
 impl OpenAiCompatibleDriver {
     /// Create a new OpenAI-compatible driver.
-    pub fn new(
-        api_key: String,
-        base_url: String,
-        provider_name: String,
-    ) -> Self {
+    pub fn new(api_key: String, base_url: String, provider_name: String) -> Self {
         Self {
             client: Client::new(),
             api_key,
@@ -476,12 +465,10 @@ impl OpenAiCompatibleDriver {
 
     /// Parse the OpenAI chat completions response.
     fn parse_response(&self, body: &serde_json::Value) -> PunchResult<CompletionResponse> {
-        let choice = body["choices"]
-            .get(0)
-            .ok_or_else(|| PunchError::Provider {
-                provider: self.provider_name.clone(),
-                message: "no choices in response".to_string(),
-            })?;
+        let choice = body["choices"].get(0).ok_or_else(|| PunchError::Provider {
+            provider: self.provider_name.clone(),
+            message: "no choices in response".to_string(),
+        })?;
 
         let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop");
         let stop_reason = match finish_reason {
@@ -502,9 +489,7 @@ impl OpenAiCompatibleDriver {
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                let args_str = tc["function"]["arguments"]
-                    .as_str()
-                    .unwrap_or("{}");
+                let args_str = tc["function"]["arguments"].as_str().unwrap_or("{}");
                 let input: serde_json::Value =
                     serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
 
@@ -543,7 +528,10 @@ impl OpenAiCompatibleDriver {
 #[async_trait]
 impl LlmDriver for OpenAiCompatibleDriver {
     async fn complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
         let body = self.build_request_body(&request);
 
         let response = self
@@ -651,12 +639,12 @@ pub fn create_driver(config: &ModelConfig) -> PunchResult<Arc<dyn LlmDriver>> {
         .unwrap_or_else(|| default_base_url(&config.provider).to_string());
 
     match &config.provider {
-        Provider::Anthropic => {
-            Ok(Arc::new(AnthropicDriver::new(api_key, Some(base_url))))
-        }
+        Provider::Anthropic => Ok(Arc::new(AnthropicDriver::new(api_key, Some(base_url)))),
         provider => {
             let name = provider.to_string();
-            Ok(Arc::new(OpenAiCompatibleDriver::new(api_key, base_url, name)))
+            Ok(Arc::new(OpenAiCompatibleDriver::new(
+                api_key, base_url, name,
+            )))
         }
     }
 }

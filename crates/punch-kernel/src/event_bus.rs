@@ -75,10 +75,7 @@ impl EventBus {
     /// This is a convenience wrapper — filtering happens on the receiver side.
     /// For high-throughput scenarios consider filtering inside the subscriber's
     /// own task loop instead.
-    pub fn subscribe_filtered<F>(
-        &self,
-        predicate: F,
-    ) -> FilteredReceiver<F>
+    pub fn subscribe_filtered<F>(&self, predicate: F) -> FilteredReceiver<F>
     where
         F: Fn(&PunchEvent) -> bool + Send + 'static,
     {
@@ -202,9 +199,8 @@ mod tests {
     #[tokio::test]
     async fn filtered_receiver_only_gets_matching_events() {
         let bus = EventBus::new();
-        let mut filtered = bus.subscribe_filtered(|event| {
-            matches!(event, PunchEvent::FighterSpawned { .. })
-        });
+        let mut filtered =
+            bus.subscribe_filtered(|event| matches!(event, PunchEvent::FighterSpawned { .. }));
 
         // Publish a non-matching event first.
         bus.publish(PunchEvent::Error {

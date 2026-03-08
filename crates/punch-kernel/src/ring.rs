@@ -1,7 +1,8 @@
 //! **The Ring** — the central kernel and coordinator for the Punch system.
 //!
 //! The [`Ring`] owns every fighter and gorilla, wires them to the memory
-//! substrate, the LLM driver, the event bus, and the scheduler. All mutations
+//! substrate, the LLM driver, the event bus, the scheduler, the background
+//! executor, the workflow engine, and the metering engine. All mutations
 //! go through the Ring so that invariants (quotas, capabilities, lifecycle
 //! events) are enforced in a single place.
 
@@ -10,18 +11,24 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
-use punch_runtime::{FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop};
+use punch_runtime::{
+    FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities,
+};
 use punch_types::{
     FighterId, FighterManifest, FighterStatus, GorillaId, GorillaManifest, GorillaMetrics,
     GorillaStatus, PunchConfig, PunchError, PunchEvent, PunchResult,
 };
 
+use crate::background::BackgroundExecutor;
 use crate::event_bus::EventBus;
+use crate::metering::MeteringEngine;
 use crate::scheduler::{QuotaConfig, Scheduler};
+use crate::workflow::{Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 // ---------------------------------------------------------------------------
 // Entry types
@@ -88,6 +95,16 @@ pub struct Ring {
     scheduler: Scheduler,
     /// Top-level Punch configuration.
     config: PunchConfig,
+    /// Background executor for autonomous gorilla tasks.
+    background: BackgroundExecutor,
+    /// Multi-step workflow engine.
+    workflow_engine: WorkflowEngine,
+    /// Cost tracking and metering engine.
+    metering: MeteringEngine,
+    /// Shutdown signal sender.
+    shutdown_tx: watch::Sender<bool>,
+    /// Shutdown signal receiver.
+    _shutdown_rx: watch::Receiver<bool>,
 }
 
 impl Ring {
@@ -101,6 +118,11 @@ impl Ring {
         memory: Arc<MemorySubstrate>,
         driver: Arc<dyn LlmDriver>,
     ) -> Self {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let background =
+            BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
+        let metering = MeteringEngine::new(Arc::clone(&memory));
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -109,6 +131,11 @@ impl Ring {
             event_bus: EventBus::new(),
             scheduler: Scheduler::new(QuotaConfig::default()),
             config,
+            background,
+            workflow_engine: WorkflowEngine::new(),
+            metering,
+            shutdown_tx,
+            _shutdown_rx: shutdown_rx,
         }
     }
 
@@ -119,6 +146,11 @@ impl Ring {
         driver: Arc<dyn LlmDriver>,
         quota_config: QuotaConfig,
     ) -> Self {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let background =
+            BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
+        let metering = MeteringEngine::new(Arc::clone(&memory));
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -127,6 +159,11 @@ impl Ring {
             event_bus: EventBus::new(),
             scheduler: Scheduler::new(quota_config),
             config,
+            background,
+            workflow_engine: WorkflowEngine::new(),
+            metering,
+            shutdown_tx,
+            _shutdown_rx: shutdown_rx,
         }
     }
 
@@ -150,6 +187,21 @@ impl Ring {
     /// Get a reference to the configuration.
     pub fn config(&self) -> &PunchConfig {
         &self.config
+    }
+
+    /// Get a reference to the background executor.
+    pub fn background(&self) -> &BackgroundExecutor {
+        &self.background
+    }
+
+    /// Get a reference to the workflow engine.
+    pub fn workflow_engine(&self) -> &WorkflowEngine {
+        &self.workflow_engine
+    }
+
+    /// Get a reference to the metering engine.
+    pub fn metering(&self) -> &MeteringEngine {
+        &self.metering
     }
 
     // -- Fighter operations --------------------------------------------------
@@ -192,7 +244,8 @@ impl Ring {
     /// Send a user message to a fighter and run the agent loop.
     ///
     /// This creates (or reuses) a bout for the fighter, checks quotas, then
-    /// delegates to [`run_fighter_loop`].
+    /// delegates to [`run_fighter_loop`]. Usage is recorded through the
+    /// metering engine after a successful completion.
     #[instrument(skip(self, message), fields(%fighter_id))]
     pub async fn send_message(
         &self,
@@ -238,18 +291,21 @@ impl Ring {
         // Mark as fighting.
         entry.status = FighterStatus::Fighting;
         let manifest = entry.manifest.clone();
+        let available_tools = tools_for_capabilities(&manifest.capabilities);
         drop(entry); // Release the DashMap guard before the async call.
 
         // Run the fighter loop.
         let params = FighterLoopParams {
-            manifest,
+            manifest: manifest.clone(),
             user_message: message,
             bout_id,
             fighter_id: *fighter_id,
             memory: Arc::clone(&self.memory),
             driver: Arc::clone(&self.driver),
-            available_tools: Vec::new(), // Tools are resolved by the runtime.
+            available_tools,
             max_iterations: None,
+            context_window: None,
+            tool_timeout_secs: None,
         };
 
         let result = run_fighter_loop(params).await;
@@ -261,6 +317,20 @@ impl Ring {
                     entry.status = FighterStatus::Idle;
                     self.scheduler
                         .record_usage(fighter_id, loop_result.usage.total());
+
+                    // Record usage through the metering engine.
+                    if let Err(e) = self
+                        .metering
+                        .record_usage(
+                            fighter_id,
+                            &manifest.model.model,
+                            loop_result.usage.input_tokens,
+                            loop_result.usage.output_tokens,
+                        )
+                        .await
+                    {
+                        warn!(error = %e, "failed to record metering usage");
+                    }
                 }
                 Err(_) => {
                     entry.status = FighterStatus::KnockedOut;
@@ -323,6 +393,9 @@ impl Ring {
     }
 
     /// Unleash (start) a gorilla's background task.
+    ///
+    /// This uses the [`BackgroundExecutor`] to spawn the gorilla's autonomous
+    /// loop, which will run the fighter loop on the gorilla's schedule.
     #[instrument(skip(self), fields(%gorilla_id))]
     pub async fn unleash_gorilla(&self, gorilla_id: &GorillaId) -> PunchResult<()> {
         let entry_ref = self
@@ -341,18 +414,17 @@ impl Ring {
 
         let gorilla_id_owned = *gorilla_id;
         let name = entry.manifest.name.clone();
+        let manifest = entry.manifest.clone();
 
-        // Spawn a placeholder background task. In a real implementation this
-        // would run the gorilla's scheduled loop using the cron expression.
-        let handle = tokio::spawn(async move {
-            info!(%gorilla_id_owned, "gorilla background task started");
-            // The actual gorilla loop would go here, driven by its schedule.
-            // For now we park the task so it can be cancelled via cage_gorilla.
-            futures::future::pending::<()>().await;
-        });
+        // Start the gorilla via the background executor.
+        self.background.start_gorilla(
+            gorilla_id_owned,
+            manifest,
+            Arc::clone(&self.memory),
+            Arc::clone(&self.driver),
+        )?;
 
         entry.status = GorillaStatus::Unleashed;
-        entry.task_handle = Some(handle);
         drop(entry);
         drop(entry_ref);
 
@@ -374,9 +446,12 @@ impl Ring {
 
         let mut entry = entry_ref.value().lock().await;
 
+        // Stop via background executor.
+        self.background.stop_gorilla(gorilla_id);
+
+        // Also abort any legacy task handle.
         if let Some(handle) = entry.task_handle.take() {
             handle.abort();
-            info!("gorilla background task aborted");
         }
 
         let name = entry.manifest.name.clone();
@@ -404,6 +479,44 @@ impl Ring {
         }
 
         result
+    }
+
+    // -- Workflow operations -------------------------------------------------
+
+    /// Register a workflow with the engine.
+    pub fn register_workflow(&self, workflow: Workflow) -> WorkflowId {
+        self.workflow_engine.register_workflow(workflow)
+    }
+
+    /// Execute a workflow by ID with the given input.
+    pub async fn execute_workflow(
+        &self,
+        workflow_id: &WorkflowId,
+        input: String,
+    ) -> PunchResult<WorkflowRunId> {
+        self.workflow_engine
+            .execute_workflow(
+                workflow_id,
+                input,
+                Arc::clone(&self.memory),
+                Arc::clone(&self.driver),
+            )
+            .await
+    }
+
+    // -- Shutdown ------------------------------------------------------------
+
+    /// Gracefully shut down the Ring, stopping all gorillas and background tasks.
+    pub fn shutdown(&self) {
+        info!("Ring shutdown initiated");
+
+        // Signal shutdown to all background tasks.
+        let _ = self.shutdown_tx.send(true);
+
+        // Stop all gorilla tasks via the background executor.
+        self.background.shutdown_all();
+
+        info!("Ring shutdown complete");
     }
 }
 

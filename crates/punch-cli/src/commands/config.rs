@@ -1,7 +1,7 @@
 //! `punch config` — Manage Punch configuration.
 
-use crate::cli::ConfigCommands;
 use super::config_path;
+use crate::cli::ConfigCommands;
 
 pub async fn run(command: ConfigCommands) -> i32 {
     match command {
@@ -54,10 +54,7 @@ async fn run_edit() -> i32 {
 
     println!("  Opening {} with {}...", path.display(), editor);
 
-    match std::process::Command::new(&editor)
-        .arg(&path)
-        .status()
-    {
+    match std::process::Command::new(&editor).arg(&path).status() {
         Ok(status) => {
             if status.success() {
                 0

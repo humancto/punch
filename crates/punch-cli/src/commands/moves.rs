@@ -1,7 +1,7 @@
 //! `punch move` — Manage moves (skills/tools).
 
-use crate::cli::MoveCommands;
 use super::punch_home;
+use crate::cli::MoveCommands;
 
 pub async fn run(command: MoveCommands) -> i32 {
     match command {
@@ -29,11 +29,7 @@ async fn run_list() -> i32 {
     let entries: Vec<_> = match std::fs::read_dir(&moves_dir) {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "toml")
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "toml"))
             .collect(),
         Err(e) => {
             eprintln!("  [X] Failed to read moves directory: {}", e);
@@ -48,7 +44,7 @@ async fn run_list() -> i32 {
         return 0;
     }
 
-    println!("  {:<24}  {}", "NAME", "FILE");
+    println!("  {:<24}  FILE", "NAME");
     println!("  {}", "-".repeat(60));
 
     for entry in &entries {

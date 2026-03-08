@@ -72,8 +72,8 @@ impl MemorySubstrate {
 
         let mut fighters = Vec::new();
         for row in rows {
-            let (id_str, name, status_str) = row
-                .map_err(|e| PunchError::Memory(format!("failed to read fighter row: {e}")))?;
+            let (id_str, name, status_str) =
+                row.map_err(|e| PunchError::Memory(format!("failed to read fighter row: {e}")))?;
 
             let id = FighterId(
                 uuid::Uuid::parse_str(&id_str)

@@ -36,6 +36,14 @@ impl MemorySubstrate {
         })
     }
 
+    /// Get a lock on the underlying database connection.
+    ///
+    /// This is intended for advanced queries that don't have a dedicated method.
+    /// Prefer using the higher-level methods on `MemorySubstrate` when possible.
+    pub async fn conn(&self) -> tokio::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().await
+    }
+
     /// Create an in-memory substrate (useful for testing).
     pub fn in_memory() -> PunchResult<Self> {
         let conn = Connection::open_in_memory().map_err(|e| {

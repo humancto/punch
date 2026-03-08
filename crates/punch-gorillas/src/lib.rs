@@ -107,9 +107,9 @@ impl GorillaLifecycle {
     /// Start (unleash) a gorilla by ID.
     pub async fn unleash(&self, id: GorillaId) -> PunchResult<()> {
         let mut gorillas = self.gorillas.write().await;
-        let entry = gorillas.get_mut(&id).ok_or_else(|| PunchError::Gorilla(
-            format!("gorilla {} not found", id),
-        ))?;
+        let entry = gorillas
+            .get_mut(&id)
+            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not found", id)))?;
         info!(gorilla_id = %id, name = %entry.manifest.name, "unleashing gorilla");
         entry.status = GorillaStatus::Unleashed;
         Ok(())
@@ -118,9 +118,9 @@ impl GorillaLifecycle {
     /// Stop (cage) a gorilla by ID.
     pub async fn cage(&self, id: GorillaId) -> PunchResult<()> {
         let mut gorillas = self.gorillas.write().await;
-        let entry = gorillas.get_mut(&id).ok_or_else(|| PunchError::Gorilla(
-            format!("gorilla {} not found", id),
-        ))?;
+        let entry = gorillas
+            .get_mut(&id)
+            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not found", id)))?;
         info!(gorilla_id = %id, name = %entry.manifest.name, "caging gorilla");
         entry.status = GorillaStatus::Caged;
         Ok(())
@@ -129,9 +129,9 @@ impl GorillaLifecycle {
     /// Get the current status of a gorilla.
     pub async fn get_status(&self, id: GorillaId) -> PunchResult<GorillaStatus> {
         let gorillas = self.gorillas.read().await;
-        let entry = gorillas.get(&id).ok_or_else(|| PunchError::Gorilla(
-            format!("gorilla {} not found", id),
-        ))?;
+        let entry = gorillas
+            .get(&id)
+            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not found", id)))?;
         Ok(entry.status)
     }
 

@@ -82,10 +82,7 @@ async fn spawn_fighter(
     let name = body.manifest.name.clone();
     let id = state.ring.spawn_fighter(body.manifest).await;
 
-    (
-        StatusCode::CREATED,
-        Json(SpawnFighterResponse { id, name }),
-    )
+    (StatusCode::CREATED, Json(SpawnFighterResponse { id, name }))
 }
 
 /// GET /api/fighters — list all fighters.
@@ -168,10 +165,7 @@ async fn send_message(
 
 /// DELETE /api/fighters/:id — kill a fighter.
 #[instrument(skip(state))]
-async fn kill_fighter(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> StatusCode {
+async fn kill_fighter(State(state): State<AppState>, Path(id): Path<Uuid>) -> StatusCode {
     let fighter_id = FighterId(id);
     state.ring.kill_fighter(&fighter_id);
     StatusCode::NO_CONTENT

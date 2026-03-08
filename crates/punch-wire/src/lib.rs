@@ -91,9 +91,9 @@ impl PunchProtocol {
     ///
     /// This spawns a background task that accepts connections.
     pub async fn listen(&self, addr: SocketAddr) -> PunchResult<()> {
-        let listener = TcpListener::bind(addr).await.map_err(|e| {
-            PunchError::Internal(format!("failed to bind to {}: {}", addr, e))
-        })?;
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|e| PunchError::Internal(format!("failed to bind to {}: {}", addr, e)))?;
 
         info!(addr = %addr, peer_id = %self.peer_id, "P2P listener started");
 
@@ -141,24 +141,17 @@ impl PunchProtocol {
             authenticated: false,
         };
 
-        self.peers
-            .write()
-            .await
-            .insert(peer.id.clone(), peer);
+        self.peers.write().await.insert(peer.id.clone(), peer);
 
         Ok(())
     }
 
     /// Send a message to a specific peer.
-    pub async fn send_message(
-        &self,
-        peer_id: &str,
-        payload: serde_json::Value,
-    ) -> PunchResult<()> {
+    pub async fn send_message(&self, peer_id: &str, payload: serde_json::Value) -> PunchResult<()> {
         let peers = self.peers.read().await;
-        let _peer = peers.get(peer_id).ok_or_else(|| {
-            PunchError::Internal(format!("peer {} not found", peer_id))
-        })?;
+        let _peer = peers
+            .get(peer_id)
+            .ok_or_else(|| PunchError::Internal(format!("peer {} not found", peer_id)))?;
 
         let mut nonce_bytes = [0u8; 16];
         rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
@@ -207,8 +200,7 @@ impl PunchProtocol {
 
 /// Compute an HMAC-SHA256 signature and return it as a hex string.
 fn compute_hmac(secret: &[u8], data: &[u8]) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
     mac.update(data);
     let result = mac.finalize();
     hex::encode(result.into_bytes())
@@ -230,21 +222,22 @@ async fn handle_connection(
     inbox: &RwLock<Vec<PeerMessage>>,
 ) -> PunchResult<()> {
     let mut buf = vec![0u8; 65536];
-    let n = stream.read(&mut buf).await.map_err(|e| {
-        PunchError::Internal(format!("failed to read from peer: {e}"))
-    })?;
+    let n = stream
+        .read(&mut buf)
+        .await
+        .map_err(|e| PunchError::Internal(format!("failed to read from peer: {e}")))?;
 
     if n == 0 {
         return Ok(());
     }
 
-    let message: PeerMessage = serde_json::from_slice(&buf[..n]).map_err(|e| {
-        PunchError::Internal(format!("failed to parse peer message: {e}"))
-    })?;
+    let message: PeerMessage = serde_json::from_slice(&buf[..n])
+        .map_err(|e| PunchError::Internal(format!("failed to parse peer message: {e}")))?;
 
     // Verify HMAC signature
-    let payload_bytes = serde_json::to_vec(&message.payload)
-        .map_err(|e| PunchError::Internal(format!("failed to serialize payload for verification: {e}")))?;
+    let payload_bytes = serde_json::to_vec(&message.payload).map_err(|e| {
+        PunchError::Internal(format!("failed to serialize payload for verification: {e}"))
+    })?;
 
     if !verify_hmac(secret, &payload_bytes, &message.signature) {
         warn!(peer_addr = %peer_addr, "HMAC verification failed");

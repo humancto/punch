@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
 
-
 use crate::AppState;
 
 /// Build the chat routes.
