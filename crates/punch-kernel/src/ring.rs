@@ -157,11 +157,20 @@ impl Ring {
     /// Spawn a new fighter from a manifest.
     ///
     /// Returns the newly-assigned [`FighterId`]. The fighter starts in
-    /// [`FighterStatus::Idle`].
+    /// [`FighterStatus::Idle`] and is persisted to the memory substrate.
     #[instrument(skip(self, manifest), fields(fighter_name = %manifest.name))]
-    pub fn spawn_fighter(&self, manifest: FighterManifest) -> FighterId {
+    pub async fn spawn_fighter(&self, manifest: FighterManifest) -> FighterId {
         let id = FighterId::new();
         let name = manifest.name.clone();
+
+        // Persist to the database first so FK constraints work.
+        if let Err(e) = self
+            .memory
+            .save_fighter(&id, &manifest, FighterStatus::Idle)
+            .await
+        {
+            warn!(error = %e, "failed to persist fighter to database (continuing in-memory only)");
+        }
 
         let entry = FighterEntry {
             manifest,
@@ -209,7 +218,12 @@ impl Ring {
         let bout_id = match entry.current_bout {
             Some(id) => id,
             None => {
-                let id = BoutId::new();
+                // Create the bout in the database.
+                let id = self
+                    .memory
+                    .create_bout(fighter_id)
+                    .await
+                    .map_err(|e| PunchError::Bout(format!("failed to create bout: {e}")))?;
                 entry.current_bout = Some(id);
 
                 self.event_bus.publish(PunchEvent::BoutStarted {

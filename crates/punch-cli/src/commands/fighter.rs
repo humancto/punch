@@ -54,7 +54,7 @@ pub async fn run_quick_chat(message: Option<String>, config_path: Option<String>
         weight_class: WeightClass::Middleweight,
     };
 
-    let fighter_id = ring.spawn_fighter(manifest);
+    let fighter_id = ring.spawn_fighter(manifest).await;
 
     match message {
         Some(msg) => {
@@ -101,7 +101,7 @@ async fn run_spawn(template: String, config_path: Option<String>) -> i32 {
     };
 
     let name = manifest.name.clone();
-    let id = ring.spawn_fighter(manifest);
+    let id = ring.spawn_fighter(manifest).await;
 
     println!();
     println!("  Fighter spawned!");
@@ -194,7 +194,7 @@ async fn run_chat(name: Option<String>, config_path: Option<String>) -> i32 {
                 capabilities: vec![],
                 weight_class: WeightClass::Middleweight,
             };
-            ring.spawn_fighter(manifest)
+            ring.spawn_fighter(manifest).await
         }
     };
 

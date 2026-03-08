@@ -80,7 +80,7 @@ async fn spawn_fighter(
     Json(body): Json<SpawnFighterRequest>,
 ) -> (StatusCode, Json<SpawnFighterResponse>) {
     let name = body.manifest.name.clone();
-    let id = state.ring.spawn_fighter(body.manifest);
+    let id = state.ring.spawn_fighter(body.manifest).await;
 
     (
         StatusCode::CREATED,
