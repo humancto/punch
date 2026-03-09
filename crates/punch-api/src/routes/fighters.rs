@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
 
-use punch_types::{FighterId, FighterManifest, FighterStatus, WeightClass};
+use std::sync::Arc;
+
+use punch_types::{AgentCoordinator, FighterId, FighterManifest, FighterStatus, WeightClass};
 
 use crate::AppState;
 
@@ -137,9 +139,13 @@ async fn send_message(
 ) -> Result<Json<SendMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
     let fighter_id = FighterId(id);
 
+    // Pass the Ring as an AgentCoordinator so fighters with AgentSpawn/AgentMessage
+    // capabilities can use inter-agent tools.
+    let coordinator: Arc<dyn AgentCoordinator> = Arc::clone(&state.ring) as Arc<dyn AgentCoordinator>;
+
     let result = state
         .ring
-        .send_message(&fighter_id, body.message)
+        .send_message_with_coordinator(&fighter_id, body.message, Some(coordinator))
         .await
         .map_err(|e| {
             let status = match &e {

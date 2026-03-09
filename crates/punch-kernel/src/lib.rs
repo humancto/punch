@@ -13,14 +13,18 @@ pub mod metering;
 pub mod registry;
 pub mod ring;
 pub mod scheduler;
+pub mod triggers;
 pub mod workflow;
 
-pub use background::BackgroundExecutor;
+pub use background::{BackgroundExecutor, fighter_manifest_from_gorilla, run_gorilla_tick};
 pub use event_bus::EventBus;
 pub use metering::{MeteringEngine, ModelPrice, SpendPeriod};
 pub use registry::AgentRegistry;
 pub use ring::{FighterEntry, GorillaEntry, Ring};
 pub use scheduler::Scheduler;
+pub use triggers::{
+    Trigger, TriggerAction, TriggerCondition, TriggerEngine, TriggerId, TriggerSummary,
+};
 pub use workflow::{
     OnError, StepResult, Workflow, WorkflowEngine, WorkflowId, WorkflowRun, WorkflowRunId,
     WorkflowRunStatus, WorkflowStep,

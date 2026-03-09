@@ -14,9 +14,9 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use punch_memory::MemorySubstrate;
-use punch_runtime::{FighterLoopParams, LlmDriver, run_fighter_loop, tools_for_capabilities};
+use punch_runtime::{FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities};
 use punch_types::{
-    FighterId, FighterManifest, GorillaId, GorillaManifest, PunchResult, WeightClass,
+    FighterId, FighterManifest, GorillaId, GorillaManifest, ModelConfig, PunchResult, WeightClass,
 };
 
 /// Maximum concurrent LLM calls across all gorillas.
@@ -39,6 +39,83 @@ pub struct BackgroundExecutor {
     _shutdown_tx: watch::Sender<bool>,
     /// Shutdown signal receiver (cloned for each gorilla task).
     shutdown_rx: watch::Receiver<bool>,
+}
+
+/// Build a [`FighterManifest`] from a [`GorillaManifest`], using the provided
+/// `default_model` as a fallback when the gorilla does not specify its own model.
+pub fn fighter_manifest_from_gorilla(
+    manifest: &GorillaManifest,
+    default_model: &ModelConfig,
+) -> FighterManifest {
+    let model = manifest.model.clone().unwrap_or_else(|| default_model.clone());
+    let capabilities = manifest.effective_capabilities();
+    let weight_class = manifest.weight_class.unwrap_or(WeightClass::Middleweight);
+    let system_prompt = manifest.effective_system_prompt();
+
+    FighterManifest {
+        name: manifest.name.clone(),
+        description: format!("Autonomous gorilla: {}", manifest.name),
+        model,
+        system_prompt,
+        capabilities,
+        weight_class,
+    }
+}
+
+/// Run a single autonomous tick for a gorilla. This is the reusable core that
+/// both the background scheduler and the CLI `gorilla test` command invoke.
+pub async fn run_gorilla_tick(
+    gorilla_id: GorillaId,
+    manifest: &GorillaManifest,
+    default_model: &ModelConfig,
+    memory: &Arc<MemorySubstrate>,
+    driver: &Arc<dyn LlmDriver>,
+) -> PunchResult<FighterLoopResult> {
+    let fighter_manifest = fighter_manifest_from_gorilla(manifest, default_model);
+    let gorilla_name = &manifest.name;
+    let system_prompt = fighter_manifest.system_prompt.clone();
+
+    // Build the autonomous prompt.
+    let autonomous_prompt = format!(
+        "[AUTONOMOUS TICK] You are {}. Review your memory, check your goals, and take the next action. {}",
+        gorilla_name, system_prompt
+    );
+
+    // Create a temporary fighter identity for this gorilla tick.
+    let fighter_id = FighterId::new();
+
+    // Save the fighter first (required for FK constraint on bout creation).
+    if let Err(e) = memory
+        .save_fighter(
+            &fighter_id,
+            &fighter_manifest,
+            punch_types::FighterStatus::Idle,
+        )
+        .await
+    {
+        warn!(gorilla_id = %gorilla_id, error = %e, "failed to persist gorilla fighter");
+    }
+
+    // Create a bout for this tick.
+    let bout_id = memory.create_bout(&fighter_id).await?;
+
+    let available_tools = tools_for_capabilities(&fighter_manifest.capabilities);
+
+    let params = FighterLoopParams {
+        manifest: fighter_manifest,
+        user_message: autonomous_prompt,
+        bout_id,
+        fighter_id,
+        memory: Arc::clone(memory),
+        driver: Arc::clone(driver),
+        available_tools,
+        max_iterations: Some(10),
+        context_window: None,
+        tool_timeout_secs: None,
+        coordinator: None,
+    };
+
+    run_fighter_loop(params).await
 }
 
 impl BackgroundExecutor {
@@ -68,7 +145,7 @@ impl BackgroundExecutor {
 
     /// Parse a schedule string like "every 30s", "every 5m", "every 1h", "every 1d"
     /// into a [`std::time::Duration`].
-    fn parse_schedule(schedule: &str) -> Option<std::time::Duration> {
+    pub fn parse_schedule(schedule: &str) -> Option<std::time::Duration> {
         let s = schedule.trim().to_lowercase();
         let s = s.strip_prefix("every ").unwrap_or(&s);
         let s = s.trim();
@@ -108,10 +185,14 @@ impl BackgroundExecutor {
     /// The task will loop on the gorilla's schedule, acquiring the LLM
     /// semaphore before each run, and executing the fighter loop with an
     /// autonomous prompt derived from the gorilla's manifest.
+    ///
+    /// `default_model` is used as a fallback when the gorilla manifest does
+    /// not specify its own `model` configuration.
     pub fn start_gorilla(
         &self,
         id: GorillaId,
         manifest: GorillaManifest,
+        default_model: ModelConfig,
         memory: Arc<MemorySubstrate>,
         driver: Arc<dyn LlmDriver>,
     ) -> PunchResult<()> {
@@ -134,7 +215,6 @@ impl BackgroundExecutor {
         let semaphore = Arc::clone(&self.llm_semaphore);
         let mut shutdown_rx = self.shutdown_rx.clone();
         let gorilla_name = manifest.name.clone();
-        let system_prompt = manifest.description.clone();
 
         let handle = tokio::spawn(async move {
             info!(
@@ -173,68 +253,7 @@ impl BackgroundExecutor {
                     }
                 };
 
-                // Build the autonomous prompt.
-                let autonomous_prompt = format!(
-                    "[AUTONOMOUS TICK] You are {}. Review your memory, check your goals, and take the next action. {}",
-                    gorilla_name, system_prompt
-                );
-
-                // Create a temporary fighter identity for this gorilla tick.
-                let fighter_id = FighterId::new();
-                let fighter_manifest = FighterManifest {
-                    name: gorilla_name.clone(),
-                    description: format!("Autonomous gorilla: {}", gorilla_name),
-                    model: punch_types::ModelConfig {
-                        provider: punch_types::Provider::Anthropic,
-                        model: "claude-sonnet-4-20250514".to_string(),
-                        api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                        base_url: None,
-                        max_tokens: Some(4096),
-                        temperature: Some(0.7),
-                    },
-                    system_prompt: system_prompt.clone(),
-                    capabilities: Vec::new(),
-                    weight_class: WeightClass::Middleweight,
-                };
-
-                // Create a bout for this tick.
-                let bout_id = match memory.create_bout(&fighter_id).await {
-                    Ok(id) => id,
-                    Err(e) => {
-                        error!(gorilla_id = %id, error = %e, "failed to create bout for gorilla tick");
-                        error_count += 1;
-                        continue;
-                    }
-                };
-
-                // Save the fighter first.
-                if let Err(e) = memory
-                    .save_fighter(
-                        &fighter_id,
-                        &fighter_manifest,
-                        punch_types::FighterStatus::Idle,
-                    )
-                    .await
-                {
-                    warn!(gorilla_id = %id, error = %e, "failed to persist gorilla fighter");
-                }
-
-                let available_tools = tools_for_capabilities(&fighter_manifest.capabilities);
-
-                let params = FighterLoopParams {
-                    manifest: fighter_manifest,
-                    user_message: autonomous_prompt,
-                    bout_id,
-                    fighter_id,
-                    memory: Arc::clone(&memory),
-                    driver: Arc::clone(&driver),
-                    available_tools,
-                    max_iterations: Some(10),
-                    context_window: None,
-                    tool_timeout_secs: None,
-                };
-
-                match run_fighter_loop(params).await {
+                match run_gorilla_tick(id, &manifest, &default_model, &memory, &driver).await {
                     Ok(result) => {
                         tasks_completed += 1;
                         info!(
@@ -283,6 +302,11 @@ impl BackgroundExecutor {
         } else {
             false
         }
+    }
+
+    /// Check whether a gorilla is currently running.
+    pub fn is_running(&self, id: &GorillaId) -> bool {
+        self.tasks.contains_key(id)
     }
 
     /// List all currently running gorilla IDs.
@@ -370,12 +394,13 @@ mod tests {
             settings_schema: None,
             dashboard_metrics: Vec::new(),
             system_prompt: None,
+            model: None,
+            capabilities: Vec::new(),
+            weight_class: None,
         };
 
         // We can't actually run the gorilla loop without a real driver/memory,
         // but we can test the task management.
-        // For a real start we'd need mock driver + memory. Instead, test stop on
-        // a manually inserted task.
         let handle = tokio::spawn(async {
             futures::future::pending::<()>().await;
         });

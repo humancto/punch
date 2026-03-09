@@ -5,12 +5,14 @@
 //! This crate provides an Axum-based REST API for spawning fighters, managing
 //! gorillas, sending messages, and exposing an OpenAI-compatible chat endpoint.
 
+pub mod middleware;
 pub mod routes;
 pub mod server;
 
 use std::sync::Arc;
 
 use punch_kernel::Ring;
+use punch_types::PunchConfig;
 
 /// Shared application state threaded through all Axum handlers.
 #[derive(Clone)]
@@ -19,4 +21,6 @@ pub struct AppState {
     pub ring: Arc<Ring>,
     /// Server start time for uptime tracking.
     pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Configuration snapshot.
+    pub config: Arc<PunchConfig>,
 }

@@ -2,7 +2,8 @@
 //!
 //! The [`WorkflowEngine`] allows registering named workflows composed of
 //! sequential steps. Each step invokes a fighter with a prompt template that
-//! supports variable substitution (`{{input}}` and `{{step_name}}`).
+//! supports variable substitution (`{{input}}`, `{{step_name}}`,
+//! `{{previous_output}}`, and `{{step_name_ref}}`).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,13 +11,13 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 use punch_memory::MemorySubstrate;
 use punch_runtime::{FighterLoopParams, LlmDriver, run_fighter_loop, tools_for_capabilities};
 use punch_types::{
-    FighterId, FighterManifest, ModelConfig, Provider, PunchError, PunchResult, WeightClass,
+    FighterId, FighterManifest, ModelConfig, PunchError, PunchResult, WeightClass,
 };
 
 // ---------------------------------------------------------------------------
@@ -94,7 +95,8 @@ pub struct WorkflowStep {
     pub name: String,
     /// The fighter name to use for this step.
     pub fighter_name: String,
-    /// Prompt template with `{{input}}` and `{{step_name}}` variables.
+    /// Prompt template with `{{input}}`, `{{step_name}}`, `{{previous_output}}`,
+    /// and `{{step_ref}}` variables.
     pub prompt_template: String,
     /// Maximum time in seconds for this step (default 120).
     pub timeout_secs: Option<u64>,
@@ -168,6 +170,48 @@ pub struct WorkflowRun {
 }
 
 // ---------------------------------------------------------------------------
+// Variable substitution
+// ---------------------------------------------------------------------------
+
+/// Replace template variables in a prompt string.
+///
+/// Supported variables:
+/// - `{{input}}` — the current input (original input or previous step's output)
+/// - `{{previous_output}}` — alias for `{{input}}`
+/// - `{{step_name}}` — the name of the current step
+/// - `{{step_1}}` / `{{step_N}}` — output of step N (1-indexed)
+/// - `{{some_step_name}}` — output of a step referenced by its name
+fn expand_variables(
+    template: &str,
+    current_input: &str,
+    step_name: &str,
+    step_results: &[StepResult],
+) -> String {
+    let mut result = template.to_string();
+
+    // {{input}} and {{previous_output}} both resolve to the current pipeline input
+    result = result.replace("{{input}}", current_input);
+    result = result.replace("{{previous_output}}", current_input);
+
+    // {{step_name}} resolves to the current step's name
+    result = result.replace("{{step_name}}", step_name);
+
+    // {{step_N}} resolves to the output of the Nth step (1-indexed)
+    for (i, sr) in step_results.iter().enumerate() {
+        let var = format!("{{{{step_{}}}}}", i + 1);
+        result = result.replace(&var, &sr.response);
+    }
+
+    // {{step_result_name}} resolves to the output of a step by name
+    for sr in step_results {
+        let var = format!("{{{{{}}}}}", sr.step_name);
+        result = result.replace(&var, &sr.response);
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowEngine
 // ---------------------------------------------------------------------------
 
@@ -199,16 +243,18 @@ impl WorkflowEngine {
     /// Execute a workflow with the given input string.
     ///
     /// Steps are executed sequentially. The prompt template for each step can
-    /// reference `{{input}}` (the original input or previous step's output)
-    /// and `{{step_name}}` (the name of the current step). Previous step
-    /// results are also available as `{{prev_step_name}}`.
-    #[instrument(skip(self, input, memory, driver), fields(%workflow_id))]
+    /// reference `{{input}}` (the original input or previous step's output),
+    /// `{{previous_output}}` (alias for `{{input}}`),
+    /// `{{step_name}}` (the name of the current step),
+    /// `{{step_N}}` (output of step N), and `{{some_step_name}}` (output by name).
+    #[instrument(skip(self, input, memory, driver, model_config), fields(%workflow_id))]
     pub async fn execute_workflow(
         &self,
         workflow_id: &WorkflowId,
         input: String,
         memory: Arc<MemorySubstrate>,
         driver: Arc<dyn LlmDriver>,
+        model_config: &ModelConfig,
     ) -> PunchResult<WorkflowRunId> {
         let workflow = self
             .workflows
@@ -232,140 +278,84 @@ impl WorkflowEngine {
         let mut failed = false;
 
         for step in &workflow.steps {
-            let step_start = Instant::now();
-
-            // Substitute variables in the prompt template.
-            let mut prompt = step.prompt_template.clone();
-            prompt = prompt.replace("{{input}}", &current_input);
-            prompt = prompt.replace("{{step_name}}", &step.name);
-
-            // Substitute previous step results by name.
-            for prev_result in &step_results {
-                let var = format!("{{{{{}}}}}", prev_result.step_name);
-                prompt = prompt.replace(&var, &prev_result.response);
-            }
-
-            // Create a temporary fighter for this step.
-            let fighter_id = FighterId::new();
-            let fighter_manifest = FighterManifest {
-                name: step.fighter_name.clone(),
-                description: format!("Workflow step: {}", step.name),
-                model: ModelConfig {
-                    provider: Provider::Anthropic,
-                    model: "claude-sonnet-4-20250514".to_string(),
-                    api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                    base_url: None,
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                },
-                system_prompt: format!(
-                    "You are executing step '{}' of workflow '{}'.",
-                    step.name, workflow.name
-                ),
-                capabilities: Vec::new(),
-                weight_class: WeightClass::Middleweight,
-            };
-
-            // Save the fighter and create a bout.
-            if let Err(e) = memory
-                .save_fighter(
-                    &fighter_id,
-                    &fighter_manifest,
-                    punch_types::FighterStatus::Idle,
+            let result = self
+                .execute_single_step(
+                    step,
+                    &workflow.name,
+                    &current_input,
+                    &step_results,
+                    &memory,
+                    &driver,
+                    model_config,
                 )
-                .await
-            {
-                error!(error = %e, "failed to persist workflow fighter");
-            }
+                .await;
 
-            let bout_id = match memory.create_bout(&fighter_id).await {
-                Ok(id) => id,
-                Err(e) => {
-                    let result = StepResult {
-                        step_name: step.name.clone(),
-                        response: String::new(),
-                        tokens_used: 0,
-                        duration_ms: step_start.elapsed().as_millis() as u64,
-                        error: Some(format!("failed to create bout: {e}")),
-                    };
-                    step_results.push(result);
-
-                    match step.on_error {
-                        OnError::FailWorkflow => {
-                            failed = true;
-                            break;
-                        }
-                        OnError::SkipStep => continue,
-                        OnError::RetryOnce => {
-                            // For simplicity, just fail on retry failure too.
-                            failed = true;
-                            break;
-                        }
-                    }
-                }
-            };
-
-            let available_tools = tools_for_capabilities(&fighter_manifest.capabilities);
-            let timeout_secs = step.timeout_secs.unwrap_or(120);
-
-            let params = FighterLoopParams {
-                manifest: fighter_manifest,
-                user_message: prompt,
-                bout_id,
-                fighter_id,
-                memory: Arc::clone(&memory),
-                driver: Arc::clone(&driver),
-                available_tools,
-                max_iterations: Some(20),
-                context_window: None,
-                tool_timeout_secs: Some(timeout_secs),
-            };
-
-            let execute_result = async {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    run_fighter_loop(params),
-                )
-                .await
-            };
-
-            let loop_result = match execute_result.await {
-                Ok(Ok(result)) => Ok(result),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(PunchError::Internal(format!(
-                    "step '{}' timed out after {}s",
-                    step.name, timeout_secs
-                ))),
-            };
-
-            match loop_result {
-                Ok(result) => {
-                    let step_result = StepResult {
-                        step_name: step.name.clone(),
-                        response: result.response.clone(),
-                        tokens_used: result.usage.total(),
-                        duration_ms: step_start.elapsed().as_millis() as u64,
-                        error: None,
-                    };
-                    current_input = result.response;
+            match result {
+                Ok(step_result) => {
+                    current_input = step_result.response.clone();
                     step_results.push(step_result);
                 }
                 Err(e) => {
                     let error_msg = format!("{e}");
-                    let step_result = StepResult {
-                        step_name: step.name.clone(),
-                        response: String::new(),
-                        tokens_used: 0,
-                        duration_ms: step_start.elapsed().as_millis() as u64,
-                        error: Some(error_msg),
-                    };
-                    step_results.push(step_result);
-
                     match step.on_error {
                         OnError::SkipStep => {
+                            warn!(step = %step.name, error = %error_msg, "step failed, skipping");
+                            let skip_result = StepResult {
+                                step_name: step.name.clone(),
+                                response: String::new(),
+                                tokens_used: 0,
+                                duration_ms: 0,
+                                error: Some(error_msg),
+                            };
+                            step_results.push(skip_result);
+                            // current_input stays the same for the next step
                             continue;
                         }
-                        OnError::FailWorkflow | OnError::RetryOnce => {
+                        OnError::RetryOnce => {
+                            warn!(step = %step.name, error = %error_msg, "step failed, retrying once");
+                            // Retry the step once.
+                            let retry_result = self
+                                .execute_single_step(
+                                    step,
+                                    &workflow.name,
+                                    &current_input,
+                                    &step_results,
+                                    &memory,
+                                    &driver,
+                                    model_config,
+                                )
+                                .await;
+
+                            match retry_result {
+                                Ok(step_result) => {
+                                    current_input = step_result.response.clone();
+                                    step_results.push(step_result);
+                                }
+                                Err(retry_err) => {
+                                    error!(step = %step.name, error = %retry_err, "step failed on retry");
+                                    let fail_result = StepResult {
+                                        step_name: step.name.clone(),
+                                        response: String::new(),
+                                        tokens_used: 0,
+                                        duration_ms: 0,
+                                        error: Some(format!("{retry_err}")),
+                                    };
+                                    step_results.push(fail_result);
+                                    failed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        OnError::FailWorkflow => {
+                            error!(step = %step.name, error = %error_msg, "step failed, aborting workflow");
+                            let fail_result = StepResult {
+                                step_name: step.name.clone(),
+                                response: String::new(),
+                                tokens_used: 0,
+                                duration_ms: 0,
+                                error: Some(error_msg),
+                            };
+                            step_results.push(fail_result);
                             failed = true;
                             break;
                         }
@@ -388,6 +378,101 @@ impl WorkflowEngine {
         Ok(run_id)
     }
 
+    /// Execute a single workflow step, creating a temporary fighter and running
+    /// it through the fighter loop.
+    async fn execute_single_step(
+        &self,
+        step: &WorkflowStep,
+        workflow_name: &str,
+        current_input: &str,
+        step_results: &[StepResult],
+        memory: &Arc<MemorySubstrate>,
+        driver: &Arc<dyn LlmDriver>,
+        model_config: &ModelConfig,
+    ) -> PunchResult<StepResult> {
+        let step_start = Instant::now();
+
+        // Substitute variables in the prompt template.
+        let prompt = expand_variables(
+            &step.prompt_template,
+            current_input,
+            &step.name,
+            step_results,
+        );
+
+        // Create a temporary fighter for this step.
+        let fighter_id = FighterId::new();
+        let fighter_manifest = FighterManifest {
+            name: step.fighter_name.clone(),
+            description: format!("Workflow step: {}", step.name),
+            model: model_config.clone(),
+            system_prompt: format!(
+                "You are executing step '{}' of workflow '{}'.",
+                step.name, workflow_name
+            ),
+            capabilities: Vec::new(),
+            weight_class: WeightClass::Middleweight,
+        };
+
+        // Save the fighter and create a bout.
+        if let Err(e) = memory
+            .save_fighter(
+                &fighter_id,
+                &fighter_manifest,
+                punch_types::FighterStatus::Idle,
+            )
+            .await
+        {
+            error!(error = %e, "failed to persist workflow fighter");
+        }
+
+        let bout_id = memory.create_bout(&fighter_id).await.map_err(|e| {
+            PunchError::Internal(format!("failed to create bout for step '{}': {e}", step.name))
+        })?;
+
+        let available_tools = tools_for_capabilities(&fighter_manifest.capabilities);
+        let timeout_secs = step.timeout_secs.unwrap_or(120);
+
+        let params = FighterLoopParams {
+            manifest: fighter_manifest,
+            user_message: prompt,
+            bout_id,
+            fighter_id,
+            memory: Arc::clone(memory),
+            driver: Arc::clone(driver),
+            available_tools,
+            max_iterations: Some(20),
+            context_window: None,
+            tool_timeout_secs: Some(timeout_secs),
+            coordinator: None,
+        };
+
+        let loop_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            run_fighter_loop(params),
+        )
+        .await;
+
+        match loop_result {
+            Ok(Ok(result)) => {
+                let step_result = StepResult {
+                    step_name: step.name.clone(),
+                    response: result.response,
+                    tokens_used: result.usage.total(),
+                    duration_ms: step_start.elapsed().as_millis() as u64,
+                    error: None,
+                };
+                info!(step = %step.name, tokens = step_result.tokens_used, "workflow step completed");
+                Ok(step_result)
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(PunchError::Internal(format!(
+                "step '{}' timed out after {}s",
+                step.name, timeout_secs
+            ))),
+        }
+    }
+
     /// Get a workflow run by its ID.
     pub fn get_run(&self, run_id: &WorkflowRunId) -> Option<WorkflowRun> {
         self.runs.get(run_id).map(|r| r.clone())
@@ -401,6 +486,15 @@ impl WorkflowEngine {
     /// List all workflow runs.
     pub fn list_runs(&self) -> Vec<WorkflowRun> {
         self.runs.iter().map(|r| r.value().clone()).collect()
+    }
+
+    /// List workflow runs filtered by workflow ID.
+    pub fn list_runs_for_workflow(&self, workflow_id: &WorkflowId) -> Vec<WorkflowRun> {
+        self.runs
+            .iter()
+            .filter(|r| r.value().workflow_id == *workflow_id)
+            .map(|r| r.value().clone())
+            .collect()
     }
 
     /// Get a workflow by its ID.
@@ -459,12 +553,69 @@ mod tests {
     }
 
     #[test]
-    fn variable_substitution_in_prompt() {
-        let template = "Analyze {{input}} for step {{step_name}}";
-        let result = template
-            .replace("{{input}}", "hello world")
-            .replace("{{step_name}}", "analysis");
+    fn variable_substitution_basic() {
+        let result = expand_variables(
+            "Analyze {{input}} for step {{step_name}}",
+            "hello world",
+            "analysis",
+            &[],
+        );
         assert_eq!(result, "Analyze hello world for step analysis");
+    }
+
+    #[test]
+    fn variable_substitution_previous_output() {
+        let result = expand_variables(
+            "Continue from: {{previous_output}}",
+            "step 1 output",
+            "step2",
+            &[],
+        );
+        assert_eq!(result, "Continue from: step 1 output");
+    }
+
+    #[test]
+    fn variable_substitution_step_refs() {
+        let step_results = vec![
+            StepResult {
+                step_name: "analyze".to_string(),
+                response: "analysis result".to_string(),
+                tokens_used: 100,
+                duration_ms: 500,
+                error: None,
+            },
+            StepResult {
+                step_name: "review".to_string(),
+                response: "review result".to_string(),
+                tokens_used: 80,
+                duration_ms: 400,
+                error: None,
+            },
+        ];
+
+        // By step number (1-indexed)
+        let result = expand_variables(
+            "Step 1 said: {{step_1}}, Step 2 said: {{step_2}}",
+            "current",
+            "step3",
+            &step_results,
+        );
+        assert_eq!(
+            result,
+            "Step 1 said: analysis result, Step 2 said: review result"
+        );
+
+        // By step name
+        let result = expand_variables(
+            "Analysis: {{analyze}}, Review: {{review}}",
+            "current",
+            "step3",
+            &step_results,
+        );
+        assert_eq!(
+            result,
+            "Analysis: analysis result, Review: review result"
+        );
     }
 
     #[test]

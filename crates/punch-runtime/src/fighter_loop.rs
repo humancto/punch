@@ -21,8 +21,8 @@ use tracing::{debug, error, info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    FighterId, FighterManifest, Message, PunchError, PunchResult, Role, ToolCallResult,
-    ToolDefinition,
+    AgentCoordinator, FighterId, FighterManifest, Message, PunchError, PunchResult, Role,
+    ToolCallResult, ToolDefinition,
 };
 
 use crate::context_budget::ContextBudget;
@@ -59,6 +59,8 @@ pub struct FighterLoopParams {
     pub context_window: Option<usize>,
     /// Per-tool timeout in seconds (default: 120).
     pub tool_timeout_secs: Option<u64>,
+    /// Optional agent coordinator for inter-agent tools.
+    pub coordinator: Option<Arc<dyn AgentCoordinator>>,
 }
 
 /// Result of a completed fighter loop run.
@@ -136,6 +138,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         working_dir: std::env::current_dir().unwrap_or_default(),
         fighter_id: params.fighter_id,
         memory: Arc::clone(&params.memory),
+        coordinator: params.coordinator.clone(),
     };
 
     // 4. Main loop.

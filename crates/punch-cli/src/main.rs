@@ -35,6 +35,9 @@ async fn main() {
         Commands::Gorilla { command } => commands::gorilla::run(command, cli.config).await,
         Commands::Move { command } => commands::moves::run(command).await,
         Commands::Chat { message } => commands::fighter::run_quick_chat(message, cli.config).await,
+        Commands::Workflow { command } => commands::workflow::run(command).await,
+        Commands::Channel { command } => commands::channel::run(command, cli.config).await,
+        Commands::Trigger { command } => commands::trigger::run(command).await,
         Commands::Config { command } => commands::config::run(command).await,
         Commands::Version => {
             println!(

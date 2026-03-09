@@ -1,5 +1,6 @@
 //! CLI command implementations.
 
+pub mod channel;
 pub mod config;
 pub mod fighter;
 pub mod gorilla;
@@ -7,6 +8,8 @@ pub mod init;
 pub mod moves;
 pub mod start;
 pub mod status;
+pub mod trigger;
+pub mod workflow;
 
 use std::path::PathBuf;
 

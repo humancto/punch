@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -20,14 +21,16 @@ use punch_runtime::{
     FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities,
 };
 use punch_types::{
-    FighterId, FighterManifest, FighterStatus, GorillaId, GorillaManifest, GorillaMetrics,
-    GorillaStatus, PunchConfig, PunchError, PunchEvent, PunchResult,
+    AgentCoordinator, AgentInfo, AgentMessageResult, FighterId, FighterManifest, FighterStatus,
+    GorillaId, GorillaManifest, GorillaMetrics, GorillaStatus, PunchConfig, PunchError, PunchEvent,
+    PunchResult,
 };
 
 use crate::background::BackgroundExecutor;
 use crate::event_bus::EventBus;
 use crate::metering::MeteringEngine;
 use crate::scheduler::{QuotaConfig, Scheduler};
+use crate::triggers::{Trigger, TriggerEngine, TriggerId, TriggerSummary};
 use crate::workflow::{Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 // ---------------------------------------------------------------------------
@@ -101,6 +104,8 @@ pub struct Ring {
     workflow_engine: WorkflowEngine,
     /// Cost tracking and metering engine.
     metering: MeteringEngine,
+    /// Event-driven trigger engine.
+    trigger_engine: TriggerEngine,
     /// Shutdown signal sender.
     shutdown_tx: watch::Sender<bool>,
     /// Shutdown signal receiver.
@@ -134,6 +139,7 @@ impl Ring {
             background,
             workflow_engine: WorkflowEngine::new(),
             metering,
+            trigger_engine: TriggerEngine::new(),
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -162,6 +168,7 @@ impl Ring {
             background,
             workflow_engine: WorkflowEngine::new(),
             metering,
+            trigger_engine: TriggerEngine::new(),
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -204,6 +211,28 @@ impl Ring {
         &self.metering
     }
 
+    /// Get a reference to the trigger engine.
+    pub fn trigger_engine(&self) -> &TriggerEngine {
+        &self.trigger_engine
+    }
+
+    // -- Trigger operations --------------------------------------------------
+
+    /// Register a trigger with the engine.
+    pub fn register_trigger(&self, trigger: Trigger) -> TriggerId {
+        self.trigger_engine.register_trigger(trigger)
+    }
+
+    /// Remove a trigger by ID.
+    pub fn remove_trigger(&self, id: &TriggerId) {
+        self.trigger_engine.remove_trigger(id);
+    }
+
+    /// List all triggers with summary information.
+    pub fn list_triggers(&self) -> Vec<(TriggerId, TriggerSummary)> {
+        self.trigger_engine.list_triggers()
+    }
+
     // -- Fighter operations --------------------------------------------------
 
     /// Spawn a new fighter from a manifest.
@@ -241,16 +270,34 @@ impl Ring {
         id
     }
 
-    /// Send a user message to a fighter and run the agent loop.
+    /// Send a user message to a fighter and run the agent loop (without coordinator).
     ///
-    /// This creates (or reuses) a bout for the fighter, checks quotas, then
-    /// delegates to [`run_fighter_loop`]. Usage is recorded through the
-    /// metering engine after a successful completion.
+    /// Convenience wrapper around [`send_message_with_coordinator`] that passes
+    /// `None`, meaning the fighter will not have access to inter-agent tools.
     #[instrument(skip(self, message), fields(%fighter_id))]
     pub async fn send_message(
         &self,
         fighter_id: &FighterId,
         message: String,
+    ) -> PunchResult<FighterLoopResult> {
+        self.send_message_with_coordinator(fighter_id, message, None)
+            .await
+    }
+
+    /// Send a user message to a fighter and run the agent loop.
+    ///
+    /// This creates (or reuses) a bout for the fighter, checks quotas, then
+    /// delegates to [`run_fighter_loop`]. Usage is recorded through the
+    /// metering engine after a successful completion.
+    ///
+    /// If `coordinator` is provided, the fighter can use inter-agent tools
+    /// (`agent_spawn`, `agent_message`, `agent_list`).
+    #[instrument(skip(self, message, coordinator), fields(%fighter_id))]
+    pub async fn send_message_with_coordinator(
+        &self,
+        fighter_id: &FighterId,
+        message: String,
+        coordinator: Option<Arc<dyn AgentCoordinator>>,
     ) -> PunchResult<FighterLoopResult> {
         // Look up the fighter.
         let mut entry = self
@@ -306,6 +353,7 @@ impl Ring {
             max_iterations: None,
             context_window: None,
             tool_timeout_secs: None,
+            coordinator,
         };
 
         let result = run_fighter_loop(params).await;
@@ -420,6 +468,7 @@ impl Ring {
         self.background.start_gorilla(
             gorilla_id_owned,
             manifest,
+            self.config.default_model.clone(),
             Arc::clone(&self.memory),
             Arc::clone(&self.driver),
         )?;
@@ -481,6 +530,58 @@ impl Ring {
         result
     }
 
+    /// Get a gorilla's manifest by ID.
+    pub async fn get_gorilla_manifest(&self, gorilla_id: &GorillaId) -> Option<GorillaManifest> {
+        let entry_ref = self.gorillas.get(gorilla_id)?;
+        let entry = entry_ref.value().lock().await;
+        Some(entry.manifest.clone())
+    }
+
+    /// Find a gorilla ID by name (case-insensitive).
+    pub async fn find_gorilla_by_name(&self, name: &str) -> Option<GorillaId> {
+        for entry in self.gorillas.iter() {
+            let inner = entry.value().lock().await;
+            if inner.manifest.name.eq_ignore_ascii_case(name) {
+                return Some(*entry.key());
+            }
+        }
+        None
+    }
+
+    /// Run a single autonomous tick for a gorilla (for testing/debugging).
+    ///
+    /// This executes the gorilla's autonomous prompt once, without starting
+    /// the background scheduler. Useful for verifying configuration.
+    #[instrument(skip(self), fields(%gorilla_id))]
+    pub async fn run_gorilla_tick(
+        &self,
+        gorilla_id: &GorillaId,
+    ) -> PunchResult<punch_runtime::FighterLoopResult> {
+        let entry_ref = self
+            .gorillas
+            .get(gorilla_id)
+            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not found", gorilla_id)))?;
+
+        let entry = entry_ref.value().lock().await;
+        let manifest = entry.manifest.clone();
+        drop(entry);
+        drop(entry_ref);
+
+        crate::background::run_gorilla_tick(
+            *gorilla_id,
+            &manifest,
+            &self.config.default_model,
+            &self.memory,
+            &self.driver,
+        )
+        .await
+    }
+
+    /// Get the LLM driver (useful for CLI commands that need to run ticks directly).
+    pub fn driver(&self) -> &Arc<dyn LlmDriver> {
+        &self.driver
+    }
+
     // -- Workflow operations -------------------------------------------------
 
     /// Register a workflow with the engine.
@@ -500,6 +601,7 @@ impl Ring {
                 input,
                 Arc::clone(&self.memory),
                 Arc::clone(&self.driver),
+                &self.config.default_model,
             )
             .await
     }
@@ -517,6 +619,53 @@ impl Ring {
         self.background.shutdown_all();
 
         info!("Ring shutdown complete");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentCoordinator implementation
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl AgentCoordinator for Ring {
+    async fn spawn_fighter(&self, manifest: FighterManifest) -> PunchResult<FighterId> {
+        Ok(Ring::spawn_fighter(self, manifest).await)
+    }
+
+    async fn send_message_to_agent(
+        &self,
+        target: &FighterId,
+        message: String,
+    ) -> PunchResult<AgentMessageResult> {
+        let result = self.send_message(target, message).await?;
+        Ok(AgentMessageResult {
+            response: result.response,
+            tokens_used: result.usage.total(),
+        })
+    }
+
+    async fn find_fighter_by_name(&self, name: &str) -> PunchResult<Option<FighterId>> {
+        let found = self.fighters.iter().find_map(|entry| {
+            if entry.value().manifest.name.eq_ignore_ascii_case(name) {
+                Some(*entry.key())
+            } else {
+                None
+            }
+        });
+        Ok(found)
+    }
+
+    async fn list_fighters(&self) -> PunchResult<Vec<AgentInfo>> {
+        let fighters = self
+            .fighters
+            .iter()
+            .map(|entry| AgentInfo {
+                id: *entry.key(),
+                name: entry.value().manifest.name.clone(),
+                status: entry.value().status,
+            })
+            .collect();
+        Ok(fighters)
     }
 }
 

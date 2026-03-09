@@ -15,6 +15,8 @@ use punch_kernel::Ring;
 use punch_types::{PunchConfig, PunchResult};
 
 use crate::AppState;
+use crate::middleware::auth::auth_middleware;
+use crate::middleware::rate_limit::{RateLimiterState, rate_limit_middleware};
 use crate::routes;
 
 /// Start The Arena — the HTTP API server.
@@ -22,12 +24,20 @@ use crate::routes;
 /// Binds to the address specified in `config.api_listen` and serves until the
 /// process is terminated.
 pub async fn start_arena(ring: Arc<Ring>, config: &PunchConfig) -> PunchResult<()> {
+    // Resolve the API key: prefer config, fall back to environment variable.
+    let api_key = if config.api_key.is_empty() {
+        std::env::var("PUNCH_API_KEY").unwrap_or_default()
+    } else {
+        config.api_key.clone()
+    };
+
     let state = AppState {
         ring,
         started_at: chrono::Utc::now(),
+        config: Arc::new(config.clone()),
     };
 
-    let app = build_router(state);
+    let app = build_router(state, &api_key, config.rate_limit_rpm);
 
     let listener = TcpListener::bind(&config.api_listen).await?;
     info!(address = %config.api_listen, "the arena is open");
@@ -38,11 +48,29 @@ pub async fn start_arena(ring: Arc<Ring>, config: &PunchConfig) -> PunchResult<(
 }
 
 /// Build the Axum router with all routes and middleware.
-fn build_router(state: AppState) -> Router {
+///
+/// Middleware is applied in this order (outermost first):
+///   1. CORS
+///   2. Tracing
+///   3. Compression
+///   4. Security headers
+///   5. Rate limiting (skips /health)
+///   6. Authentication (skips /health)
+///   7. Routes
+pub fn build_router(state: AppState, api_key: &str, rate_limit_rpm: u32) -> Router {
     let api = routes::api_router();
+    let rate_limiter = RateLimiterState::new(rate_limit_rpm);
 
     Router::new()
         .merge(api)
+        .layer(middleware::from_fn_with_state(
+            api_key.to_string(),
+            auth_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            rate_limiter,
+            rate_limit_middleware,
+        ))
         .layer(middleware::from_fn(security_headers))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())

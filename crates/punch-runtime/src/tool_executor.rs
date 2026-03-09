@@ -13,7 +13,8 @@ use tracing::{debug, instrument};
 
 use punch_memory::MemorySubstrate;
 use punch_types::{
-    Capability, FighterId, PunchError, PunchResult, ToolResult, capability::capability_matches,
+    AgentCoordinator, Capability, FighterId, PunchError, PunchResult, ToolResult,
+    capability::capability_matches,
 };
 
 /// Context passed to every tool execution.
@@ -24,6 +25,9 @@ pub struct ToolExecutionContext {
     pub fighter_id: FighterId,
     /// Memory substrate for memory/knowledge tools.
     pub memory: Arc<MemorySubstrate>,
+    /// Optional agent coordinator for inter-agent tools (agent_spawn, agent_message, agent_list).
+    /// This is `None` when the fighter does not have agent coordination capabilities.
+    pub coordinator: Option<Arc<dyn AgentCoordinator>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -86,6 +90,9 @@ async fn execute_tool_inner(
         "knowledge_add_entity" => tool_knowledge_add_entity(input, capabilities, context).await,
         "knowledge_add_relation" => tool_knowledge_add_relation(input, capabilities, context).await,
         "knowledge_query" => tool_knowledge_query(input, capabilities, context).await,
+        "agent_spawn" => tool_agent_spawn(input, capabilities, context).await,
+        "agent_message" => tool_agent_message(input, capabilities, context).await,
+        "agent_list" => tool_agent_list(capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -301,13 +308,129 @@ async fn tool_shell_exec(
     })
 }
 
-async fn tool_web_search(_input: &serde_json::Value) -> PunchResult<ToolResult> {
+async fn tool_web_search(input: &serde_json::Value) -> PunchResult<ToolResult> {
+    let query = input["query"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "web_search".into(),
+        message: "missing 'query' parameter".into(),
+    })?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| PunchError::Tool {
+            tool: "web_search".into(),
+            message: format!("failed to create HTTP client: {}", e),
+        })?;
+
+    let url = format!(
+        "https://html.duckduckgo.com/html/?q={}",
+        urlencoding::encode(query)
+    );
+
+    let response = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; PunchAgent/1.0)")
+        .send()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "web_search".into(),
+            message: format!("search request failed: {}", e),
+        })?;
+
+    let body = response.text().await.map_err(|e| PunchError::Tool {
+        tool: "web_search".into(),
+        message: format!("failed to read search response: {}", e),
+    })?;
+
+    let results = parse_duckduckgo_results(&body);
+
     Ok(ToolResult {
-        success: false,
-        output: serde_json::json!("web search not yet configured"),
-        error: Some("web search not yet configured".to_string()),
+        success: true,
+        output: serde_json::json!(results),
+        error: None,
         duration_ms: 0,
     })
+}
+
+/// Parse DuckDuckGo HTML search results to extract titles and URLs.
+fn parse_duckduckgo_results(html: &str) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+    let mut remaining = html;
+
+    // DuckDuckGo HTML results contain links with class "result__a".
+    // We parse them with simple string scanning rather than pulling in
+    // a full HTML parser dependency.
+    while results.len() < 5 {
+        // Look for result links: <a rel="nofollow" class="result__a" href="..."
+        let marker = "class=\"result__a\"";
+        let Some(pos) = remaining.find(marker) else {
+            break;
+        };
+        remaining = &remaining[pos + marker.len()..];
+
+        // Extract href.
+        let href = if let Some(href_pos) = remaining.find("href=\"") {
+            let start = href_pos + 6;
+            let href_rest = &remaining[start..];
+            if let Some(end) = href_rest.find('"') {
+                let raw_href = &href_rest[..end];
+                // DuckDuckGo wraps URLs in a redirect; extract the actual URL.
+                if let Some(uddg_pos) = raw_href.find("uddg=") {
+                    let encoded = &raw_href[uddg_pos + 5..];
+                    let decoded = urlencoding::decode(encoded)
+                        .unwrap_or_else(|_| encoded.into())
+                        .to_string();
+                    // Strip any trailing &rut= parameter.
+                    decoded.split('&').next().unwrap_or(&decoded).to_string()
+                } else {
+                    raw_href.to_string()
+                }
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+
+        // Extract title text (content between > and </a>).
+        let title = if let Some(gt_pos) = remaining.find('>') {
+            let after_gt = &remaining[gt_pos + 1..];
+            if let Some(end_tag) = after_gt.find("</a>") {
+                let raw_title = &after_gt[..end_tag];
+                // Strip any HTML tags from the title text.
+                strip_html_tags(raw_title).trim().to_string()
+            } else {
+                "Untitled".to_string()
+            }
+        } else {
+            "Untitled".to_string()
+        };
+
+        if !title.is_empty() && !href.is_empty() {
+            results.push(serde_json::json!({
+                "title": title,
+                "url": href,
+            }));
+        }
+    }
+
+    results
+}
+
+/// Strip HTML tags from a string, returning only text content.
+fn strip_html_tags(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    result
 }
 
 async fn tool_web_fetch(
@@ -603,6 +726,177 @@ async fn tool_knowledge_query(
 }
 
 // ---------------------------------------------------------------------------
+// Agent coordination tools
+// ---------------------------------------------------------------------------
+
+/// Helper to get the coordinator or return an error.
+fn get_coordinator(context: &ToolExecutionContext) -> PunchResult<&dyn AgentCoordinator> {
+    context
+        .coordinator
+        .as_deref()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "agent".into(),
+            message: "agent coordinator not available in this context".into(),
+        })
+}
+
+async fn tool_agent_spawn(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::AgentSpawn)?;
+
+    let coordinator = get_coordinator(context)?;
+
+    let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "agent_spawn".into(),
+        message: "missing 'name' parameter".into(),
+    })?;
+
+    let system_prompt = input["system_prompt"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "agent_spawn".into(),
+            message: "missing 'system_prompt' parameter".into(),
+        })?;
+
+    let description = input["description"]
+        .as_str()
+        .unwrap_or("Spawned by another agent");
+
+    // Build a manifest for the new fighter. We use sensible defaults
+    // and let the coordinator (Ring) handle persistence and model config.
+    use punch_types::{FighterManifest, ModelConfig, Provider, WeightClass};
+
+    // Parse capabilities for the child agent if provided.
+    let child_capabilities: Vec<punch_types::Capability> = if let Some(caps) = input.get("capabilities") {
+        serde_json::from_value(caps.clone()).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let manifest = FighterManifest {
+        name: name.to_string(),
+        description: description.to_string(),
+        model: ModelConfig {
+            provider: Provider::Ollama,
+            model: "gpt-oss:20b".to_string(),
+            api_key_env: None,
+            base_url: Some("http://localhost:11434".to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+        },
+        system_prompt: system_prompt.to_string(),
+        capabilities: child_capabilities,
+        weight_class: WeightClass::Featherweight,
+    };
+
+    let fighter_id = coordinator.spawn_fighter(manifest).await?;
+
+    debug!(fighter_id = %fighter_id, name = %name, "agent_spawn: fighter spawned");
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "fighter_id": fighter_id.0.to_string(),
+            "name": name,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_agent_message(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::AgentMessage)?;
+
+    let coordinator = get_coordinator(context)?;
+
+    // Accept either "fighter_id" or "name" to identify the target.
+    let target_id = if let Some(id_str) = input["fighter_id"].as_str() {
+        let uuid = uuid::Uuid::parse_str(id_str).map_err(|e| PunchError::Tool {
+            tool: "agent_message".into(),
+            message: format!("invalid fighter_id '{}': {}", id_str, e),
+        })?;
+        punch_types::FighterId(uuid)
+    } else if let Some(name) = input["name"].as_str() {
+        coordinator
+            .find_fighter_by_name(name)
+            .await?
+            .ok_or_else(|| PunchError::Tool {
+                tool: "agent_message".into(),
+                message: format!("no fighter found with name '{}'", name),
+            })?
+    } else {
+        return Err(PunchError::Tool {
+            tool: "agent_message".into(),
+            message: "must provide either 'fighter_id' or 'name' parameter".into(),
+        });
+    };
+
+    let message = input["message"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "agent_message".into(),
+            message: "missing 'message' parameter".into(),
+        })?
+        .to_string();
+
+    debug!(
+        target = %target_id,
+        from = %context.fighter_id,
+        "agent_message: sending inter-agent message"
+    );
+
+    let result = coordinator
+        .send_message_to_agent(&target_id, message)
+        .await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "response": result.response,
+            "tokens_used": result.tokens_used,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_agent_list(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::AgentMessage)?;
+
+    let coordinator = get_coordinator(context)?;
+
+    let agents = coordinator.list_fighters().await?;
+
+    let agent_list: Vec<serde_json::Value> = agents
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "id": a.id.0.to_string(),
+                "name": a.name,
+                "status": format!("{}", a.status),
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!(agent_list),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // SSRF protection
 // ---------------------------------------------------------------------------
 
@@ -630,7 +924,66 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use punch_types::Capability;
+    use async_trait::async_trait;
+    use punch_types::{
+        AgentCoordinator, AgentInfo, AgentMessageResult, Capability, FighterId, FighterManifest,
+        FighterStatus,
+    };
+
+    /// A mock coordinator for testing agent tools.
+    struct MockCoordinator {
+        fighters: Vec<AgentInfo>,
+    }
+
+    impl MockCoordinator {
+        fn new() -> Self {
+            Self {
+                fighters: vec![AgentInfo {
+                    id: FighterId(uuid::Uuid::nil()),
+                    name: "test-fighter".to_string(),
+                    status: FighterStatus::Idle,
+                }],
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AgentCoordinator for MockCoordinator {
+        async fn spawn_fighter(&self, _manifest: FighterManifest) -> PunchResult<FighterId> {
+            Ok(FighterId(uuid::Uuid::new_v4()))
+        }
+
+        async fn send_message_to_agent(
+            &self,
+            _target: &FighterId,
+            message: String,
+        ) -> PunchResult<AgentMessageResult> {
+            Ok(AgentMessageResult {
+                response: format!("echo: {}", message),
+                tokens_used: 42,
+            })
+        }
+
+        async fn find_fighter_by_name(&self, name: &str) -> PunchResult<Option<FighterId>> {
+            let found = self.fighters.iter().find(|f| f.name == name).map(|f| f.id);
+            Ok(found)
+        }
+
+        async fn list_fighters(&self) -> PunchResult<Vec<AgentInfo>> {
+            Ok(self.fighters.clone())
+        }
+    }
+
+    fn make_test_context(
+        coordinator: Option<Arc<dyn AgentCoordinator>>,
+    ) -> ToolExecutionContext {
+        ToolExecutionContext {
+            working_dir: std::env::temp_dir(),
+            fighter_id: FighterId(uuid::Uuid::new_v4()),
+            memory: Arc::new(MemorySubstrate::in_memory().unwrap()),
+            coordinator,
+        }
+    }
 
     #[test]
     fn test_require_capability_granted() {
@@ -686,5 +1039,203 @@ mod tests {
             require_capability(&caps, &Capability::Network("api.example.com".to_string())).is_ok()
         );
         assert!(require_capability(&caps, &Capability::Network("evil.com".to_string())).is_err());
+    }
+
+    // -- Agent tool tests ---------------------------------------------------
+
+    #[tokio::test]
+    async fn test_agent_message_with_mock_coordinator() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        let caps = vec![Capability::AgentMessage];
+        let target_id = uuid::Uuid::nil().to_string();
+
+        let input = serde_json::json!({
+            "fighter_id": target_id,
+            "message": "hello from fighter A"
+        });
+
+        let result = execute_tool("agent_message", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let response = result.output["response"].as_str().unwrap();
+        assert_eq!(response, "echo: hello from fighter A");
+        assert_eq!(result.output["tokens_used"].as_u64().unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_agent_message_by_name() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        let caps = vec![Capability::AgentMessage];
+
+        let input = serde_json::json!({
+            "name": "test-fighter",
+            "message": "hello by name"
+        });
+
+        let result = execute_tool("agent_message", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(
+            result.output["response"].as_str().unwrap(),
+            "echo: hello by name"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_agent_message_name_not_found() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        let caps = vec![Capability::AgentMessage];
+
+        let input = serde_json::json!({
+            "name": "nonexistent-fighter",
+            "message": "hello"
+        });
+
+        let result = execute_tool("agent_message", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        // Should fail gracefully (not panic).
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("nonexistent-fighter"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_list_with_mock_coordinator() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        let caps = vec![Capability::AgentMessage];
+
+        let input = serde_json::json!({});
+
+        let result = execute_tool("agent_list", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let agents = result.output.as_array().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["name"].as_str().unwrap(), "test-fighter");
+    }
+
+    #[tokio::test]
+    async fn test_agent_spawn_with_mock_coordinator() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        let caps = vec![Capability::AgentSpawn];
+
+        let input = serde_json::json!({
+            "name": "worker-1",
+            "system_prompt": "You are a worker agent."
+        });
+
+        let result = execute_tool("agent_spawn", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["name"].as_str().unwrap(), "worker-1");
+        assert!(result.output["fighter_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_agent_message_denied_without_capability() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        // No AgentMessage capability.
+        let caps = vec![Capability::Memory];
+
+        let input = serde_json::json!({
+            "fighter_id": uuid::Uuid::nil().to_string(),
+            "message": "hello"
+        });
+
+        let result = execute_tool("agent_message", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("capability"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_spawn_denied_without_capability() {
+        let coordinator: Arc<dyn AgentCoordinator> = Arc::new(MockCoordinator::new());
+        let context = make_test_context(Some(coordinator));
+        // No AgentSpawn capability.
+        let caps = vec![Capability::Memory];
+
+        let input = serde_json::json!({
+            "name": "worker-1",
+            "system_prompt": "test"
+        });
+
+        let result = execute_tool("agent_spawn", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("capability"));
+    }
+
+    #[test]
+    fn test_parse_duckduckgo_results_mock_html() {
+        let mock_html = r#"
+        <div class="result">
+            <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fpage1&rut=abc">
+                <b>Example</b> Page One
+            </a>
+        </div>
+        <div class="result">
+            <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.org%2Fpage2&rut=def">
+                Example Page Two
+            </a>
+        </div>
+        "#;
+
+        let results = parse_duckduckgo_results(mock_html);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0]["title"].as_str().unwrap(), "Example Page One");
+        assert_eq!(results[0]["url"].as_str().unwrap(), "https://example.com/page1");
+        assert_eq!(results[1]["title"].as_str().unwrap(), "Example Page Two");
+        assert_eq!(results[1]["url"].as_str().unwrap(), "https://example.org/page2");
+    }
+
+    #[test]
+    fn test_parse_duckduckgo_results_empty_html() {
+        let results = parse_duckduckgo_results("<html><body>No results</body></html>");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_strip_html_tags() {
+        assert_eq!(strip_html_tags("<b>bold</b> text"), "bold text");
+        assert_eq!(strip_html_tags("no tags"), "no tags");
+        assert_eq!(strip_html_tags("<a href=\"x\">link</a>"), "link");
+    }
+
+    #[tokio::test]
+    async fn test_agent_tools_without_coordinator() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::AgentMessage];
+
+        let input = serde_json::json!({
+            "fighter_id": uuid::Uuid::nil().to_string(),
+            "message": "hello"
+        });
+
+        let result = execute_tool("agent_message", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("coordinator not available"));
     }
 }

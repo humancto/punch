@@ -26,6 +26,7 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
             }
             Capability::Network(_) => {
                 push_unique(&mut tools, web_fetch());
+                push_unique(&mut tools, web_search());
             }
             Capability::Memory => {
                 push_unique(&mut tools, memory_store());
@@ -35,6 +36,13 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
                 push_unique(&mut tools, knowledge_add_entity());
                 push_unique(&mut tools, knowledge_add_relation());
                 push_unique(&mut tools, knowledge_query());
+            }
+            Capability::AgentSpawn => {
+                push_unique(&mut tools, agent_spawn());
+            }
+            Capability::AgentMessage => {
+                push_unique(&mut tools, agent_message());
+                push_unique(&mut tools, agent_list());
             }
             _ => {}
         }
@@ -51,11 +59,15 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         file_list(),
         shell_exec(),
         web_fetch(),
+        web_search(),
         memory_store(),
         memory_recall(),
         knowledge_add_entity(),
         knowledge_add_relation(),
         knowledge_query(),
+        agent_spawn(),
+        agent_message(),
+        agent_list(),
     ]
 }
 
@@ -159,6 +171,26 @@ fn web_fetch() -> ToolDefinition {
                 }
             },
             "required": ["url"]
+        }),
+        category: ToolCategory::Web,
+    }
+}
+
+fn web_search() -> ToolDefinition {
+    ToolDefinition {
+        name: "web_search".into(),
+        description:
+            "Search the web using DuckDuckGo and return the top results with titles and URLs."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query."
+                }
+            },
+            "required": ["query"]
         }),
         category: ToolCategory::Web,
     }
@@ -283,5 +315,81 @@ fn knowledge_query() -> ToolDefinition {
             "required": ["query"]
         }),
         category: ToolCategory::Knowledge,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent coordination tools
+// ---------------------------------------------------------------------------
+
+fn agent_spawn() -> ToolDefinition {
+    ToolDefinition {
+        name: "agent_spawn".into(),
+        description: "Spawn a new fighter (AI agent). Returns the new fighter's ID. Use this to create subordinate agents that can handle specialized tasks.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "A human-readable name for the new fighter."
+                },
+                "system_prompt": {
+                    "type": "string",
+                    "description": "The system prompt that shapes the new fighter's behavior and specialization."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "A short description of the fighter's purpose (optional)."
+                },
+                "capabilities": {
+                    "type": "array",
+                    "description": "Capabilities to grant the new fighter (optional). Each item is a capability object.",
+                    "items": {
+                        "type": "object"
+                    }
+                }
+            },
+            "required": ["name", "system_prompt"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn agent_message() -> ToolDefinition {
+    ToolDefinition {
+        name: "agent_message".into(),
+        description: "Send a message to another fighter by ID or name and get its response. Use this for inter-agent coordination and delegation.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "fighter_id": {
+                    "type": "string",
+                    "description": "The UUID of the target fighter (provide either this or 'name')."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The name of the target fighter (provide either this or 'fighter_id')."
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The message to send to the target fighter."
+                }
+            },
+            "required": ["message"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn agent_list() -> ToolDefinition {
+    ToolDefinition {
+        name: "agent_list".into(),
+        description: "List all active fighters (AI agents) with their IDs, names, and status."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+        category: ToolCategory::Agent,
     }
 }

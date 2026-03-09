@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use punch_api::server::start_arena;
-use punch_kernel::Ring;
+use punch_kernel::{OnError, Ring, Workflow, WorkflowId, WorkflowStep};
 use punch_memory::MemorySubstrate;
 use punch_runtime::create_driver;
 use punch_types::GorillaManifest;
@@ -92,6 +92,9 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     // Auto-load bundled gorilla manifests.
     let gorilla_count = load_bundled_gorillas(&ring);
 
+    // Register built-in workflows.
+    let workflow_count = register_builtin_workflows(&ring);
+
     // Write PID file.
     let pid_path = punch_home().join(".daemon.pid");
     let pid = std::process::id();
@@ -105,6 +108,13 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     println!("  Provider:     {}", config.default_model.provider);
     println!("  Model:        {}", config.default_model.model);
     println!("  Gorillas:     {} registered", gorilla_count);
+    println!("  Workflows:    {} registered", workflow_count);
+    println!("  Channels:     {} configured", config.channels.len());
+    if !config.channels.is_empty() {
+        for (name, ch) in &config.channels {
+            println!("    - {} ({})", name, ch.channel_type);
+        }
+    }
     println!("  PID:          {}", pid);
     println!();
 
@@ -199,4 +209,34 @@ fn load_bundled_gorillas(ring: &Arc<Ring>) -> usize {
     }
 
     count
+}
+
+/// Register built-in workflows with the Ring.
+fn register_builtin_workflows(ring: &Arc<Ring>) -> usize {
+    // research-and-summarize: Step 1 = Scout (researches topic), Step 2 = Oracle (summarizes findings)
+    let workflow = Workflow {
+        id: WorkflowId::new(),
+        name: "research-and-summarize".to_string(),
+        steps: vec![
+            WorkflowStep {
+                name: "scout".to_string(),
+                fighter_name: "Scout".to_string(),
+                prompt_template: "Research the following topic thoroughly and provide detailed findings:\n\n{{input}}".to_string(),
+                timeout_secs: Some(120),
+                on_error: OnError::FailWorkflow,
+            },
+            WorkflowStep {
+                name: "oracle".to_string(),
+                fighter_name: "Oracle".to_string(),
+                prompt_template: "Summarize the following research findings into a clear, concise summary:\n\n{{previous_output}}".to_string(),
+                timeout_secs: Some(120),
+                on_error: OnError::FailWorkflow,
+            },
+        ],
+    };
+
+    ring.register_workflow(workflow);
+    info!("registered built-in workflow: research-and-summarize");
+
+    1
 }

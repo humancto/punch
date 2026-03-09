@@ -78,6 +78,24 @@ pub enum Commands {
         command: ConfigCommands,
     },
 
+    /// Manage multi-step agent workflows
+    Workflow {
+        #[command(subcommand)]
+        command: WorkflowCommands,
+    },
+
+    /// Manage channel adapters (Telegram, Discord, Slack)
+    Channel {
+        #[command(subcommand)]
+        command: ChannelCommands,
+    },
+
+    /// Manage event-driven triggers
+    Trigger {
+        #[command(subcommand)]
+        command: TriggerCommands,
+    },
+
     /// Print version information
     Version,
 }
@@ -136,6 +154,12 @@ pub enum GorillaCommands {
         /// Gorilla name
         name: String,
     },
+
+    /// Run a single autonomous tick of a gorilla (for testing)
+    Test {
+        /// Gorilla name
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -153,6 +177,59 @@ pub enum MoveCommands {
     Install {
         /// Move name
         name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WorkflowCommands {
+    /// List registered workflows
+    List,
+
+    /// Execute a workflow
+    Run {
+        /// Workflow ID
+        id: String,
+        /// Input text for the workflow
+        input: String,
+    },
+
+    /// Check the status of a workflow run
+    Status {
+        /// Run ID
+        run_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ChannelCommands {
+    /// List configured channels and their status
+    List,
+
+    /// Send a test message through a channel adapter
+    Test {
+        /// Platform to test (telegram, discord, slack)
+        platform: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TriggerCommands {
+    /// List all registered triggers
+    List,
+
+    /// Add a new trigger
+    Add {
+        /// Trigger type: keyword, schedule, event, webhook
+        #[arg(name = "type")]
+        trigger_type: String,
+        /// Configuration (JSON string)
+        config: String,
+    },
+
+    /// Remove a trigger by ID
+    Remove {
+        /// Trigger ID (UUID)
+        id: String,
     },
 }
 

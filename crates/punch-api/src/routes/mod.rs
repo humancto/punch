@@ -1,9 +1,12 @@
 //! Route module organisation for The Arena API.
 
+pub mod channels;
 pub mod chat;
 pub mod fighters;
 pub mod gorillas;
 pub mod health;
+pub mod triggers;
+pub mod workflows;
 
 use axum::Router;
 
@@ -16,4 +19,7 @@ pub fn api_router() -> Router<AppState> {
         .merge(fighters::router())
         .merge(gorillas::router())
         .merge(chat::router())
+        .merge(workflows::router())
+        .merge(channels::router())
+        .merge(triggers::router())
 }

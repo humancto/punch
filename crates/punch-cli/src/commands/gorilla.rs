@@ -1,6 +1,8 @@
 //! `punch gorilla` — Manage gorillas (autonomous agents).
 
-use super::{load_config, load_dotenv};
+use std::sync::Arc;
+
+use super::{load_config, load_dotenv, punch_home};
 use crate::cli::GorillaCommands;
 
 pub async fn run(command: GorillaCommands, config_path: Option<String>) -> i32 {
@@ -11,6 +13,7 @@ pub async fn run(command: GorillaCommands, config_path: Option<String>) -> i32 {
         GorillaCommands::Unleash { name } => run_unleash(name, config_path).await,
         GorillaCommands::Cage { name } => run_cage(name, config_path).await,
         GorillaCommands::Status { name } => run_status(name, config_path).await,
+        GorillaCommands::Test { name } => run_test(name, config_path).await,
     }
 }
 
@@ -259,4 +262,138 @@ async fn run_status(name: String, config_path: Option<String>) -> i32 {
             1
         }
     }
+}
+
+/// Run a single test tick of a gorilla locally (without the daemon).
+///
+/// This loads the gorilla manifest from bundled or user gorillas, creates a
+/// temporary Ring, and runs a single autonomous tick to verify the config works.
+async fn run_test(name: String, config_path: Option<String>) -> i32 {
+    let config = match load_config(config_path.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [X] {}", e);
+            return 1;
+        }
+    };
+
+    // Find the gorilla manifest by name.
+    let manifest = match find_gorilla_manifest(&name) {
+        Some(m) => m,
+        None => {
+            eprintln!("  [X] Gorilla '{}' not found in bundled or user gorillas.", name);
+            eprintln!("  Searched in:");
+            eprintln!("    - crates/punch-gorillas/bundled/");
+            eprintln!("    - ~/.punch/gorillas/");
+            return 1;
+        }
+    };
+
+    println!();
+    println!("  Testing gorilla: {}", manifest.name);
+    println!("  Schedule: {}", manifest.schedule);
+    println!("  Capabilities: {:?}", manifest.effective_capabilities());
+
+    let effective_model = manifest.model.clone().unwrap_or_else(|| config.default_model.clone());
+    println!("  Model: {} ({})", effective_model.model, effective_model.provider);
+    println!();
+    println!("  Running single autonomous tick...");
+    println!();
+
+    // Create a temporary in-memory memory substrate.
+    let memory = match punch_memory::MemorySubstrate::in_memory() {
+        Ok(m) => Arc::new(m),
+        Err(e) => {
+            eprintln!("  [X] Failed to create memory substrate: {}", e);
+            return 1;
+        }
+    };
+
+    // Create the LLM driver using the gorilla's model or the default.
+    let driver = match punch_runtime::create_driver(&effective_model) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("  [X] Failed to create LLM driver: {}", e);
+            return 1;
+        }
+    };
+
+    let gorilla_id = punch_types::GorillaId::new();
+
+    match punch_kernel::run_gorilla_tick(
+        gorilla_id,
+        &manifest,
+        &config.default_model,
+        &memory,
+        &driver,
+    )
+    .await
+    {
+        Ok(result) => {
+            println!("  --- Gorilla Response ---");
+            println!();
+            // Indent the response for readability.
+            for line in result.response.lines() {
+                println!("  {}", line);
+            }
+            println!();
+            println!("  ---");
+            println!("  Iterations:  {}", result.iterations);
+            println!("  Tool calls:  {}", result.tool_calls_made);
+            println!("  Tokens used: {}", result.usage.total());
+            println!();
+            println!("  Test PASSED. Gorilla '{}' is working.", name);
+            println!();
+            0
+        }
+        Err(e) => {
+            eprintln!("  [X] Gorilla tick failed: {}", e);
+            eprintln!();
+            eprintln!("  Test FAILED. Check your model configuration and API keys.");
+            1
+        }
+    }
+}
+
+/// Search for a gorilla manifest file by name in bundled and user directories.
+fn find_gorilla_manifest(name: &str) -> Option<punch_types::GorillaManifest> {
+    let search_paths = vec![
+        // Development: relative to project root.
+        std::path::PathBuf::from("crates/punch-gorillas/bundled"),
+        // User-installed gorillas.
+        punch_home().join("gorillas"),
+    ];
+
+    for base_dir in &search_paths {
+        if !base_dir.exists() {
+            continue;
+        }
+
+        let entries = match std::fs::read_dir(base_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let toml_path = path.join("GORILLA.toml");
+            if !toml_path.exists() {
+                continue;
+            }
+
+            if let Ok(contents) = std::fs::read_to_string(&toml_path) {
+                if let Ok(manifest) = toml::from_str::<punch_types::GorillaManifest>(&contents) {
+                    if manifest.name.eq_ignore_ascii_case(name) {
+                        return Some(manifest);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }

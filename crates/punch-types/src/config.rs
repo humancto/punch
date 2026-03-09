@@ -6,6 +6,12 @@ use std::collections::HashMap;
 pub struct PunchConfig {
     /// Socket address for the Arena API server (e.g. "0.0.0.0:6660").
     pub api_listen: String,
+    /// API key for authentication. If empty, auth is disabled (dev mode).
+    #[serde(default)]
+    pub api_key: String,
+    /// Per-IP rate limit in requests per minute. Default: 60.
+    #[serde(default = "default_rate_limit_rpm")]
+    pub rate_limit_rpm: u32,
     /// Default model to use when none is specified.
     pub default_model: ModelConfig,
     /// Memory subsystem configuration.
@@ -115,4 +121,8 @@ pub struct McpServerConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_rate_limit_rpm() -> u32 {
+    60
 }

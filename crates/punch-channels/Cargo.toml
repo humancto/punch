@@ -18,3 +18,8 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
 chrono = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
