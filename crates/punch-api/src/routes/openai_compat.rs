@@ -1217,4 +1217,440 @@ mod tests {
         let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.model, "nonexistent-model-42");
     }
+
+    // -- System message conversion --
+
+    #[test]
+    fn test_oai_to_punch_system_message() {
+        let oai = ChatMessage {
+            role: "system".to_string(),
+            content: Some("You are a helpful coding assistant.".to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let punch = oai_message_to_punch(&oai);
+        assert_eq!(punch.role, punch_types::Role::System);
+        assert_eq!(punch.content, "You are a helpful coding assistant.");
+    }
+
+    #[test]
+    fn test_oai_to_punch_assistant_message() {
+        let oai = ChatMessage {
+            role: "assistant".to_string(),
+            content: Some("Here is my response.".to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let punch = oai_message_to_punch(&oai);
+        assert_eq!(punch.role, punch_types::Role::Assistant);
+        assert_eq!(punch.content, "Here is my response.");
+    }
+
+    #[test]
+    fn test_oai_to_punch_unknown_role_defaults_to_user() {
+        let oai = ChatMessage {
+            role: "developer".to_string(),
+            content: Some("test content".to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let punch = oai_message_to_punch(&oai);
+        assert_eq!(punch.role, punch_types::Role::User);
+    }
+
+    #[test]
+    fn test_oai_to_punch_none_content() {
+        let oai = ChatMessage {
+            role: "user".to_string(),
+            content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let punch = oai_message_to_punch(&oai);
+        assert_eq!(punch.content, "");
+    }
+
+    // -- Punch to OAI conversions --
+
+    #[test]
+    fn test_punch_to_oai_system() {
+        let msg = punch_types::Message::new(punch_types::Role::System, "system prompt");
+        let oai = punch_message_to_oai(&msg);
+        assert_eq!(oai.role, "system");
+        assert_eq!(oai.content, Some("system prompt".to_string()));
+    }
+
+    #[test]
+    fn test_punch_to_oai_user() {
+        let msg = punch_types::Message::new(punch_types::Role::User, "hello");
+        let oai = punch_message_to_oai(&msg);
+        assert_eq!(oai.role, "user");
+        assert_eq!(oai.content, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_punch_to_oai_tool_result() {
+        let mut msg = punch_types::Message::new(punch_types::Role::Tool, "result data");
+        msg.tool_results = vec![punch_types::ToolCallResult {
+            id: "call_xyz".to_string(),
+            content: "result data".to_string(),
+            is_error: false,
+        }];
+        let oai = punch_message_to_oai(&msg);
+        assert_eq!(oai.role, "tool");
+        assert_eq!(oai.tool_call_id, Some("call_xyz".to_string()));
+    }
+
+    // -- Stop sequence edge cases --
+
+    #[test]
+    fn test_stop_sequence_empty_list() {
+        let text = "Hello world";
+        let (result, reason) = apply_stop_sequences(text, &[]);
+        assert_eq!(result, "Hello world");
+        assert_eq!(reason, "stop");
+    }
+
+    #[test]
+    fn test_stop_sequence_at_start() {
+        let text = "STOP the rest";
+        let (result, _) = apply_stop_sequences(text, &["STOP".to_string()]);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_stop_sequence_empty_text() {
+        let text = "";
+        let (result, reason) = apply_stop_sequences(text, &["stop".to_string()]);
+        assert_eq!(result, "");
+        assert_eq!(reason, "stop");
+    }
+
+    #[test]
+    fn test_stop_sequence_multiple_strings() {
+        let stop = StopSequence::Multiple(vec!["END".to_string(), "DONE".to_string()]);
+        let vec = stop.into_vec();
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec[0], "END");
+        assert_eq!(vec[1], "DONE");
+    }
+
+    #[test]
+    fn test_stop_sequence_single_string() {
+        let stop = StopSequence::Single("STOP".to_string());
+        let vec = stop.into_vec();
+        assert_eq!(vec.len(), 1);
+        assert_eq!(vec[0], "STOP");
+    }
+
+    // -- Temperature edge cases --
+
+    #[test]
+    fn test_temperature_max_value() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "temperature": 2.0
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.temperature, Some(2.0));
+    }
+
+    #[test]
+    fn test_max_tokens_handling() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 1
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.max_tokens, Some(1));
+    }
+
+    #[test]
+    fn test_max_tokens_large_value() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 128000
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.max_tokens, Some(128000));
+    }
+
+    // -- Empty messages --
+
+    #[test]
+    fn test_empty_messages_array() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": []
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert!(req.messages.is_empty());
+    }
+
+    // -- Tool call serialization --
+
+    #[test]
+    fn test_tool_call_spec_serialization() {
+        let tc = ToolCallSpec {
+            id: Some("call_99".to_string()),
+            call_type: Some("function".to_string()),
+            function: ToolCallFunctionSpec {
+                name: Some("calculator".to_string()),
+                arguments: Some(r#"{"x":1,"y":2}"#.to_string()),
+            },
+            index: Some(0),
+        };
+        let json = serde_json::to_value(&tc).unwrap();
+        assert_eq!(json["id"], "call_99");
+        assert_eq!(json["type"], "function");
+        assert_eq!(json["function"]["name"], "calculator");
+        assert_eq!(json["index"], 0);
+    }
+
+    #[test]
+    fn test_tool_call_spec_minimal() {
+        let tc = ToolCallSpec {
+            id: None,
+            call_type: None,
+            function: ToolCallFunctionSpec {
+                name: None,
+                arguments: None,
+            },
+            index: None,
+        };
+        let json = serde_json::to_value(&tc).unwrap();
+        // Optional fields should be omitted
+        assert!(json.get("id").is_none());
+        assert!(json.get("type").is_none());
+    }
+
+    // -- Streaming chunk with finish reason --
+
+    #[test]
+    fn test_streaming_chunk_finish_reason() {
+        let chunk = ChatCompletionChunk {
+            id: "chatcmpl-done".to_string(),
+            object: "chat.completion.chunk",
+            created: 1700000000,
+            model: "gpt-4o".to_string(),
+            choices: vec![ChunkChoice {
+                index: 0,
+                delta: ChunkDelta {
+                    role: None,
+                    content: None,
+                    tool_calls: None,
+                },
+                finish_reason: Some("stop".to_string()),
+            }],
+        };
+        let json = serde_json::to_value(&chunk).unwrap();
+        assert_eq!(json["choices"][0]["finish_reason"], "stop");
+        // Both role and content should be omitted
+        assert!(json["choices"][0]["delta"].get("role").is_none());
+        assert!(json["choices"][0]["delta"].get("content").is_none());
+    }
+
+    #[test]
+    fn test_streaming_chunk_with_tool_calls() {
+        let chunk = ChatCompletionChunk {
+            id: "chatcmpl-tc".to_string(),
+            object: "chat.completion.chunk",
+            created: 1700000000,
+            model: "gpt-4o".to_string(),
+            choices: vec![ChunkChoice {
+                index: 0,
+                delta: ChunkDelta {
+                    role: None,
+                    content: None,
+                    tool_calls: Some(vec![ToolCallSpec {
+                        id: Some("call_delta".to_string()),
+                        call_type: Some("function".to_string()),
+                        function: ToolCallFunctionSpec {
+                            name: Some("search".to_string()),
+                            arguments: Some("{}".to_string()),
+                        },
+                        index: Some(0),
+                    }]),
+                },
+                finish_reason: None,
+            }],
+        };
+        let json = serde_json::to_value(&chunk).unwrap();
+        assert!(json["choices"][0]["delta"]["tool_calls"].is_array());
+    }
+
+    // -- Model object format --
+
+    #[test]
+    fn test_model_object_format() {
+        let model = ModelObject {
+            id: "gpt-4o-mini".to_string(),
+            object: "model",
+            created: 1700000000,
+            owned_by: "openai".to_string(),
+        };
+        let json = serde_json::to_value(&model).unwrap();
+        assert_eq!(json["id"], "gpt-4o-mini");
+        assert_eq!(json["object"], "model");
+        assert_eq!(json["owned_by"], "openai");
+        assert!(json["created"].is_number());
+    }
+
+    // -- Token estimation --
+
+    #[test]
+    fn test_estimate_prompt_tokens_empty() {
+        let tokens = estimate_prompt_tokens(&[]);
+        assert_eq!(tokens, 0);
+    }
+
+    #[test]
+    fn test_estimate_prompt_tokens_with_name() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some("Hello".to_string()),
+            name: Some("alice".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        let tokens = estimate_prompt_tokens(&messages);
+        assert!(tokens > 0);
+    }
+
+    #[test]
+    fn test_estimate_completion_tokens_empty() {
+        let tokens = estimate_completion_tokens("");
+        assert_eq!(tokens, 0);
+    }
+
+    // -- Completion ID uniqueness --
+
+    #[test]
+    fn test_completion_ids_are_unique() {
+        let id1 = generate_completion_id();
+        let id2 = generate_completion_id();
+        assert_ne!(id1, id2);
+    }
+
+    // -- OAI error response format --
+
+    #[test]
+    fn test_oai_error_serialization() {
+        let err = OaiErrorResponse {
+            error: OaiError {
+                message: "Rate limit exceeded".to_string(),
+                r#type: "rate_limit_error".to_string(),
+                code: Some("rate_limit_exceeded".to_string()),
+            },
+        };
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["error"]["message"], "Rate limit exceeded");
+        assert_eq!(json["error"]["type"], "rate_limit_error");
+        assert_eq!(json["error"]["code"], "rate_limit_exceeded");
+    }
+
+    #[test]
+    fn test_oai_error_no_code() {
+        let err = OaiErrorResponse {
+            error: OaiError {
+                message: "Internal error".to_string(),
+                r#type: "api_error".to_string(),
+                code: None,
+            },
+        };
+        let json = serde_json::to_value(&err).unwrap();
+        assert!(json["error"]["code"].is_null());
+    }
+
+    // -- Usage stats --
+
+    #[test]
+    fn test_usage_serialization() {
+        let usage = Usage {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+        };
+        let json = serde_json::to_value(&usage).unwrap();
+        assert_eq!(json["prompt_tokens"], 100);
+        assert_eq!(json["completion_tokens"], 50);
+        assert_eq!(json["total_tokens"], 150);
+    }
+
+    // -- Chat message serialization --
+
+    #[test]
+    fn test_chat_message_none_fields_skipped() {
+        let msg = ChatMessage {
+            role: "user".to_string(),
+            content: Some("Hello".to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert!(json.get("name").is_none());
+        assert!(json.get("tool_calls").is_none());
+        assert!(json.get("tool_call_id").is_none());
+    }
+
+    // -- Tool function spec --
+
+    #[test]
+    fn test_tool_function_spec_no_params() {
+        let json = r#"{
+            "type": "function",
+            "function": {
+                "name": "get_time"
+            }
+        }"#;
+        let tool: ToolSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(tool.function.name, "get_time");
+        assert!(tool.function.description.is_none());
+        assert!(tool.function.parameters.is_none());
+    }
+
+    // -- Stream option deserialization --
+
+    #[test]
+    fn test_stream_false() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": false
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.stream, Some(false));
+    }
+
+    // -- Tool choice deserialization --
+
+    #[test]
+    fn test_tool_choice_auto() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "auto"
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.tool_choice, Some(serde_json::json!("auto")));
+    }
+
+    #[test]
+    fn test_tool_choice_none_value() {
+        let json = r#"{
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "none"
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.tool_choice, Some(serde_json::json!("none")));
+    }
 }

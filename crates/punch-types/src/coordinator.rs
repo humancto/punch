@@ -61,3 +61,79 @@ pub trait AgentCoordinator: Send + Sync {
     /// List all active fighters.
     async fn list_fighters(&self) -> PunchResult<Vec<AgentInfo>>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_agent_info_serde_roundtrip() {
+        let info = AgentInfo {
+            id: FighterId(Uuid::nil()),
+            name: "TestAgent".to_string(),
+            status: FighterStatus::Idle,
+        };
+        let json = serde_json::to_string(&info).expect("serialize");
+        let deser: AgentInfo = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.name, "TestAgent");
+        assert_eq!(deser.status, FighterStatus::Idle);
+    }
+
+    #[test]
+    fn test_agent_info_all_statuses() {
+        let statuses = vec![
+            FighterStatus::Idle,
+            FighterStatus::Fighting,
+            FighterStatus::Resting,
+            FighterStatus::KnockedOut,
+            FighterStatus::Training,
+        ];
+        for status in statuses {
+            let info = AgentInfo {
+                id: FighterId::new(),
+                name: "Agent".to_string(),
+                status,
+            };
+            let json = serde_json::to_string(&info).expect("serialize");
+            let deser: AgentInfo = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(deser.status, status);
+        }
+    }
+
+    #[test]
+    fn test_agent_message_result_serde() {
+        let result = AgentMessageResult {
+            response: "I processed your request".to_string(),
+            tokens_used: 256,
+        };
+        let json = serde_json::to_string(&result).expect("serialize");
+        let deser: AgentMessageResult = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.response, "I processed your request");
+        assert_eq!(deser.tokens_used, 256);
+    }
+
+    #[test]
+    fn test_agent_message_result_empty_response() {
+        let result = AgentMessageResult {
+            response: String::new(),
+            tokens_used: 0,
+        };
+        let json = serde_json::to_string(&result).expect("serialize");
+        let deser: AgentMessageResult = serde_json::from_str(&json).expect("deserialize");
+        assert!(deser.response.is_empty());
+        assert_eq!(deser.tokens_used, 0);
+    }
+
+    #[test]
+    fn test_agent_info_clone() {
+        let info = AgentInfo {
+            id: FighterId(Uuid::nil()),
+            name: "Cloneable".to_string(),
+            status: FighterStatus::Fighting,
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.name, info.name);
+        assert_eq!(cloned.status, info.status);
+    }
+}

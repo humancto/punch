@@ -194,6 +194,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_load_nonexistent_fighter() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let id = punch_types::FighterId::new();
+        let loaded = substrate.load_fighter(&id).await.unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_multiple_fighters() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let id1 = punch_types::FighterId::new();
+        let id2 = punch_types::FighterId::new();
+
+        let mut m1 = test_manifest();
+        m1.name = "Alpha Fighter".into();
+        let mut m2 = test_manifest();
+        m2.name = "Beta Fighter".into();
+
+        substrate.save_fighter(&id1, &m1, FighterStatus::Idle).await.unwrap();
+        substrate.save_fighter(&id2, &m2, FighterStatus::Fighting).await.unwrap();
+
+        let fighters = substrate.list_fighters().await.unwrap();
+        assert_eq!(fighters.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_update_nonexistent_fighter_status() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let id = punch_types::FighterId::new();
+        let result = substrate.update_fighter_status(&id, FighterStatus::Fighting).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_and_verify_gone() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let id = punch_types::FighterId::new();
+        substrate.save_fighter(&id, &test_manifest(), FighterStatus::Idle).await.unwrap();
+
+        substrate.delete_fighter(&id).await.unwrap();
+        let loaded = substrate.load_fighter(&id).await.unwrap();
+        assert!(loaded.is_none());
+
+        let fighters = substrate.list_fighters().await.unwrap();
+        assert!(fighters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_save_fighter_overwrites() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let id = punch_types::FighterId::new();
+
+        let mut m1 = test_manifest();
+        m1.name = "Original".into();
+        substrate.save_fighter(&id, &m1, FighterStatus::Idle).await.unwrap();
+
+        let mut m2 = test_manifest();
+        m2.name = "Updated".into();
+        substrate.save_fighter(&id, &m2, FighterStatus::Fighting).await.unwrap();
+
+        let loaded = substrate.load_fighter(&id).await.unwrap().unwrap();
+        assert_eq!(loaded.name, "Updated");
+
+        // Should still only be 1 fighter
+        let fighters = substrate.list_fighters().await.unwrap();
+        assert_eq!(fighters.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_update_and_delete_fighter() {
         let substrate = MemorySubstrate::in_memory().unwrap();
         let id = punch_types::FighterId::new();

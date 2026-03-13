@@ -321,4 +321,65 @@ mod tests {
         assert_eq!(SpendPeriod::Day.to_string(), "day");
         assert_eq!(SpendPeriod::Month.to_string(), "month");
     }
+
+    #[test]
+    fn estimate_cost_zero_tokens() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let engine = MeteringEngine::new(memory);
+        let cost = engine.estimate_cost("claude-sonnet-4-20250514", 0, 0);
+        assert!((cost - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn estimate_cost_claude_opus() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let engine = MeteringEngine::new(memory);
+        // claude-opus: $15/M in, $75/M out
+        let cost = engine.estimate_cost("claude-opus-4-20250514", 1_000_000, 1_000_000);
+        assert!((cost - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_cost_claude_haiku() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let engine = MeteringEngine::new(memory);
+        // claude-haiku: $0.25/M in, $1.25/M out
+        let cost = engine.estimate_cost("claude-haiku-3.5", 1_000_000, 1_000_000);
+        assert!((cost - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_cost_gpt4o() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let engine = MeteringEngine::new(memory);
+        // gpt-4o: $2.50/M in, $10/M out
+        let cost = engine.estimate_cost("gpt-4o", 1_000_000, 1_000_000);
+        assert!((cost - 12.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn with_custom_prices() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let mut prices = HashMap::new();
+        prices.insert(
+            "custom-model".to_string(),
+            ModelPrice {
+                input_per_million: 5.0,
+                output_per_million: 10.0,
+            },
+        );
+        let engine = MeteringEngine::with_prices(memory, prices);
+        let cost = engine.estimate_cost("custom-model", 1_000_000, 1_000_000);
+        assert!((cost - 15.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn custom_prices_missing_model_uses_default_fallback() {
+        let memory = Arc::new(MemorySubstrate::in_memory().expect("in-memory substrate"));
+        let prices = HashMap::new();
+        let engine = MeteringEngine::with_prices(memory, prices);
+        // Default: $1/M in, $3/M out
+        let cost = engine.estimate_cost("anything", 1_000_000, 1_000_000);
+        assert!((cost - 4.0).abs() < 1e-9);
+    }
 }

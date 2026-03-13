@@ -640,4 +640,199 @@ mod tests {
         let id = WorkflowId::new();
         assert!(engine.get_workflow(&id).is_none());
     }
+
+    #[test]
+    fn workflow_engine_default() {
+        let engine = WorkflowEngine::default();
+        assert!(engine.list_workflows().is_empty());
+        assert!(engine.list_runs().is_empty());
+    }
+
+    #[test]
+    fn register_multiple_workflows() {
+        let engine = WorkflowEngine::new();
+
+        for i in 0..5 {
+            let workflow = Workflow {
+                id: WorkflowId::new(),
+                name: format!("workflow-{}", i),
+                steps: vec![],
+            };
+            engine.register_workflow(workflow);
+        }
+
+        assert_eq!(engine.list_workflows().len(), 5);
+    }
+
+    #[test]
+    fn register_workflow_returns_correct_id() {
+        let engine = WorkflowEngine::new();
+        let wf_id = WorkflowId::new();
+        let workflow = Workflow {
+            id: wf_id,
+            name: "id-test".to_string(),
+            steps: vec![],
+        };
+        let returned_id = engine.register_workflow(workflow);
+        assert_eq!(returned_id, wf_id);
+    }
+
+    #[test]
+    fn workflow_id_display() {
+        let id = WorkflowId::new();
+        let s = format!("{}", id);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn workflow_run_id_display() {
+        let id = WorkflowRunId::new();
+        let s = format!("{}", id);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn workflow_id_default() {
+        let id = WorkflowId::default();
+        // Should be a valid UUID.
+        assert!(!id.0.is_nil());
+    }
+
+    #[test]
+    fn workflow_run_id_default() {
+        let id = WorkflowRunId::default();
+        assert!(!id.0.is_nil());
+    }
+
+    #[test]
+    fn variable_substitution_no_variables() {
+        let result = expand_variables("plain text with no vars", "input", "step", &[]);
+        assert_eq!(result, "plain text with no vars");
+    }
+
+    #[test]
+    fn variable_substitution_all_variables_at_once() {
+        let step_results = vec![StepResult {
+            step_name: "analysis".to_string(),
+            response: "analyzed data".to_string(),
+            tokens_used: 50,
+            duration_ms: 100,
+            error: None,
+        }];
+
+        let result = expand_variables(
+            "Input: {{input}}, Prev: {{previous_output}}, Step: {{step_name}}, S1: {{step_1}}, Named: {{analysis}}",
+            "my input",
+            "current_step",
+            &step_results,
+        );
+        assert_eq!(
+            result,
+            "Input: my input, Prev: my input, Step: current_step, S1: analyzed data, Named: analyzed data"
+        );
+    }
+
+    #[test]
+    fn variable_substitution_empty_input() {
+        let result = expand_variables("{{input}} is here", "", "step", &[]);
+        assert_eq!(result, " is here");
+    }
+
+    #[test]
+    fn variable_substitution_multiple_same_var() {
+        let result = expand_variables(
+            "{{input}} and {{input}} again",
+            "hello",
+            "step",
+            &[],
+        );
+        assert_eq!(result, "hello and hello again");
+    }
+
+    #[test]
+    fn on_error_default_is_fail_workflow() {
+        let on_error = OnError::default();
+        assert!(matches!(on_error, OnError::FailWorkflow));
+    }
+
+    #[test]
+    fn list_runs_for_workflow_filters_correctly() {
+        let engine = WorkflowEngine::new();
+        let wf_id_1 = WorkflowId::new();
+        let wf_id_2 = WorkflowId::new();
+
+        // No runs initially.
+        assert!(engine.list_runs_for_workflow(&wf_id_1).is_empty());
+        assert!(engine.list_runs_for_workflow(&wf_id_2).is_empty());
+    }
+
+    #[test]
+    fn workflow_step_serialization() {
+        let step = WorkflowStep {
+            name: "test".to_string(),
+            fighter_name: "fighter".to_string(),
+            prompt_template: "Do {{input}}".to_string(),
+            timeout_secs: Some(30),
+            on_error: OnError::SkipStep,
+        };
+        let json = serde_json::to_string(&step).unwrap();
+        let deserialized: WorkflowStep = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "test");
+        assert_eq!(deserialized.timeout_secs, Some(30));
+    }
+
+    #[test]
+    fn workflow_serialization_roundtrip() {
+        let workflow = Workflow {
+            id: WorkflowId::new(),
+            name: "roundtrip".to_string(),
+            steps: vec![WorkflowStep {
+                name: "s1".to_string(),
+                fighter_name: "f1".to_string(),
+                prompt_template: "{{input}}".to_string(),
+                timeout_secs: None,
+                on_error: OnError::RetryOnce,
+            }],
+        };
+        let json = serde_json::to_string(&workflow).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "roundtrip");
+        assert_eq!(deserialized.steps.len(), 1);
+    }
+
+    #[test]
+    fn step_result_with_error() {
+        let sr = StepResult {
+            step_name: "failing".to_string(),
+            response: String::new(),
+            tokens_used: 0,
+            duration_ms: 0,
+            error: Some("timeout".to_string()),
+        };
+        assert!(sr.error.is_some());
+        assert_eq!(sr.error.unwrap(), "timeout");
+    }
+
+    #[test]
+    fn variable_substitution_step_ref_by_number_out_of_range() {
+        // {{step_5}} when we only have 2 steps should remain unreplaced.
+        let step_results = vec![
+            StepResult {
+                step_name: "a".to_string(),
+                response: "r1".to_string(),
+                tokens_used: 0,
+                duration_ms: 0,
+                error: None,
+            },
+            StepResult {
+                step_name: "b".to_string(),
+                response: "r2".to_string(),
+                tokens_used: 0,
+                duration_ms: 0,
+                error: None,
+            },
+        ];
+        let result = expand_variables("{{step_5}}", "input", "step", &step_results);
+        assert_eq!(result, "{{step_5}}");
+    }
 }

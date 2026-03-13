@@ -635,4 +635,232 @@ mod tests {
             .collect();
         assert!(pending.is_empty());
     }
+
+    #[test]
+    fn test_extract_prompt_with_context_and_prompt() {
+        let input = serde_json::json!({
+            "prompt": "Analyze this code",
+            "context": {
+                "language": "rust"
+            },
+            "mode": "text"
+        });
+        assert_eq!(extract_prompt(&input), "Analyze this code");
+    }
+
+    #[test]
+    fn test_extract_prompt_numeric_value() {
+        let input = serde_json::json!(42);
+        let result = extract_prompt(&input);
+        assert_eq!(result, "42");
+    }
+
+    #[test]
+    fn test_extract_prompt_null_value() {
+        let input = serde_json::json!(null);
+        let result = extract_prompt(&input);
+        assert_eq!(result, "null");
+    }
+
+    #[test]
+    fn test_extract_prompt_array_value() {
+        let input = serde_json::json!(["a", "b"]);
+        let result = extract_prompt(&input);
+        assert!(result.contains('a'));
+    }
+
+    #[test]
+    fn test_extract_prompt_empty_object() {
+        let input = serde_json::json!({});
+        let result = extract_prompt(&input);
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_prompt_prefers_structured_over_prompt_field() {
+        // A2ATaskInput has prompt, context, mode fields.
+        let input = serde_json::json!({
+            "prompt": "structured prompt",
+            "context": {},
+            "mode": "text"
+        });
+        assert_eq!(extract_prompt(&input), "structured prompt");
+    }
+
+    #[test]
+    fn test_extract_prompt_message_over_json_fallback() {
+        let input = serde_json::json!({
+            "message": "msg field",
+            "other": "data"
+        });
+        assert_eq!(extract_prompt(&input), "msg field");
+    }
+
+    #[test]
+    fn test_build_task_system_prompt_with_multiple_context_keys() {
+        let input = serde_json::json!({
+            "prompt": "do stuff",
+            "context": {
+                "a": "1",
+                "b": "2",
+                "c": "3"
+            }
+        });
+        let prompt = build_task_system_prompt(&input);
+        assert!(prompt.contains("Task Context"));
+        assert!(prompt.contains("**a**"));
+        assert!(prompt.contains("**b**"));
+        assert!(prompt.contains("**c**"));
+    }
+
+    #[test]
+    fn test_build_task_system_prompt_null_context() {
+        let input = serde_json::json!({
+            "prompt": "hello",
+            "context": null
+        });
+        let prompt = build_task_system_prompt(&input);
+        assert!(!prompt.contains("Task Context"));
+    }
+
+    #[test]
+    fn test_build_task_system_prompt_context_is_string() {
+        let input = serde_json::json!({
+            "prompt": "hello",
+            "context": "not an object"
+        });
+        let prompt = build_task_system_prompt(&input);
+        assert!(!prompt.contains("Task Context"));
+    }
+
+    #[test]
+    fn test_task_lifecycle_pending_running_completed() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+        let task = make_task("lifecycle", A2ATaskStatus::Pending);
+        tasks.insert("lifecycle".to_string(), task);
+
+        // Step 1: Pending -> Running.
+        {
+            let mut entry = tasks.get_mut("lifecycle").unwrap();
+            assert_eq!(entry.status, A2ATaskStatus::Pending);
+            entry.status = A2ATaskStatus::Running;
+        }
+
+        // Step 2: Running -> Completed.
+        {
+            let mut entry = tasks.get_mut("lifecycle").unwrap();
+            assert_eq!(entry.status, A2ATaskStatus::Running);
+            entry.status = A2ATaskStatus::Completed;
+            entry.output = Some(serde_json::json!({"result": "done"}));
+        }
+
+        let entry = tasks.get("lifecycle").unwrap();
+        assert_eq!(entry.status, A2ATaskStatus::Completed);
+        assert!(entry.output.is_some());
+    }
+
+    #[test]
+    fn test_task_lifecycle_pending_running_failed() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+        let task = make_task("fail-life", A2ATaskStatus::Pending);
+        tasks.insert("fail-life".to_string(), task);
+
+        {
+            let mut entry = tasks.get_mut("fail-life").unwrap();
+            entry.status = A2ATaskStatus::Running;
+        }
+        {
+            let mut entry = tasks.get_mut("fail-life").unwrap();
+            entry.status = A2ATaskStatus::Failed("some error".to_string());
+        }
+
+        let entry = tasks.get("fail-life").unwrap();
+        assert!(matches!(entry.status, A2ATaskStatus::Failed(_)));
+    }
+
+    #[test]
+    fn test_failed_task_preserves_error_detail() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+        let task = make_task("err-detail", A2ATaskStatus::Running);
+        tasks.insert("err-detail".to_string(), task);
+
+        let error_msg = "rate limit exceeded: retry after 60s".to_string();
+        {
+            let mut entry = tasks.get_mut("err-detail").unwrap();
+            entry.status = A2ATaskStatus::Failed(error_msg.clone());
+        }
+
+        let entry = tasks.get("err-detail").unwrap();
+        match &entry.status {
+            A2ATaskStatus::Failed(msg) => assert_eq!(msg, &error_msg),
+            _ => panic!("expected Failed"),
+        }
+    }
+
+    #[test]
+    fn test_concurrent_task_isolation() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+
+        // Create independent tasks.
+        tasks.insert("t1".to_string(), make_task("t1", A2ATaskStatus::Pending));
+        tasks.insert("t2".to_string(), make_task("t2", A2ATaskStatus::Running));
+        tasks.insert("t3".to_string(), make_task("t3", A2ATaskStatus::Completed));
+
+        // Modifying one doesn't affect others.
+        {
+            let mut entry = tasks.get_mut("t1").unwrap();
+            entry.status = A2ATaskStatus::Running;
+        }
+
+        assert_eq!(tasks.get("t1").unwrap().status, A2ATaskStatus::Running);
+        assert_eq!(tasks.get("t2").unwrap().status, A2ATaskStatus::Running);
+        assert_eq!(tasks.get("t3").unwrap().status, A2ATaskStatus::Completed);
+    }
+
+    #[test]
+    fn test_task_output_with_structured_data() {
+        let output = A2ATaskOutput {
+            content: "Result text".to_string(),
+            data: Some(serde_json::json!({
+                "tokens_used": 500,
+                "iterations": 3,
+                "tool_calls": 2,
+            })),
+            mode: "text".to_string(),
+        };
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["content"], "Result text");
+        assert_eq!(json["data"]["tokens_used"], 500);
+        assert_eq!(json["data"]["iterations"], 3);
+    }
+
+    #[test]
+    fn test_task_removal() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+        tasks.insert("rm-task".to_string(), make_task("rm-task", A2ATaskStatus::Completed));
+
+        assert!(tasks.contains_key("rm-task"));
+        tasks.remove("rm-task");
+        assert!(!tasks.contains_key("rm-task"));
+    }
+
+    #[test]
+    fn test_task_updated_at_changes() {
+        let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
+        let task = make_task("time-task", A2ATaskStatus::Pending);
+        let original_time = task.updated_at;
+        tasks.insert("time-task".to_string(), task);
+
+        // Small sleep to ensure time difference.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        {
+            let mut entry = tasks.get_mut("time-task").unwrap();
+            entry.status = A2ATaskStatus::Running;
+            entry.updated_at = Utc::now();
+        }
+
+        let entry = tasks.get("time-task").unwrap();
+        assert!(entry.updated_at >= original_time);
+    }
 }

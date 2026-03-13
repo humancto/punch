@@ -326,4 +326,62 @@ mod tests {
         // In test (debug) builds, devtools should be enabled.
         assert!(wv.devtools);
     }
+
+    #[test]
+    fn ipc_message_empty_string() {
+        assert_eq!(
+            IpcMessage::parse(""),
+            IpcMessage::Unknown("".to_string())
+        );
+    }
+
+    #[test]
+    fn ipc_message_spawn_fighter_empty_template() {
+        assert_eq!(
+            IpcMessage::parse("spawn_fighter:"),
+            IpcMessage::SpawnFighter {
+                template: "".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn ipc_message_spawn_fighter_complex_template() {
+        assert_eq!(
+            IpcMessage::parse("spawn_fighter:code_reviewer_v2"),
+            IpcMessage::SpawnFighter {
+                template: "code_reviewer_v2".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn menu_item_equality() {
+        assert_eq!(MenuItem::Quit, MenuItem::Quit);
+        assert_ne!(MenuItem::Quit, MenuItem::Refresh);
+        assert_ne!(MenuItem::NewFighter, MenuItem::About);
+    }
+
+    #[test]
+    fn webview_window_config_default_url() {
+        let config = DesktopConfig::default();
+        let wv = WebviewWindowConfig::from_desktop_config(&config);
+        assert!(wv.url.starts_with("http://"));
+        assert!(wv.url.contains("theme="));
+    }
+
+    #[test]
+    fn webview_window_config_light_theme_url() {
+        let desktop = DesktopConfig {
+            theme: super::super::desktop::Theme::Light,
+            ..Default::default()
+        };
+        let wv = WebviewWindowConfig::from_desktop_config(&desktop);
+        assert!(wv.url.contains("theme=light"));
+    }
+
+    #[test]
+    fn window_title_constant() {
+        assert_eq!(WINDOW_TITLE, "Punch Agent OS");
+    }
 }

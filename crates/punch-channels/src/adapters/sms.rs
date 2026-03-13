@@ -287,4 +287,65 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_parse_webhook_no_from() {
+        let adapter = make_adapter();
+        let mut params = HashMap::new();
+        params.insert("Body".to_string(), "Hello".to_string());
+        assert!(adapter.parse_webhook_payload(&params).is_none());
+    }
+
+    #[test]
+    fn test_parse_webhook_no_body() {
+        let adapter = make_adapter();
+        let mut params = HashMap::new();
+        params.insert("From".to_string(), "+15559876543".to_string());
+        assert!(adapter.parse_webhook_payload(&params).is_none());
+    }
+
+    #[test]
+    fn test_parse_webhook_sms_metadata_to() {
+        let adapter = make_adapter();
+        let mut params = HashMap::new();
+        params.insert("From".to_string(), "+1555".to_string());
+        params.insert("To".to_string(), "+1666".to_string());
+        params.insert("Body".to_string(), "Hi".to_string());
+        let msg = adapter.parse_webhook_payload(&params).unwrap();
+        assert_eq!(msg.metadata.get("to").unwrap(), "+1666");
+    }
+
+    #[test]
+    fn test_parse_webhook_no_media() {
+        let adapter = make_adapter();
+        let mut params = HashMap::new();
+        params.insert("From".to_string(), "+1555".to_string());
+        params.insert("Body".to_string(), "Hi".to_string());
+        let msg = adapter.parse_webhook_payload(&params).unwrap();
+        assert!(msg.metadata.get("media_urls").is_none());
+    }
+
+    #[test]
+    fn test_parse_webhook_mms_single_media() {
+        let adapter = make_adapter();
+        let mut params = HashMap::new();
+        params.insert("From".to_string(), "+1555".to_string());
+        params.insert("Body".to_string(), "Photo".to_string());
+        params.insert("NumMedia".to_string(), "1".to_string());
+        params.insert("MediaUrl0".to_string(), "https://example.com/img.jpg".to_string());
+        let msg = adapter.parse_webhook_payload(&params).unwrap();
+        let media = msg.metadata.get("media_urls").unwrap().as_array().unwrap();
+        assert_eq!(media.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_webhook_message_counter() {
+        let adapter = make_adapter();
+        assert_eq!(adapter.status().messages_received, 0);
+        let mut params = HashMap::new();
+        params.insert("From".to_string(), "+1".to_string());
+        params.insert("Body".to_string(), "hi".to_string());
+        adapter.parse_webhook_payload(&params);
+        assert_eq!(adapter.status().messages_received, 1);
+    }
 }

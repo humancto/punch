@@ -707,4 +707,83 @@ mod tests {
             "completely different strings should have low similarity"
         );
     }
+
+    #[test]
+    fn test_levenshtein_both_empty() {
+        assert_eq!(levenshtein_distance("", ""), 0);
+    }
+
+    #[test]
+    fn test_levenshtein_substitutions() {
+        assert_eq!(levenshtein_distance("abc", "xyz"), 3);
+    }
+
+    #[test]
+    fn test_normalized_similarity_both_empty() {
+        let sim = normalized_similarity("", "");
+        assert!((sim - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_normalized_similarity_one_empty() {
+        let sim = normalized_similarity("hello", "");
+        assert!((sim - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_merge_values_empty() {
+        let (value, confidence) = MemoryConsolidator::merge_values(&[]);
+        assert!(value.is_empty());
+        assert!((confidence - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_merge_values_single() {
+        let (value, confidence) = MemoryConsolidator::merge_values(&[("only", 0.5)]);
+        assert_eq!(value, "only");
+        assert!((confidence - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_decay_custom_rate() {
+        let config = ConsolidationConfig {
+            decay_rate: 0.1,
+            ..ConsolidationConfig::default()
+        };
+        let c = MemoryConsolidator::new(config);
+        let result = c.apply_decay(1.0, 10.0);
+        // 1.0 * 0.9^10 ≈ 0.3486
+        assert!(result < 0.4);
+        assert!(result > 0.3);
+    }
+
+    #[test]
+    fn test_config_serde_roundtrip() {
+        let config = ConsolidationConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: ConsolidationConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.max_memories_per_fighter, config.max_memories_per_fighter);
+        assert_eq!(restored.max_age_days, config.max_age_days);
+    }
+
+    #[test]
+    fn test_result_serde_roundtrip() {
+        let result = ConsolidationResult {
+            memories_before: 100,
+            memories_after: 80,
+            merged: 5,
+            pruned: 15,
+            decayed: 90,
+            duration_ms: 42,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let restored: ConsolidationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.memories_before, 100);
+        assert_eq!(restored.pruned, 15);
+    }
+
+    #[test]
+    fn test_keys_similar_empty_strings() {
+        assert!(MemoryConsolidator::keys_are_similar("", ""));
+    }
 }

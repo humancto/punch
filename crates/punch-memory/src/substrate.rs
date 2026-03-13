@@ -137,3 +137,78 @@ impl MemorySubstrate {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_in_memory_creation() {
+        let substrate = MemorySubstrate::in_memory();
+        assert!(substrate.is_ok());
+    }
+
+    #[test]
+    fn test_no_embedding_store_by_default() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        assert!(!substrate.has_embedding_store());
+    }
+
+    #[test]
+    fn test_with_builtin_embeddings() {
+        let substrate = MemorySubstrate::in_memory()
+            .unwrap()
+            .with_builtin_embeddings()
+            .unwrap();
+        assert!(substrate.has_embedding_store());
+    }
+
+    #[test]
+    fn test_embed_and_store_without_store() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let result = substrate.embed_and_store("hello", HashMap::new()).unwrap();
+        assert!(result.is_none(), "no embedding store means None");
+    }
+
+    #[test]
+    fn test_semantic_search_without_store() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let result = substrate.semantic_search("hello", 5).unwrap();
+        assert!(result.is_none(), "no embedding store means None");
+    }
+
+    #[test]
+    fn test_embed_and_store_with_builtin() {
+        let substrate = MemorySubstrate::in_memory()
+            .unwrap()
+            .with_builtin_embeddings()
+            .unwrap();
+        let result = substrate.embed_and_store("test text", HashMap::new()).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_semantic_search_with_builtin() {
+        let substrate = MemorySubstrate::in_memory()
+            .unwrap()
+            .with_builtin_embeddings()
+            .unwrap();
+        substrate.embed_and_store("hello world", HashMap::new()).unwrap();
+        let results = substrate.semantic_search("hello", 5).unwrap();
+        assert!(results.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_conn_access() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let conn = substrate.conn().await;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(count > 0, "should have tables from migrations");
+    }
+}

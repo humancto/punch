@@ -268,3 +268,147 @@ mod hex {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_hmac_deterministic() {
+        let secret = b"my-shared-secret";
+        let data = b"hello world";
+        let sig1 = compute_hmac(secret, data);
+        let sig2 = compute_hmac(secret, data);
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn test_compute_hmac_different_data() {
+        let secret = b"my-shared-secret";
+        let sig1 = compute_hmac(secret, b"message A");
+        let sig2 = compute_hmac(secret, b"message B");
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn test_compute_hmac_different_keys() {
+        let data = b"same data";
+        let sig1 = compute_hmac(b"key-1", data);
+        let sig2 = compute_hmac(b"key-2", data);
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn test_verify_hmac_valid() {
+        let secret = b"shared-secret-42";
+        let data = b"payload data";
+        let sig = compute_hmac(secret, data);
+        assert!(verify_hmac(secret, data, &sig));
+    }
+
+    #[test]
+    fn test_verify_hmac_invalid_signature() {
+        let secret = b"shared-secret-42";
+        let data = b"payload data";
+        assert!(!verify_hmac(secret, data, "invalid-hex-signature"));
+    }
+
+    #[test]
+    fn test_verify_hmac_wrong_key() {
+        let data = b"payload data";
+        let sig = compute_hmac(b"correct-key", data);
+        assert!(!verify_hmac(b"wrong-key", data, &sig));
+    }
+
+    #[test]
+    fn test_verify_hmac_tampered_data() {
+        let secret = b"secret";
+        let sig = compute_hmac(secret, b"original");
+        assert!(!verify_hmac(secret, b"tampered", &sig));
+    }
+
+    #[test]
+    fn test_hmac_output_is_hex() {
+        let sig = compute_hmac(b"key", b"data");
+        // HMAC-SHA256 produces 32 bytes = 64 hex chars
+        assert_eq!(sig.len(), 64);
+        assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex::encode([0x00]), "00");
+        assert_eq!(hex::encode([0xff]), "ff");
+        assert_eq!(hex::encode([0xde, 0xad, 0xbe, 0xef]), "deadbeef");
+        assert_eq!(hex::encode([]), "");
+    }
+
+    #[test]
+    fn test_peer_serialization() {
+        let peer = Peer {
+            id: "peer-1".to_string(),
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            authenticated: true,
+        };
+        let json = serde_json::to_string(&peer).unwrap();
+        let deserialized: Peer = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "peer-1");
+        assert!(deserialized.authenticated);
+    }
+
+    #[test]
+    fn test_peer_message_serialization() {
+        let msg = PeerMessage {
+            from: "peer-a".to_string(),
+            to: "peer-b".to_string(),
+            payload: serde_json::json!({"action": "sync"}),
+            signature: "abc123".to_string(),
+            nonce: "nonce-value".to_string(),
+            timestamp: Utc::now(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: PeerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.from, "peer-a");
+        assert_eq!(deserialized.to, "peer-b");
+        assert_eq!(deserialized.payload["action"], "sync");
+    }
+
+    #[tokio::test]
+    async fn test_punch_protocol_creation() {
+        let proto = PunchProtocol::new("node-1".to_string(), b"secret".to_vec());
+        assert_eq!(proto.peer_id(), "node-1");
+    }
+
+    #[tokio::test]
+    async fn test_punch_protocol_empty_peers() {
+        let proto = PunchProtocol::new("node-1".to_string(), b"secret".to_vec());
+        let peers = proto.list_peers().await;
+        assert!(peers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_punch_protocol_empty_inbox() {
+        let proto = PunchProtocol::new("node-1".to_string(), b"secret".to_vec());
+        let messages = proto.receive().await;
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_send_message_unknown_peer() {
+        let proto = PunchProtocol::new("node-1".to_string(), b"secret".to_vec());
+        let result = proto
+            .send_message("nonexistent-peer", serde_json::json!({"hello": "world"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_peer_unauthenticated_default() {
+        let peer = Peer {
+            id: "new-peer".to_string(),
+            addr: "192.168.1.1:9090".parse().unwrap(),
+            authenticated: false,
+        };
+        assert!(!peer.authenticated);
+    }
+}

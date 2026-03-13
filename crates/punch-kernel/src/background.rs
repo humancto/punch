@@ -456,4 +456,228 @@ mod tests {
         let id = GorillaId::new();
         assert!(!executor.stop_gorilla(&id));
     }
+
+    #[test]
+    fn parse_schedule_raw_seconds() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("60"),
+            Some(std::time::Duration::from_secs(60))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_with_whitespace() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("  every  10s  "),
+            Some(std::time::Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_case_insensitive() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("Every 2H"),
+            Some(std::time::Duration::from_secs(7200))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_empty_string() {
+        assert_eq!(BackgroundExecutor::parse_schedule(""), None);
+    }
+
+    #[test]
+    fn parse_schedule_just_prefix() {
+        assert_eq!(BackgroundExecutor::parse_schedule("every "), None);
+    }
+
+    #[test]
+    fn default_creates_executor() {
+        let executor = BackgroundExecutor::default();
+        assert_eq!(executor.running_count(), 0);
+        assert!(executor.list_running().is_empty());
+    }
+
+    #[tokio::test]
+    async fn is_running_returns_correct_state() {
+        let executor = BackgroundExecutor::new();
+        let id = GorillaId::new();
+
+        assert!(!executor.is_running(&id));
+
+        let handle = tokio::spawn(async {
+            futures::future::pending::<()>().await;
+        });
+        executor.tasks.insert(
+            id,
+            GorillaTask {
+                handle,
+                started_at: Utc::now(),
+            },
+        );
+
+        assert!(executor.is_running(&id));
+        executor.stop_gorilla(&id);
+        assert!(!executor.is_running(&id));
+    }
+
+    #[tokio::test]
+    async fn multiple_gorillas_tracked_independently() {
+        let executor = BackgroundExecutor::new();
+        let ids: Vec<GorillaId> = (0..5).map(|_| GorillaId::new()).collect();
+
+        for &id in &ids {
+            let handle = tokio::spawn(async {
+                futures::future::pending::<()>().await;
+            });
+            executor.tasks.insert(
+                id,
+                GorillaTask {
+                    handle,
+                    started_at: Utc::now(),
+                },
+            );
+        }
+
+        assert_eq!(executor.running_count(), 5);
+
+        // Stop the first two.
+        executor.stop_gorilla(&ids[0]);
+        executor.stop_gorilla(&ids[1]);
+        assert_eq!(executor.running_count(), 3);
+
+        // The remaining three should still be running.
+        for &id in &ids[2..] {
+            assert!(executor.is_running(&id));
+        }
+
+        executor.shutdown_all();
+        assert_eq!(executor.running_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn with_shutdown_receives_shutdown_signal() {
+        let (tx, rx) = watch::channel(false);
+        let executor = BackgroundExecutor::with_shutdown(tx.clone(), rx);
+
+        let id = GorillaId::new();
+        let handle = tokio::spawn(async {
+            futures::future::pending::<()>().await;
+        });
+        executor.tasks.insert(
+            id,
+            GorillaTask {
+                handle,
+                started_at: Utc::now(),
+            },
+        );
+
+        assert_eq!(executor.running_count(), 1);
+        executor.shutdown_all();
+        assert_eq!(executor.running_count(), 0);
+    }
+
+    #[test]
+    fn fighter_manifest_from_gorilla_uses_default_model() {
+        use punch_types::{ModelConfig, Provider};
+
+        let manifest = GorillaManifest {
+            name: "test-gorilla".to_string(),
+            description: "A test gorilla".to_string(),
+            schedule: "every 30s".to_string(),
+            moves_required: Vec::new(),
+            settings_schema: None,
+            dashboard_metrics: Vec::new(),
+            system_prompt: Some("Custom prompt".to_string()),
+            model: None,
+            capabilities: Vec::new(),
+            weight_class: None,
+        };
+
+        let default_model = ModelConfig {
+            provider: Provider::Anthropic,
+            model: "claude-sonnet-4-20250514".to_string(),
+            api_key_env: None,
+            base_url: None,
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+        };
+
+        let fighter = fighter_manifest_from_gorilla(&manifest, &default_model);
+        assert_eq!(fighter.name, "test-gorilla");
+        assert_eq!(fighter.model.model, "claude-sonnet-4-20250514");
+        assert_eq!(fighter.system_prompt, "Custom prompt");
+        assert_eq!(fighter.weight_class, punch_types::WeightClass::Middleweight);
+    }
+
+    #[test]
+    fn fighter_manifest_from_gorilla_uses_gorilla_model_if_set() {
+        use punch_types::{ModelConfig, Provider};
+
+        let gorilla_model = ModelConfig {
+            provider: Provider::OpenAI,
+            model: "gpt-4o".to_string(),
+            api_key_env: None,
+            base_url: None,
+            max_tokens: Some(8192),
+            temperature: Some(0.5),
+        };
+
+        let manifest = GorillaManifest {
+            name: "smart-gorilla".to_string(),
+            description: "Uses its own model".to_string(),
+            schedule: "every 1h".to_string(),
+            moves_required: Vec::new(),
+            settings_schema: None,
+            dashboard_metrics: Vec::new(),
+            system_prompt: None,
+            model: Some(gorilla_model),
+            capabilities: Vec::new(),
+            weight_class: Some(punch_types::WeightClass::Heavyweight),
+        };
+
+        let default_model = ModelConfig {
+            provider: Provider::Anthropic,
+            model: "claude-sonnet-4-20250514".to_string(),
+            api_key_env: None,
+            base_url: None,
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+        };
+
+        let fighter = fighter_manifest_from_gorilla(&manifest, &default_model);
+        assert_eq!(fighter.model.model, "gpt-4o");
+        assert_eq!(fighter.weight_class, punch_types::WeightClass::Heavyweight);
+        // system_prompt falls back to description when None.
+        assert_eq!(fighter.system_prompt, "Uses its own model");
+    }
+
+    #[tokio::test]
+    async fn list_running_returns_all_ids() {
+        let executor = BackgroundExecutor::new();
+        let mut expected_ids = Vec::new();
+
+        for _ in 0..3 {
+            let id = GorillaId::new();
+            expected_ids.push(id);
+            let handle = tokio::spawn(async {
+                futures::future::pending::<()>().await;
+            });
+            executor.tasks.insert(
+                id,
+                GorillaTask {
+                    handle,
+                    started_at: Utc::now(),
+                },
+            );
+        }
+
+        let running = executor.list_running();
+        assert_eq!(running.len(), 3);
+        for id in &expected_ids {
+            assert!(running.contains(id));
+        }
+
+        executor.shutdown_all();
+    }
 }

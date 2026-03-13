@@ -1574,4 +1574,628 @@ mod tests {
         assert!(names.contains(&"browser_type"));
         assert!(names.contains(&"browser_content"));
     }
+
+    // -----------------------------------------------------------------------
+    // Tool definition correctness tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_file_read_definition() {
+        let t = file_read();
+        assert_eq!(t.name, "file_read");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        assert_eq!(t.input_schema["type"], "object");
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "path"));
+    }
+
+    #[test]
+    fn test_file_write_definition() {
+        let t = file_write();
+        assert_eq!(t.name, "file_write");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "path"));
+        assert!(required.iter().any(|v| v == "content"));
+    }
+
+    #[test]
+    fn test_file_list_definition() {
+        let t = file_list();
+        assert_eq!(t.name, "file_list");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        assert_eq!(t.input_schema["type"], "object");
+    }
+
+    #[test]
+    fn test_file_search_definition() {
+        let t = file_search();
+        assert_eq!(t.name, "file_search");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pattern"));
+    }
+
+    #[test]
+    fn test_file_info_definition() {
+        let t = file_info();
+        assert_eq!(t.name, "file_info");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "path"));
+    }
+
+    #[test]
+    fn test_patch_apply_definition() {
+        let t = patch_apply();
+        assert_eq!(t.name, "patch_apply");
+        assert_eq!(t.category, ToolCategory::FileSystem);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "path"));
+        assert!(required.iter().any(|v| v == "diff"));
+    }
+
+    #[test]
+    fn test_shell_exec_definition() {
+        let t = shell_exec();
+        assert_eq!(t.name, "shell_exec");
+        assert_eq!(t.category, ToolCategory::Shell);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "command"));
+    }
+
+    #[test]
+    fn test_web_fetch_definition() {
+        let t = web_fetch();
+        assert_eq!(t.name, "web_fetch");
+        assert_eq!(t.category, ToolCategory::Web);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "url"));
+    }
+
+    #[test]
+    fn test_web_search_definition() {
+        let t = web_search();
+        assert_eq!(t.name, "web_search");
+        assert_eq!(t.category, ToolCategory::Web);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "query"));
+    }
+
+    #[test]
+    fn test_memory_store_definition() {
+        let t = memory_store();
+        assert_eq!(t.name, "memory_store");
+        assert_eq!(t.category, ToolCategory::Memory);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "key"));
+        assert!(required.iter().any(|v| v == "value"));
+    }
+
+    #[test]
+    fn test_memory_recall_definition() {
+        let t = memory_recall();
+        assert_eq!(t.name, "memory_recall");
+        assert_eq!(t.category, ToolCategory::Memory);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "query"));
+    }
+
+    #[test]
+    fn test_knowledge_tools_definitions() {
+        let ae = knowledge_add_entity();
+        assert_eq!(ae.name, "knowledge_add_entity");
+        assert_eq!(ae.category, ToolCategory::Knowledge);
+        let required = ae.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "name"));
+        assert!(required.iter().any(|v| v == "entity_type"));
+
+        let ar = knowledge_add_relation();
+        assert_eq!(ar.name, "knowledge_add_relation");
+        let required = ar.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "from"));
+        assert!(required.iter().any(|v| v == "relation"));
+        assert!(required.iter().any(|v| v == "to"));
+
+        let kq = knowledge_query();
+        assert_eq!(kq.name, "knowledge_query");
+        let required = kq.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "query"));
+    }
+
+    #[test]
+    fn test_agent_tools_definitions() {
+        let spawn = agent_spawn();
+        assert_eq!(spawn.name, "agent_spawn");
+        assert_eq!(spawn.category, ToolCategory::Agent);
+        let required = spawn.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "name"));
+        assert!(required.iter().any(|v| v == "system_prompt"));
+
+        let msg = agent_message();
+        assert_eq!(msg.name, "agent_message");
+        assert_eq!(msg.category, ToolCategory::Agent);
+        let required = msg.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "message"));
+
+        let list = agent_list();
+        assert_eq!(list.name, "agent_list");
+        assert_eq!(list.category, ToolCategory::Agent);
+    }
+
+    #[test]
+    fn test_git_tools_definitions() {
+        let status = git_status();
+        assert_eq!(status.name, "git_status");
+        assert_eq!(status.category, ToolCategory::SourceControl);
+
+        let diff = git_diff();
+        assert_eq!(diff.name, "git_diff");
+
+        let log = git_log();
+        assert_eq!(log.name, "git_log");
+
+        let commit = git_commit();
+        assert_eq!(commit.name, "git_commit");
+        let required = commit.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "message"));
+
+        let branch = git_branch();
+        assert_eq!(branch.name, "git_branch");
+    }
+
+    #[test]
+    fn test_docker_tools_definitions() {
+        let ps = docker_ps();
+        assert_eq!(ps.name, "docker_ps");
+        assert_eq!(ps.category, ToolCategory::Container);
+
+        let run = docker_run();
+        assert_eq!(run.name, "docker_run");
+        let required = run.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "image"));
+
+        let build = docker_build();
+        assert_eq!(build.name, "docker_build");
+
+        let logs = docker_logs();
+        assert_eq!(logs.name, "docker_logs");
+        let required = logs.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "container"));
+    }
+
+    #[test]
+    fn test_http_tools_definitions() {
+        let req = http_request();
+        assert_eq!(req.name, "http_request");
+        assert_eq!(req.category, ToolCategory::Web);
+        let required = req.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "url"));
+
+        let post = http_post();
+        assert_eq!(post.name, "http_post");
+        let required = post.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "url"));
+        assert!(required.iter().any(|v| v == "json"));
+    }
+
+    #[test]
+    fn test_data_tools_definitions() {
+        let jq = json_query();
+        assert_eq!(jq.name, "json_query");
+        assert_eq!(jq.category, ToolCategory::Data);
+        let required = jq.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "data"));
+        assert!(required.iter().any(|v| v == "path"));
+
+        let jt = json_transform();
+        assert_eq!(jt.name, "json_transform");
+        let required = jt.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "data"));
+
+        let yp = yaml_parse();
+        assert_eq!(yp.name, "yaml_parse");
+        let required = yp.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "content"));
+
+        let rm = regex_match();
+        assert_eq!(rm.name, "regex_match");
+        let required = rm.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pattern"));
+        assert!(required.iter().any(|v| v == "text"));
+
+        let rr = regex_replace();
+        assert_eq!(rr.name, "regex_replace");
+        let required = rr.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pattern"));
+        assert!(required.iter().any(|v| v == "replacement"));
+        assert!(required.iter().any(|v| v == "text"));
+    }
+
+    #[test]
+    fn test_process_tools_definitions() {
+        let pl = process_list();
+        assert_eq!(pl.name, "process_list");
+        assert_eq!(pl.category, ToolCategory::Shell);
+
+        let pk = process_kill();
+        assert_eq!(pk.name, "process_kill");
+        let required = pk.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pid"));
+    }
+
+    #[test]
+    fn test_schedule_tools_definitions() {
+        let st = schedule_task();
+        assert_eq!(st.name, "schedule_task");
+        assert_eq!(st.category, ToolCategory::Schedule);
+        let required = st.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "name"));
+        assert!(required.iter().any(|v| v == "command"));
+        assert!(required.iter().any(|v| v == "delay_secs"));
+
+        let sl = schedule_list();
+        assert_eq!(sl.name, "schedule_list");
+
+        let sc = schedule_cancel();
+        assert_eq!(sc.name, "schedule_cancel");
+        let required = sc.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "task_id"));
+    }
+
+    #[test]
+    fn test_code_analysis_tools_definitions() {
+        let cs = code_search();
+        assert_eq!(cs.name, "code_search");
+        assert_eq!(cs.category, ToolCategory::CodeAnalysis);
+        let required = cs.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pattern"));
+
+        let sym = code_symbols();
+        assert_eq!(sym.name, "code_symbols");
+        let required = sym.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "path"));
+    }
+
+    #[test]
+    fn test_archive_tools_definitions() {
+        let ac = archive_create();
+        assert_eq!(ac.name, "archive_create");
+        assert_eq!(ac.category, ToolCategory::Archive);
+        let required = ac.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "output_path"));
+        assert!(required.iter().any(|v| v == "paths"));
+
+        let ae = archive_extract();
+        assert_eq!(ae.name, "archive_extract");
+        let required = ae.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "archive_path"));
+        assert!(required.iter().any(|v| v == "destination"));
+
+        let al = archive_list();
+        assert_eq!(al.name, "archive_list");
+        let required = al.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "archive_path"));
+    }
+
+    #[test]
+    fn test_template_render_definition() {
+        let t = template_render();
+        assert_eq!(t.name, "template_render");
+        assert_eq!(t.category, ToolCategory::Template);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "template"));
+        assert!(required.iter().any(|v| v == "variables"));
+    }
+
+    #[test]
+    fn test_crypto_tools_definitions() {
+        let hc = hash_compute();
+        assert_eq!(hc.name, "hash_compute");
+        assert_eq!(hc.category, ToolCategory::Crypto);
+
+        let hv = hash_verify();
+        assert_eq!(hv.name, "hash_verify");
+        let required = hv.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "expected"));
+    }
+
+    #[test]
+    fn test_env_tools_definitions() {
+        let eg = env_get();
+        assert_eq!(eg.name, "env_get");
+        assert_eq!(eg.category, ToolCategory::Shell);
+        let required = eg.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "name"));
+
+        let el = env_list();
+        assert_eq!(el.name, "env_list");
+    }
+
+    #[test]
+    fn test_text_tools_definitions() {
+        let td = text_diff();
+        assert_eq!(td.name, "text_diff");
+        assert_eq!(td.category, ToolCategory::Data);
+        let required = td.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "old_text"));
+        assert!(required.iter().any(|v| v == "new_text"));
+
+        let tc = text_count();
+        assert_eq!(tc.name, "text_count");
+        let required = tc.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "text"));
+    }
+
+    // -----------------------------------------------------------------------
+    // tools_for_capabilities tests per capability variant
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tools_for_file_read_capability() {
+        let caps = vec![Capability::FileRead("**".into())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"file_read"));
+        assert!(names.contains(&"file_list"));
+        assert!(names.contains(&"file_search"));
+        assert!(names.contains(&"file_info"));
+        assert!(!names.contains(&"file_write"));
+    }
+
+    #[test]
+    fn test_tools_for_file_write_capability() {
+        let caps = vec![Capability::FileWrite("**".into())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"file_write"));
+        assert!(names.contains(&"patch_apply"));
+        assert!(!names.contains(&"file_read"));
+    }
+
+    #[test]
+    fn test_tools_for_shell_exec_capability() {
+        let caps = vec![Capability::ShellExec("*".into())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"shell_exec"));
+        assert!(names.contains(&"process_list"));
+        assert!(names.contains(&"process_kill"));
+        assert!(names.contains(&"env_get"));
+        assert!(names.contains(&"env_list"));
+    }
+
+    #[test]
+    fn test_tools_for_network_capability() {
+        let caps = vec![Capability::Network("*".into())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"web_fetch"));
+        assert!(names.contains(&"web_search"));
+        assert!(names.contains(&"http_request"));
+        assert!(names.contains(&"http_post"));
+    }
+
+    #[test]
+    fn test_tools_for_memory_capability() {
+        let caps = vec![Capability::Memory];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"memory_store"));
+        assert!(names.contains(&"memory_recall"));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_tools_for_knowledge_graph_capability() {
+        let caps = vec![Capability::KnowledgeGraph];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"knowledge_add_entity"));
+        assert!(names.contains(&"knowledge_add_relation"));
+        assert!(names.contains(&"knowledge_query"));
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_tools_for_agent_spawn_capability() {
+        let caps = vec![Capability::AgentSpawn];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"agent_spawn"));
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_tools_for_agent_message_capability() {
+        let caps = vec![Capability::AgentMessage];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"agent_message"));
+        assert!(names.contains(&"agent_list"));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_tools_for_source_control_capability() {
+        let caps = vec![Capability::SourceControl];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"git_status"));
+        assert!(names.contains(&"git_diff"));
+        assert!(names.contains(&"git_log"));
+        assert!(names.contains(&"git_commit"));
+        assert!(names.contains(&"git_branch"));
+        assert_eq!(names.len(), 5);
+    }
+
+    #[test]
+    fn test_tools_for_container_capability() {
+        let caps = vec![Capability::Container];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"docker_ps"));
+        assert!(names.contains(&"docker_run"));
+        assert!(names.contains(&"docker_build"));
+        assert!(names.contains(&"docker_logs"));
+        assert_eq!(names.len(), 4);
+    }
+
+    #[test]
+    fn test_tools_for_data_manipulation_capability() {
+        let caps = vec![Capability::DataManipulation];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"json_query"));
+        assert!(names.contains(&"json_transform"));
+        assert!(names.contains(&"yaml_parse"));
+        assert!(names.contains(&"regex_match"));
+        assert!(names.contains(&"regex_replace"));
+        assert!(names.contains(&"text_diff"));
+        assert!(names.contains(&"text_count"));
+        assert_eq!(names.len(), 7);
+    }
+
+    #[test]
+    fn test_tools_for_schedule_capability() {
+        let caps = vec![Capability::Schedule];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"schedule_task"));
+        assert!(names.contains(&"schedule_list"));
+        assert!(names.contains(&"schedule_cancel"));
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_tools_for_code_analysis_capability() {
+        let caps = vec![Capability::CodeAnalysis];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"code_search"));
+        assert!(names.contains(&"code_symbols"));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_tools_for_archive_capability() {
+        let caps = vec![Capability::Archive];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"archive_create"));
+        assert!(names.contains(&"archive_extract"));
+        assert!(names.contains(&"archive_list"));
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_tools_for_template_capability() {
+        let caps = vec![Capability::Template];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"template_render"));
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_tools_for_crypto_capability() {
+        let caps = vec![Capability::Crypto];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"hash_compute"));
+        assert!(names.contains(&"hash_verify"));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_tools_for_empty_capabilities() {
+        let caps: Vec<Capability> = vec![];
+        let tools = tools_for_capabilities(&caps);
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_tools_for_event_publish_returns_empty() {
+        // EventPublish is in the _ => {} catch-all
+        let caps = vec![Capability::EventPublish];
+        let tools = tools_for_capabilities(&caps);
+        assert!(tools.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // push_unique dedup tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_push_unique_dedup() {
+        let mut tools = Vec::new();
+        push_unique(&mut tools, file_read());
+        push_unique(&mut tools, file_read());
+        push_unique(&mut tools, file_read());
+        assert_eq!(tools.len(), 1);
+    }
+
+    #[test]
+    fn test_push_unique_different_tools() {
+        let mut tools = Vec::new();
+        push_unique(&mut tools, file_read());
+        push_unique(&mut tools, file_write());
+        push_unique(&mut tools, shell_exec());
+        assert_eq!(tools.len(), 3);
+    }
+
+    #[test]
+    fn test_tools_for_multiple_capabilities_dedup() {
+        // FileRead + FileRead should not double-add tools
+        let caps = vec![
+            Capability::FileRead("src/**".into()),
+            Capability::FileRead("tests/**".into()),
+        ];
+        let tools = tools_for_capabilities(&caps);
+        let file_read_count = tools.iter().filter(|t| t.name == "file_read").count();
+        assert_eq!(file_read_count, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // all_tools tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_all_tools_count() {
+        let tools = all_tools();
+        // Count the items in the vec literal in all_tools()
+        assert!(
+            tools.len() >= 50,
+            "expected at least 50 tools, got {}",
+            tools.len()
+        );
+    }
+
+    #[test]
+    fn test_all_tools_unique_names() {
+        let tools = all_tools();
+        let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), original_len, "all_tools has duplicate names");
+    }
+
+    #[test]
+    fn test_all_tools_valid_schemas() {
+        let tools = all_tools();
+        for tool in &tools {
+            assert_eq!(
+                tool.input_schema["type"], "object",
+                "tool {} has non-object schema",
+                tool.name
+            );
+            assert!(!tool.name.is_empty(), "tool has empty name");
+            assert!(
+                !tool.description.is_empty(),
+                "tool {} has empty description",
+                tool.name
+            );
+        }
+    }
 }

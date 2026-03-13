@@ -472,4 +472,85 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_verify_webhook_signature_empty_body() {
+        let adapter = make_adapter();
+        let mut mac = HmacSha256::new_from_slice(b"webhook-secret-456").unwrap();
+        mac.update(b"");
+        let sig = format!("sha256={}", hex_encode(&mac.finalize().into_bytes()));
+        assert!(adapter.verify_webhook_signature(&sig, b""));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_no_prefix() {
+        let adapter = make_adapter();
+        assert!(!adapter.verify_webhook_signature("abc123", b"body"));
+    }
+
+    #[test]
+    fn test_parse_unknown_event_type() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "action": "created",
+            "comment": { "id": 1, "user": {"login": "a", "id": 1}, "body": "x", "created_at": "2024-01-01T00:00:00Z" }
+        });
+        assert!(adapter.parse_webhook_payload("push", &payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_issue_comment_empty_body() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "action": "created",
+            "issue": { "number": 1, "title": "T" },
+            "comment": { "id": 1, "user": {"login": "a", "id": 1}, "body": "", "created_at": "2024-01-01T00:00:00Z" }
+        });
+        assert!(adapter.parse_webhook_payload("issue_comment", &payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_pr_review_comment_empty_body() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "action": "created",
+            "pull_request": { "number": 1 },
+            "comment": { "id": 1, "user": {"login": "a", "id": 1}, "body": "", "created_at": "2024-01-01T00:00:00Z" }
+        });
+        assert!(adapter.parse_webhook_payload("pull_request_review_comment", &payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_issue_comment_metadata() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "action": "created",
+            "issue": { "number": 7, "title": "My Issue" },
+            "comment": { "id": 999, "user": {"login": "x", "id": 5}, "body": "hi", "created_at": "2024-01-01T00:00:00Z" }
+        });
+        let msg = adapter.parse_webhook_payload("issue_comment", &payload).unwrap();
+        assert_eq!(msg.metadata.get("event_type").unwrap(), "issue_comment");
+        assert_eq!(msg.metadata.get("issue_number").unwrap(), &serde_json::json!(7));
+        assert_eq!(msg.metadata.get("issue_title").unwrap(), "My Issue");
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex_encode(&[0x00, 0xff, 0xab]), "00ffab");
+    }
+
+    #[test]
+    fn test_constant_time_eq_same() {
+        assert!(constant_time_eq(b"hello", b"hello"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_length() {
+        assert!(!constant_time_eq(b"hello", b"hi"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_content() {
+        assert!(!constant_time_eq(b"hello", b"world"));
+    }
 }

@@ -230,4 +230,53 @@ mod tests {
         let app = DesktopApp::new(config);
         assert_eq!(app.config().port, 8080);
     }
+
+    #[test]
+    fn test_desktop_app_dashboard_url() {
+        let app = DesktopApp::new(DesktopConfig::default());
+        assert_eq!(
+            app.state().dashboard_url(),
+            "http://localhost:6660/dashboard"
+        );
+    }
+
+    #[test]
+    fn test_desktop_app_theme_setting() {
+        let config = DesktopConfig {
+            theme: Theme::System,
+            ..DesktopConfig::default()
+        };
+        let app = DesktopApp::new(config);
+        assert_eq!(app.state().theme, Theme::System);
+    }
+
+    #[test]
+    fn test_desktop_app_custom_port() {
+        let config = DesktopConfig {
+            port: 3000,
+            ..DesktopConfig::default()
+        };
+        let app = DesktopApp::new(config);
+        assert_eq!(app.state().arena_url, "http://localhost:3000");
+        assert_eq!(app.client().base_url(), "http://localhost:3000");
+    }
+
+    #[test]
+    fn test_desktop_app_no_auto_open() {
+        let config = DesktopConfig {
+            open_browser: false,
+            ..DesktopConfig::default()
+        };
+        let app = DesktopApp::new(config);
+        assert!(!app.state().auto_open_browser);
+    }
+
+    #[test]
+    fn test_desktop_config_api_key() {
+        let config = DesktopConfig {
+            api_key: Some("my-secret".to_string()),
+            ..DesktopConfig::default()
+        };
+        assert_eq!(config.api_key, Some("my-secret".to_string()));
+    }
 }

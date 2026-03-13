@@ -541,4 +541,46 @@ mod tests {
         config.theme = Theme::System;
         assert!(config.dashboard_url_with_theme().contains("theme=system"));
     }
+
+    #[test]
+    fn desktop_config_custom_host() {
+        let config = DesktopConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            ..Default::default()
+        };
+        assert_eq!(config.dashboard_url(), "http://0.0.0.0:8080");
+    }
+
+    #[test]
+    fn desktop_config_window_dimensions() {
+        let config = DesktopConfig {
+            window_width: 800,
+            window_height: 600,
+            ..Default::default()
+        };
+        assert_eq!(config.window_width, 800);
+        assert_eq!(config.window_height, 600);
+    }
+
+    #[test]
+    fn desktop_config_custom_title() {
+        let config = DesktopConfig {
+            window_title: "My Custom Title".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.window_title, "My Custom Title");
+    }
+
+    #[test]
+    fn desktop_app_config_reference() {
+        let config = DesktopConfig {
+            port: 4444,
+            auto_open_browser: false,
+            ..Default::default()
+        };
+        let app = DesktopApp::new(config);
+        assert_eq!(app.config().port, 4444);
+        assert!(!app.config().auto_open_browser);
+    }
 }

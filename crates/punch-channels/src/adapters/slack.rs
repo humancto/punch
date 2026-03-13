@@ -370,4 +370,88 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[tokio::test]
+    async fn test_parse_slack_event_empty_text() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        let payload = serde_json::json!({
+            "type": "event_callback",
+            "event": {
+                "type": "message",
+                "user": "U1",
+                "channel": "C1",
+                "text": "",
+                "ts": "1700000000.000100"
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_slack_event_wrong_type() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        let payload = serde_json::json!({
+            "type": "event_callback",
+            "event": {
+                "type": "reaction_added",
+                "user": "U1",
+                "channel": "C1",
+                "ts": "1700000000.000100"
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_slack_filters_own_bot_messages() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        adapter.set_bot_user_id("UBOTSELF".to_string()).await;
+
+        let payload = serde_json::json!({
+            "type": "event_callback",
+            "event": {
+                "type": "message",
+                "user": "UBOTSELF",
+                "channel": "C1",
+                "text": "My own msg",
+                "ts": "1700000000.000100"
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_slack_subtype_channel_leave() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        let payload = serde_json::json!({
+            "type": "event_callback",
+            "event": {
+                "type": "message",
+                "subtype": "channel_leave",
+                "user": "U1",
+                "channel": "C1",
+                "text": "left",
+                "ts": "1700000000.000100"
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
+
+    #[test]
+    fn test_check_url_verification_no_challenge() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        let payload = serde_json::json!({ "type": "url_verification" });
+        // No challenge field
+        assert!(adapter.check_url_verification(&payload).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_slack_not_event_callback() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+        let payload = serde_json::json!({
+            "type": "url_verification",
+            "challenge": "abc"
+        });
+        assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
 }

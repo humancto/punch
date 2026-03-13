@@ -321,4 +321,69 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_parse_whatsapp_empty_text() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "object": "whatsapp_business_account",
+            "entry": [{"id": "B", "changes": [{"value": {
+                "contacts": [{"profile": {"name": "A"}, "wa_id": "1"}],
+                "messages": [{"from": "1", "id": "w1", "timestamp": "1700000000",
+                    "type": "text", "text": {"body": ""}}]
+            }, "field": "messages"}]}]
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_whatsapp_no_contacts() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "object": "whatsapp_business_account",
+            "entry": [{"id": "B", "changes": [{"value": {
+                "messages": [{"from": "1234", "id": "w1", "timestamp": "1700000000",
+                    "type": "text", "text": {"body": "Hi"}}]
+            }, "field": "messages"}]}]
+        });
+        let msg = adapter.parse_webhook_payload(&payload).unwrap();
+        // display_name falls back to phone number
+        assert_eq!(msg.display_name, "1234");
+    }
+
+    #[test]
+    fn test_parse_whatsapp_status_field_ignored() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "object": "whatsapp_business_account",
+            "entry": [{"id": "B", "changes": [{"value": {
+                "statuses": [{"id": "s1"}]
+            }, "field": "statuses"}]}]
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_whatsapp_video_type_ignored() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "object": "whatsapp_business_account",
+            "entry": [{"id": "B", "changes": [{"value": {
+                "contacts": [{"profile": {"name": "A"}, "wa_id": "1"}],
+                "messages": [{"from": "1", "id": "w1", "timestamp": "1700000000",
+                    "type": "video", "video": {"id": "v1"}}]
+            }, "field": "messages"}]}]
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_whatsapp_empty_entry() {
+        let adapter = make_adapter();
+        let payload = serde_json::json!({
+            "object": "whatsapp_business_account",
+            "entry": []
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
 }

@@ -563,6 +563,132 @@ mod tests {
     }
 
     #[test]
+    fn test_marketplace_default() {
+        let mp = SkillMarketplace::default();
+        assert!(mp.installed_skills().is_empty());
+    }
+
+    #[test]
+    fn test_install_nonexistent() {
+        let mp = SkillMarketplace::new();
+        let id = Uuid::new_v4();
+        let result = mp.install(&id);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_uninstall_nonexistent() {
+        let mp = SkillMarketplace::new();
+        let id = Uuid::new_v4();
+        let result = mp.uninstall(&id);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_search_case_insensitive() {
+        let mp = SkillMarketplace::new();
+        mp.publish(sample_listing("MyTool", "code"));
+
+        let results = mp.search("mytool");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_search_no_match() {
+        let mp = SkillMarketplace::new();
+        mp.publish(sample_listing("alpha", "code"));
+
+        let results = mp.search("zzzzz");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_by_description() {
+        let mp = SkillMarketplace::new();
+        let listing = sample_listing("tool", "web");
+        mp.publish(listing);
+
+        let results = mp.search("skill for tool");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_installed_skills_list() {
+        let mp = SkillMarketplace::new();
+        let l1 = sample_listing("a", "code");
+        let l2 = sample_listing("b", "web");
+        let id1 = l1.id;
+        let id2 = l2.id;
+        mp.publish(l1);
+        mp.publish(l2);
+
+        mp.install(&id1).unwrap();
+        mp.install(&id2).unwrap();
+
+        let installed = mp.installed_skills();
+        assert_eq!(installed.len(), 2);
+    }
+
+    #[test]
+    fn test_install_count_increments() {
+        let mp = SkillMarketplace::new();
+        let listing = sample_listing("counter", "misc");
+        let id = listing.id;
+        mp.publish(listing);
+
+        mp.install(&id).unwrap();
+        let updated = mp.get(&id).unwrap();
+        assert_eq!(updated.install_count, 1);
+    }
+
+    #[test]
+    fn test_update_rating_nonexistent() {
+        let mp = SkillMarketplace::new();
+        // Should not panic
+        mp.update_rating(&Uuid::new_v4(), 3.0);
+    }
+
+    #[test]
+    fn test_skill_source_serde() {
+        let sources = vec![
+            SkillSource::Builtin,
+            SkillSource::Local(std::path::PathBuf::from("/tmp/skill")),
+            SkillSource::Remote("https://example.com/skill.wasm".to_string()),
+            SkillSource::Plugin(Uuid::new_v4()),
+        ];
+        for source in &sources {
+            let json = serde_json::to_string(source).unwrap();
+            let restored: SkillSource = serde_json::from_str(&json).unwrap();
+            // Just verify roundtrip doesn't panic
+            let _ = format!("{restored:?}");
+        }
+    }
+
+    #[test]
+    fn test_builtin_skills_have_tools() {
+        let skills = builtin_skills();
+        for skill in &skills {
+            assert!(
+                !skill.tool_definitions.is_empty(),
+                "builtin skill '{}' should have at least one tool",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_builtin_skills_all_builtin_source() {
+        let skills = builtin_skills();
+        for skill in &skills {
+            assert!(
+                matches!(skill.source, SkillSource::Builtin),
+                "builtin skill '{}' should have Builtin source",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
     fn test_get_by_id() {
         let mp = SkillMarketplace::new();
         let listing = sample_listing("findme", "code");

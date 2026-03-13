@@ -615,4 +615,183 @@ mod tests {
         assert!(!GuardVerdict::Block("test".into()).is_circuit_break());
         assert!(GuardVerdict::CircuitBreak("test".into()).is_circuit_break());
     }
+
+    // -----------------------------------------------------------------------
+    // Additional guard tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_guard_config_default() {
+        let config = GuardConfig::default();
+        assert_eq!(config.max_iterations, 50);
+        assert_eq!(config.warn_threshold, 3);
+        assert_eq!(config.block_threshold, 5);
+        assert_eq!(config.circuit_breaker_threshold, 30);
+    }
+
+    #[test]
+    fn test_loop_guard_new() {
+        let guard = LoopGuard::new(10, 5);
+        assert_eq!(guard.iterations(), 0);
+    }
+
+    #[test]
+    fn test_loop_guard_iterations_incremented_by_tool_calls() {
+        let mut guard = LoopGuard::new(50, 5);
+        let calls = vec![make_tool_call("test", serde_json::json!({}))];
+        guard.record_tool_calls(&calls);
+        assert_eq!(guard.iterations(), 1);
+    }
+
+    #[test]
+    fn test_loop_guard_iterations_incremented_by_record_iteration() {
+        let mut guard = LoopGuard::new(50, 5);
+        guard.record_iteration();
+        guard.record_iteration();
+        guard.record_iteration();
+        assert_eq!(guard.iterations(), 3);
+    }
+
+    #[test]
+    fn test_evaluate_call_first_call_is_allow() {
+        let mut guard = LoopGuard::new(50, 5);
+        let tc = make_tool_call("file_read", serde_json::json!({"path": "/tmp/test"}));
+        assert_eq!(guard.evaluate_call(&tc), GuardVerdict::Allow);
+    }
+
+    #[test]
+    fn test_evaluate_call_different_params_no_warn() {
+        let mut guard = LoopGuard::with_config(GuardConfig {
+            max_iterations: 50,
+            warn_threshold: 2,
+            block_threshold: 5,
+            circuit_breaker_threshold: 50,
+        });
+
+        let tc1 = make_tool_call("file_read", serde_json::json!({"path": "/a"}));
+        let tc2 = make_tool_call("file_read", serde_json::json!({"path": "/b"}));
+
+        assert_eq!(guard.evaluate_call(&tc1), GuardVerdict::Allow);
+        assert_eq!(guard.evaluate_call(&tc2), GuardVerdict::Allow);
+    }
+
+    #[test]
+    fn test_hash_call_deterministic() {
+        let tc = make_tool_call("test", serde_json::json!({"key": "value"}));
+        let h1 = hash_call(&tc);
+        let h2 = hash_call(&tc);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hash_call_different_for_different_inputs() {
+        let tc1 = make_tool_call("test", serde_json::json!({"key": "value1"}));
+        let tc2 = make_tool_call("test", serde_json::json!({"key": "value2"}));
+        assert_ne!(hash_call(&tc1), hash_call(&tc2));
+    }
+
+    #[test]
+    fn test_hash_outcome_deterministic() {
+        let tc = make_tool_call("test", serde_json::json!({}));
+        let h1 = hash_outcome(&tc, "result");
+        let h2 = hash_outcome(&tc, "result");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hash_outcome_different_for_different_results() {
+        let tc = make_tool_call("test", serde_json::json!({}));
+        assert_ne!(hash_outcome(&tc, "result1"), hash_outcome(&tc, "result2"));
+    }
+
+    #[test]
+    fn test_outcome_blocked_only_after_two() {
+        let mut guard = LoopGuard::new(50, 5);
+        let tc = make_tool_call("test", serde_json::json!({}));
+
+        assert!(!guard.is_outcome_blocked(&tc, "result"));
+        guard.record_outcome(&tc, "result");
+        assert!(!guard.is_outcome_blocked(&tc, "result"));
+        guard.record_outcome(&tc, "result");
+        assert!(guard.is_outcome_blocked(&tc, "result"));
+    }
+
+    #[test]
+    fn test_no_ping_pong_with_three_calls() {
+        let mut guard = LoopGuard::with_config(GuardConfig {
+            max_iterations: 50,
+            warn_threshold: 10,
+            block_threshold: 20,
+            circuit_breaker_threshold: 50,
+        });
+
+        let call_a = vec![make_tool_call("a", serde_json::json!({}))];
+        let call_b = vec![make_tool_call("b", serde_json::json!({}))];
+
+        // Only A, B, A -- not enough for ping-pong (need 4)
+        assert_eq!(guard.record_tool_calls(&call_a), LoopGuardVerdict::Continue);
+        assert_eq!(guard.record_tool_calls(&call_b), LoopGuardVerdict::Continue);
+        assert_eq!(guard.record_tool_calls(&call_a), LoopGuardVerdict::Continue);
+    }
+
+    #[test]
+    fn test_no_ping_pong_same_call_repeated() {
+        let mut guard = LoopGuard::with_config(GuardConfig {
+            max_iterations: 50,
+            warn_threshold: 10,
+            block_threshold: 20,
+            circuit_breaker_threshold: 50,
+        });
+
+        let call_a = vec![make_tool_call("a", serde_json::json!({}))];
+
+        // A, A, A, A is not a ping-pong pattern (needs A != B)
+        for _ in 0..4 {
+            guard.record_tool_calls(&call_a);
+        }
+        // Should not break due to ping-pong (might warn for repetition)
+    }
+
+    #[test]
+    fn test_loop_guard_verdict_continue_equality() {
+        assert_eq!(LoopGuardVerdict::Continue, LoopGuardVerdict::Continue);
+    }
+
+    #[test]
+    fn test_loop_guard_verdict_break_equality() {
+        assert_eq!(
+            LoopGuardVerdict::Break("reason".into()),
+            LoopGuardVerdict::Break("reason".into())
+        );
+        assert_ne!(
+            LoopGuardVerdict::Break("reason1".into()),
+            LoopGuardVerdict::Break("reason2".into())
+        );
+    }
+
+    #[test]
+    fn test_effective_thresholds_normal_tool() {
+        let guard = LoopGuard::with_config(GuardConfig {
+            max_iterations: 50,
+            warn_threshold: 3,
+            block_threshold: 5,
+            circuit_breaker_threshold: 30,
+        });
+        let (warn, block) = guard.effective_thresholds("file_read");
+        assert_eq!(warn, 3);
+        assert_eq!(block, 5);
+    }
+
+    #[test]
+    fn test_effective_thresholds_poll_tool() {
+        let guard = LoopGuard::with_config(GuardConfig {
+            max_iterations: 50,
+            warn_threshold: 3,
+            block_threshold: 5,
+            circuit_breaker_threshold: 30,
+        });
+        let (warn, block) = guard.effective_thresholds("shell_exec");
+        assert_eq!(warn, 9); // 3 * 3
+        assert_eq!(block, 15); // 5 * 3
+    }
 }

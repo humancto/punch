@@ -531,4 +531,244 @@ mod tests {
             assert!(state.tasks.get(&id).is_some());
         }
     }
+
+    #[test]
+    fn test_unknown_task_not_found() {
+        let state = test_a2a_state();
+        assert!(state.tasks.get("nonexistent-task-id").is_none());
+    }
+
+    #[test]
+    fn test_task_with_output() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "task-with-output".to_string(),
+            status: A2ATaskStatus::Completed,
+            input: serde_json::json!({"prompt": "generate"}),
+            output: Some(serde_json::json!({"result": "generated text", "tokens": 42})),
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+
+        let found = state.tasks.get("task-with-output").unwrap();
+        assert_eq!(found.status, A2ATaskStatus::Completed);
+        assert!(found.output.is_some());
+        assert_eq!(found.output.as_ref().unwrap()["tokens"], 42);
+    }
+
+    #[test]
+    fn test_cancel_pending_task() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "pending-cancel".to_string(),
+            status: A2ATaskStatus::Pending,
+            input: serde_json::json!({}),
+            output: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+
+        // Pending tasks should be cancellable
+        {
+            let entry = state.tasks.get("pending-cancel").unwrap();
+            assert!(matches!(
+                entry.status,
+                A2ATaskStatus::Pending | A2ATaskStatus::Running
+            ));
+        }
+
+        // Cancel it
+        {
+            let mut entry = state.tasks.get_mut("pending-cancel").unwrap();
+            entry.status = A2ATaskStatus::Cancelled;
+        }
+
+        let found = state.tasks.get("pending-cancel").unwrap();
+        assert_eq!(found.status, A2ATaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_remove_agent_response_serialization() {
+        let resp = RemoveAgentResponse {
+            removed: true,
+            agent_id: "remote-agent-1".to_string(),
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        assert!(json.contains("true"));
+        assert!(json.contains("remote-agent-1"));
+    }
+
+    #[test]
+    fn test_remove_agent_response_not_found() {
+        let resp = RemoveAgentResponse {
+            removed: false,
+            agent_id: "missing-agent".to_string(),
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        assert!(json.contains("false"));
+    }
+
+    #[test]
+    fn test_registry_discover_unknown_agent() {
+        let state = test_a2a_state();
+        assert!(state.registry.discover("nonexistent-agent").is_none());
+    }
+
+    #[test]
+    fn test_registry_multiple_agents() {
+        let state = test_a2a_state();
+
+        for i in 0..3 {
+            let card = AgentCard {
+                name: format!("agent-{i}"),
+                description: format!("Agent {i}"),
+                url: format!("http://agent-{i}:4000"),
+                version: "1.0.0".to_string(),
+                capabilities: vec![],
+                input_modes: vec!["text".to_string()],
+                output_modes: vec!["text".to_string()],
+                authentication: None,
+            };
+            state.registry.register(card);
+        }
+
+        assert_eq!(state.registry.list().len(), 3);
+
+        for i in 0..3 {
+            let name = format!("agent-{i}");
+            assert!(state.registry.discover(&name).is_some());
+        }
+    }
+
+    #[test]
+    fn test_a2a_state_clone() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "clone-task".to_string(),
+            status: A2ATaskStatus::Pending,
+            input: serde_json::json!({}),
+            output: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+
+        // Clone shares the same underlying Arc
+        let cloned = state.clone();
+        assert_eq!(cloned.tasks.len(), 1);
+        assert_eq!(cloned.local_card.name, "test-agent");
+    }
+
+    #[test]
+    fn test_task_updated_at_changes() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "timestamp-test".to_string(),
+            status: A2ATaskStatus::Pending,
+            input: serde_json::json!({}),
+            output: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+
+        let original_updated = {
+            let t = state.tasks.get("timestamp-test").unwrap();
+            t.updated_at
+        };
+
+        // Simulate status change
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        {
+            let mut t = state.tasks.get_mut("timestamp-test").unwrap();
+            t.status = A2ATaskStatus::Running;
+            t.updated_at = Utc::now();
+        }
+
+        let new_updated = {
+            let t = state.tasks.get("timestamp-test").unwrap();
+            t.updated_at
+        };
+
+        assert!(new_updated > original_updated);
+    }
+
+    #[test]
+    fn test_task_removal() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "removable".to_string(),
+            status: A2ATaskStatus::Pending,
+            input: serde_json::json!({}),
+            output: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+        assert_eq!(state.tasks.len(), 1);
+
+        state.tasks.remove("removable");
+        assert_eq!(state.tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_send_task_request_complex_input() {
+        let json = r#"{"input": {"messages": [{"role": "user", "content": "hello"}], "config": {"temperature": 0.7}}}"#;
+        let req: SendTaskRequest = serde_json::from_str(json).expect("deserialize");
+        assert!(req.input["messages"].is_array());
+        assert_eq!(req.input["config"]["temperature"], 0.7);
+    }
+
+    #[test]
+    fn test_agent_card_capabilities() {
+        let card = AgentCard {
+            name: "multi-cap-agent".to_string(),
+            description: "Agent with multiple capabilities".to_string(),
+            url: "http://localhost:5000".to_string(),
+            version: "2.0.0".to_string(),
+            capabilities: vec![
+                "code_review".to_string(),
+                "testing".to_string(),
+                "deployment".to_string(),
+            ],
+            input_modes: vec!["text".to_string(), "json".to_string()],
+            output_modes: vec!["text".to_string(), "json".to_string()],
+            authentication: None,
+        };
+
+        assert_eq!(card.capabilities.len(), 3);
+        assert!(card.capabilities.contains(&"code_review".to_string()));
+        assert_eq!(card.input_modes.len(), 2);
+        assert_eq!(card.output_modes.len(), 2);
+    }
+
+    #[test]
+    fn test_failed_task_status() {
+        let state = test_a2a_state();
+        let now = Utc::now();
+        let task = A2ATask {
+            id: "failed-task".to_string(),
+            status: A2ATaskStatus::Failed("model timeout".to_string()),
+            input: serde_json::json!({"prompt": "something"}),
+            output: Some(serde_json::json!({"error": "model timeout"})),
+            created_at: now,
+            updated_at: now,
+        };
+        state.tasks.insert(task.id.clone(), task);
+
+        let found = state.tasks.get("failed-task").unwrap();
+        assert!(matches!(found.status, A2ATaskStatus::Failed(_)));
+        // Failed tasks should not be cancellable
+        assert!(!matches!(
+            found.status,
+            A2ATaskStatus::Pending | A2ATaskStatus::Running
+        ));
+    }
 }

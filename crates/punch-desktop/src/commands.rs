@@ -392,4 +392,79 @@ mod tests {
         };
         assert_eq!(err.to_string(), "arena error (404): not found");
     }
+
+    #[test]
+    fn test_arena_client_url_construction_fighters() {
+        let client = ArenaClient::new("http://localhost:6660");
+        // Verify base_url is stored correctly for URL building
+        assert_eq!(client.base_url(), "http://localhost:6660");
+        // The URL format should be {base_url}/api/fighters
+        let expected = format!("{}/api/fighters", client.base_url());
+        assert_eq!(expected, "http://localhost:6660/api/fighters");
+    }
+
+    #[test]
+    fn test_arena_client_url_construction_gorillas() {
+        let client = ArenaClient::new("http://localhost:6660");
+        let expected = format!("{}/api/gorillas", client.base_url());
+        assert_eq!(expected, "http://localhost:6660/api/gorillas");
+    }
+
+    #[test]
+    fn test_arena_client_url_construction_status() {
+        let client = ArenaClient::new("http://localhost:6660");
+        let expected = format!("{}/api/status", client.base_url());
+        assert_eq!(expected, "http://localhost:6660/api/status");
+    }
+
+    #[test]
+    fn test_arena_client_url_construction_health() {
+        let client = ArenaClient::new("http://localhost:6660");
+        let expected = format!("{}/health", client.base_url());
+        assert_eq!(expected, "http://localhost:6660/health");
+    }
+
+    #[test]
+    fn test_arena_client_url_construction_message() {
+        let client = ArenaClient::new("http://localhost:6660");
+        let id = FighterId(uuid::Uuid::nil());
+        let expected = format!("{}/api/fighters/{}/message", client.base_url(), id);
+        assert!(expected.contains("/api/fighters/"));
+        assert!(expected.contains("/message"));
+    }
+
+    #[tokio::test]
+    async fn test_get_config_strips_http_prefix() {
+        let client = ArenaClient::new("http://127.0.0.1:6660");
+        let config = client.get_config().await.unwrap();
+        assert_eq!(config.api_listen, "127.0.0.1:6660");
+    }
+
+    #[tokio::test]
+    async fn test_get_config_handles_no_prefix() {
+        let client = ArenaClient::new("localhost:6660");
+        let config = client.get_config().await.unwrap();
+        assert_eq!(config.api_listen, "localhost:6660");
+    }
+
+    #[test]
+    fn test_command_error_deserialize() {
+        let err = CommandError::Deserialize("invalid JSON".to_string());
+        assert_eq!(err.to_string(), "deserialization error: invalid JSON");
+    }
+
+    #[tokio::test]
+    async fn test_spawn_fighter_unreachable() {
+        let client = ArenaClient::new("http://127.0.0.1:19999");
+        let result = client.spawn_fighter("test", "You are a test.").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_send_message_unreachable() {
+        let client = ArenaClient::new("http://127.0.0.1:19999");
+        let id = FighterId(uuid::Uuid::nil());
+        let result = client.send_message(&id, "hello").await;
+        assert!(result.is_err());
+    }
 }

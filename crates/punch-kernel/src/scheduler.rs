@@ -271,4 +271,154 @@ mod tests {
         assert!(!scheduler.check_quota(&a));
         assert!(scheduler.check_quota(&b));
     }
+
+    #[test]
+    fn default_quota_config() {
+        let config = QuotaConfig::default();
+        assert_eq!(config.tokens_per_hour, 1_000_000);
+        assert_eq!(config.messages_per_hour, 500);
+    }
+
+    #[test]
+    fn check_quota_creates_entry_if_missing() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+        // First check should create entry and return true (within quota).
+        assert!(scheduler.check_quota(&id));
+        // Second check should still work.
+        assert!(scheduler.check_quota(&id));
+    }
+
+    #[test]
+    fn token_quota_just_under_limit_passes() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+
+        scheduler.record_usage(&id, 999);
+        assert!(scheduler.check_quota(&id));
+    }
+
+    #[test]
+    fn message_quota_just_under_limit_passes() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+
+        for _ in 0..4 {
+            scheduler.record_usage(&id, 0);
+        }
+
+        assert!(scheduler.check_quota(&id));
+    }
+
+    #[test]
+    fn both_quotas_can_exceed_independently() {
+        // Exceed only tokens.
+        let scheduler = Scheduler::new(test_config());
+        let id_tok = FighterId::new();
+        scheduler.record_usage(&id_tok, 1001);
+        assert!(!scheduler.check_quota(&id_tok));
+
+        // Exceed only messages (with zero tokens each).
+        let scheduler2 = Scheduler::new(test_config());
+        let id_msg = FighterId::new();
+        for _ in 0..5 {
+            scheduler2.record_usage(&id_msg, 0);
+        }
+        assert!(!scheduler2.check_quota(&id_msg));
+    }
+
+    #[test]
+    fn remove_fighter_allows_reuse_of_quota() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+
+        scheduler.record_usage(&id, 1000);
+        assert!(!scheduler.check_quota(&id));
+
+        scheduler.remove_fighter(&id);
+        assert!(scheduler.check_quota(&id));
+
+        // Can record usage again.
+        scheduler.record_usage(&id, 500);
+        assert!(scheduler.check_quota(&id));
+    }
+
+    #[test]
+    fn cleanup_with_no_entries_does_not_panic() {
+        let scheduler = Scheduler::new(test_config());
+        scheduler.cleanup();
+    }
+
+    #[test]
+    fn multiple_fighters_cleanup() {
+        let config = QuotaConfig {
+            tokens_per_hour: 1000,
+            messages_per_hour: 100,
+            window: Duration::zero(),
+        };
+        let scheduler = Scheduler::new(config);
+
+        let ids: Vec<FighterId> = (0..5).map(|_| FighterId::new()).collect();
+        for id in &ids {
+            scheduler.record_usage(id, 100);
+        }
+
+        scheduler.cleanup();
+
+        // All should be cleaned up since window is zero.
+        for id in &ids {
+            assert!(scheduler.check_quota(id));
+        }
+    }
+
+    #[test]
+    fn concurrent_quota_checks_are_safe() {
+        use std::sync::Arc;
+        use std::thread;
+
+        // Use generous limits so concurrent access doesn't exceed them.
+        let config = QuotaConfig {
+            tokens_per_hour: 1_000_000,
+            messages_per_hour: 1_000,
+            window: Duration::hours(1),
+        };
+        let scheduler = Arc::new(Scheduler::new(config));
+        let id = FighterId::new();
+
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let sched = Arc::clone(&scheduler);
+            let fid = id;
+            handles.push(thread::spawn(move || {
+                sched.record_usage(&fid, 10);
+                sched.check_quota(&fid);
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Should still be within quota (10 records of 10 tokens = 100 tokens, 10 messages).
+        assert!(scheduler.check_quota(&id));
+    }
+
+    #[test]
+    fn remove_nonexistent_fighter_does_not_panic() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+        scheduler.remove_fighter(&id); // Should not panic.
+    }
+
+    #[test]
+    fn accumulating_usage_reaches_limit() {
+        let scheduler = Scheduler::new(test_config());
+        let id = FighterId::new();
+
+        // Record 200 tokens 5 times = 1000, which should hit the limit.
+        for _ in 0..5 {
+            scheduler.record_usage(&id, 200);
+        }
+        assert!(!scheduler.check_quota(&id));
+    }
 }

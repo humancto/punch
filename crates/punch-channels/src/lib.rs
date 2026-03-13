@@ -319,4 +319,210 @@ mod tests {
         assert_eq!(deserialized.platform, ChannelPlatform::Telegram);
         assert_eq!(deserialized.user_id, "user1");
     }
+
+    // --- NEW: split_message edge cases ---
+
+    #[test]
+    fn test_split_message_empty_string() {
+        let chunks = split_message("", 100);
+        assert_eq!(chunks, vec![""]);
+    }
+
+    #[test]
+    fn test_split_message_exact_boundary() {
+        let text = "12345";
+        let chunks = split_message(text, 5);
+        assert_eq!(chunks, vec!["12345"]);
+    }
+
+    #[test]
+    fn test_split_message_one_over_boundary() {
+        let text = "123456";
+        let chunks = split_message(text, 5);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len() + chunks[1].len(), 6);
+    }
+
+    #[test]
+    fn test_split_message_no_newlines() {
+        let text = "abcdefghijklmnopqrstuvwxyz";
+        let chunks = split_message(text, 10);
+        // Should split at max_len boundaries since no newlines
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 10);
+        }
+    }
+
+    #[test]
+    fn test_split_message_unicode() {
+        let text = "Hello \u{1F600} World \u{1F600} Test";
+        let chunks = split_message(text, 100);
+        assert_eq!(chunks, vec![text]);
+    }
+
+    #[test]
+    fn test_split_message_crlf_newlines() {
+        // split_message splits on \n, so \r remains attached to each line
+        let text = "line1\r\nline2\r\nline3";
+        let chunks = split_message(text, 10);
+        assert_eq!(chunks, vec!["line1\r", "line2\r", "line3"]);
+    }
+
+    #[test]
+    fn test_split_message_consecutive_newlines() {
+        let text = "line1\n\nline3";
+        let chunks = split_message(text, 8);
+        // Should handle the empty line between
+        assert!(chunks.len() >= 2);
+    }
+
+    // --- NEW: IncomingMessage field access ---
+
+    #[test]
+    fn test_incoming_message_field_access() {
+        let ts = Utc::now();
+        let mut meta = HashMap::new();
+        meta.insert("key".to_string(), serde_json::json!("value"));
+
+        let msg = IncomingMessage {
+            channel_id: "ch42".to_string(),
+            user_id: "u99".to_string(),
+            display_name: "Bob".to_string(),
+            text: "Test message".to_string(),
+            timestamp: ts,
+            platform: ChannelPlatform::Discord,
+            platform_message_id: "msg-555".to_string(),
+            is_group: true,
+            metadata: meta,
+        };
+
+        assert_eq!(msg.channel_id, "ch42");
+        assert_eq!(msg.user_id, "u99");
+        assert_eq!(msg.display_name, "Bob");
+        assert_eq!(msg.text, "Test message");
+        assert_eq!(msg.platform, ChannelPlatform::Discord);
+        assert_eq!(msg.platform_message_id, "msg-555");
+        assert!(msg.is_group);
+        assert_eq!(msg.metadata.get("key").unwrap(), &serde_json::json!("value"));
+    }
+
+    #[test]
+    fn test_incoming_message_default_is_group() {
+        // is_group defaults to false with serde
+        let json = r#"{
+            "channel_id":"c","user_id":"u","display_name":"n",
+            "text":"t","timestamp":"2024-01-01T00:00:00Z",
+            "platform":"telegram","platform_message_id":"1"
+        }"#;
+        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        assert!(!msg.is_group);
+    }
+
+    #[test]
+    fn test_incoming_message_default_metadata() {
+        let json = r#"{
+            "channel_id":"c","user_id":"u","display_name":"n",
+            "text":"t","timestamp":"2024-01-01T00:00:00Z",
+            "platform":"discord","platform_message_id":"1"
+        }"#;
+        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.metadata.is_empty());
+    }
+
+    // --- NEW: ChannelStatus defaults ---
+
+    #[test]
+    fn test_channel_status_defaults() {
+        let status = ChannelStatus::default();
+        assert!(!status.connected);
+        assert!(status.started_at.is_none());
+        assert_eq!(status.messages_received, 0);
+        assert_eq!(status.messages_sent, 0);
+        assert!(status.last_error.is_none());
+    }
+
+    // --- NEW: ChannelPlatform display for all variants ---
+
+    #[test]
+    fn test_channel_platform_display_all() {
+        assert_eq!(ChannelPlatform::WhatsApp.to_string(), "whatsapp");
+        assert_eq!(ChannelPlatform::Signal.to_string(), "signal");
+        assert_eq!(ChannelPlatform::Matrix.to_string(), "matrix");
+        assert_eq!(ChannelPlatform::Email.to_string(), "email");
+        assert_eq!(ChannelPlatform::Teams.to_string(), "teams");
+        assert_eq!(ChannelPlatform::Irc.to_string(), "irc");
+        assert_eq!(ChannelPlatform::Mastodon.to_string(), "mastodon");
+        assert_eq!(ChannelPlatform::Reddit.to_string(), "reddit");
+        assert_eq!(ChannelPlatform::Twitch.to_string(), "twitch");
+        assert_eq!(ChannelPlatform::GitHub.to_string(), "github");
+        assert_eq!(ChannelPlatform::Line.to_string(), "line");
+        assert_eq!(ChannelPlatform::WebChat.to_string(), "webchat");
+        assert_eq!(ChannelPlatform::GoogleChat.to_string(), "google_chat");
+        assert_eq!(ChannelPlatform::Bluesky.to_string(), "bluesky");
+        assert_eq!(ChannelPlatform::LinkedIn.to_string(), "linkedin");
+        assert_eq!(ChannelPlatform::Sms.to_string(), "sms");
+        assert_eq!(ChannelPlatform::DingTalk.to_string(), "dingtalk");
+        assert_eq!(ChannelPlatform::Feishu.to_string(), "feishu");
+        assert_eq!(ChannelPlatform::Nostr.to_string(), "nostr");
+        assert_eq!(ChannelPlatform::Mattermost.to_string(), "mattermost");
+        assert_eq!(ChannelPlatform::Zulip.to_string(), "zulip");
+        assert_eq!(ChannelPlatform::RocketChat.to_string(), "rocketchat");
+    }
+
+    // --- NEW: ChannelPlatform serde ---
+
+    #[test]
+    fn test_channel_platform_serde_roundtrip() {
+        let platforms = vec![
+            ChannelPlatform::Telegram,
+            ChannelPlatform::Discord,
+            ChannelPlatform::Custom("test".to_string()),
+        ];
+        for p in platforms {
+            let json = serde_json::to_string(&p).unwrap();
+            let deserialized: ChannelPlatform = serde_json::from_str(&json).unwrap();
+            assert_eq!(p, deserialized);
+        }
+    }
+
+    // --- NEW: ChannelBridge tests ---
+
+    #[tokio::test]
+    async fn test_channel_bridge_new_has_no_adapters() {
+        let bridge = ChannelBridge::new();
+        let adapters = bridge.list_adapters().await;
+        assert!(adapters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_channel_bridge_default() {
+        let bridge = ChannelBridge::default();
+        let adapters = bridge.list_adapters().await;
+        assert!(adapters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_channel_bridge_send_message_unknown_adapter() {
+        let bridge = ChannelBridge::new();
+        let result = bridge.send_message("nonexistent", "ch1", "hello").await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_channel_status_serde() {
+        let status = ChannelStatus {
+            connected: true,
+            started_at: Some(Utc::now()),
+            messages_received: 42,
+            messages_sent: 10,
+            last_error: Some("test error".to_string()),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let restored: ChannelStatus = serde_json::from_str(&json).unwrap();
+        assert!(restored.connected);
+        assert_eq!(restored.messages_received, 42);
+        assert_eq!(restored.messages_sent, 10);
+        assert_eq!(restored.last_error, Some("test error".to_string()));
+    }
 }

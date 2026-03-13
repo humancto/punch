@@ -276,4 +276,54 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_parse_incoming_email_subject_only() {
+        let adapter = EmailAdapter::new(make_config());
+        let msg = adapter
+            .parse_incoming_email("a@b.com", "A", "Subject only", "", "m1", None)
+            .unwrap();
+        assert_eq!(msg.text, "Subject only");
+    }
+
+    #[test]
+    fn test_parse_incoming_email_body_only() {
+        let adapter = EmailAdapter::new(make_config());
+        let msg = adapter
+            .parse_incoming_email("a@b.com", "A", "", "Body only", "m1", None)
+            .unwrap();
+        assert_eq!(msg.text, "Body only");
+    }
+
+    #[test]
+    fn test_parse_incoming_email_with_date() {
+        let adapter = EmailAdapter::new(make_config());
+        let date = chrono::Utc::now();
+        let msg = adapter
+            .parse_incoming_email("a@b.com", "A", "Subj", "Body", "m1", Some(date))
+            .unwrap();
+        assert_eq!(msg.timestamp, date);
+    }
+
+    #[test]
+    fn test_parse_incoming_email_message_counter() {
+        let adapter = EmailAdapter::new(make_config());
+        assert_eq!(adapter.status().messages_received, 0);
+        adapter
+            .parse_incoming_email("a@b.com", "A", "S", "B", "m1", None)
+            .unwrap();
+        assert_eq!(adapter.status().messages_received, 1);
+    }
+
+    #[test]
+    fn test_parse_incoming_email_platform() {
+        let adapter = EmailAdapter::new(make_config());
+        let msg = adapter
+            .parse_incoming_email("a@b.com", "A", "S", "B", "m1", None)
+            .unwrap();
+        assert_eq!(msg.platform, ChannelPlatform::Email);
+        assert!(!msg.is_group);
+        assert_eq!(msg.user_id, "a@b.com");
+        assert_eq!(msg.channel_id, "a@b.com");
+    }
 }

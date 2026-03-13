@@ -284,6 +284,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_multiple_messages_in_bout() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
+
+        substrate.save_message(&bout_id, &Message::new(Role::User, "Hello")).await.unwrap();
+        substrate.save_message(&bout_id, &Message::new(Role::Assistant, "Hi there")).await.unwrap();
+        substrate.save_message(&bout_id, &Message::new(Role::User, "How are you?")).await.unwrap();
+
+        let messages = substrate.load_messages(&bout_id).await.unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+        assert_eq!(messages[2].content, "How are you?");
+    }
+
+    #[tokio::test]
+    async fn test_load_messages_empty_bout() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
+
+        let messages = substrate.load_messages(&bout_id).await.unwrap();
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_bouts_for_fighter() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate.create_bout(&fighter_id).await.unwrap();
+        substrate.create_bout(&fighter_id).await.unwrap();
+        substrate.create_bout(&fighter_id).await.unwrap();
+
+        let bouts = substrate.list_bouts(&fighter_id).await.unwrap();
+        assert_eq!(bouts.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_bout_summary_message_count() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
+
+        substrate.save_message(&bout_id, &Message::new(Role::User, "a")).await.unwrap();
+        substrate.save_message(&bout_id, &Message::new(Role::Assistant, "b")).await.unwrap();
+
+        let bouts = substrate.list_bouts(&fighter_id).await.unwrap();
+        assert_eq!(bouts[0].message_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_bout_id_display() {
+        let bout_id = super::BoutId::new();
+        let s = bout_id.to_string();
+        assert!(!s.is_empty());
+        // Should be a valid UUID string
+        assert!(uuid::Uuid::parse_str(&s).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_bout_cascades_messages() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
+        substrate.save_message(&bout_id, &Message::new(Role::User, "msg")).await.unwrap();
+
+        substrate.delete_bout(&bout_id).await.unwrap();
+        let bouts = substrate.list_bouts(&fighter_id).await.unwrap();
+        assert!(bouts.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_list_and_delete_bouts() {
         let substrate = MemorySubstrate::in_memory().unwrap();
         let fighter_id = punch_types::FighterId::new();

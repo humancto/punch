@@ -307,4 +307,98 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_parse_telegram_empty_text() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        let payload = serde_json::json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 1,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000000,
+                "text": ""
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_telegram_no_from() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        let payload = serde_json::json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 1,
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000000,
+                "text": "Hello"
+            }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_telegram_first_name_only() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        let payload = serde_json::json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 1,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000000,
+                "text": "Hi"
+            }
+        });
+        let msg = adapter.parse_webhook_payload(&payload).unwrap();
+        assert_eq!(msg.display_name, "Alice");
+    }
+
+    #[test]
+    fn test_parse_telegram_group_type() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        let payload = serde_json::json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 1,
+                "from": { "id": 111, "first_name": "Bob" },
+                "chat": { "id": -100, "type": "group" },
+                "date": 1700000000,
+                "text": "Group msg"
+            }
+        });
+        let msg = adapter.parse_webhook_payload(&payload).unwrap();
+        assert!(msg.is_group);
+    }
+
+    #[test]
+    fn test_parse_telegram_message_counter() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        assert_eq!(adapter.status().messages_received, 0);
+
+        let payload = serde_json::json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 1,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000000,
+                "text": "Test"
+            }
+        });
+        adapter.parse_webhook_payload(&payload);
+        assert_eq!(adapter.status().messages_received, 1);
+
+        adapter.parse_webhook_payload(&payload);
+        assert_eq!(adapter.status().messages_received, 2);
+    }
+
+    #[test]
+    fn test_parse_telegram_no_message_key() {
+        let adapter = TelegramAdapter::new("token".to_string());
+        let payload = serde_json::json!({ "update_id": 123 });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
 }

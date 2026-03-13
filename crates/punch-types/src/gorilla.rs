@@ -140,3 +140,225 @@ pub struct GorillaMetrics {
     /// Timestamp of the last execution ("rampage").
     pub last_rampage: Option<DateTime<Utc>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ModelConfig, Provider};
+
+    #[test]
+    fn test_gorilla_id_display() {
+        let uuid = Uuid::nil();
+        let id = GorillaId(uuid);
+        assert_eq!(id.to_string(), uuid.to_string());
+    }
+
+    #[test]
+    fn test_gorilla_id_new_unique() {
+        let id1 = GorillaId::new();
+        let id2 = GorillaId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_gorilla_id_default() {
+        let id = GorillaId::default();
+        assert_ne!(id.0, Uuid::nil());
+    }
+
+    #[test]
+    fn test_gorilla_id_serde_transparent() {
+        let uuid = Uuid::new_v4();
+        let id = GorillaId(uuid);
+        let json = serde_json::to_string(&id).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", uuid));
+        let deser: GorillaId = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser, id);
+    }
+
+    #[test]
+    fn test_gorilla_status_display() {
+        assert_eq!(GorillaStatus::Caged.to_string(), "caged");
+        assert_eq!(GorillaStatus::Unleashed.to_string(), "unleashed");
+        assert_eq!(GorillaStatus::Rampaging.to_string(), "rampaging");
+        assert_eq!(GorillaStatus::Resting.to_string(), "resting");
+        assert_eq!(GorillaStatus::Injured.to_string(), "injured");
+    }
+
+    #[test]
+    fn test_gorilla_status_serde_roundtrip() {
+        let statuses = vec![
+            GorillaStatus::Caged,
+            GorillaStatus::Unleashed,
+            GorillaStatus::Rampaging,
+            GorillaStatus::Resting,
+            GorillaStatus::Injured,
+        ];
+        for status in &statuses {
+            let json = serde_json::to_string(status).expect("serialize");
+            let deser: GorillaStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(&deser, status);
+        }
+    }
+
+    #[test]
+    fn test_gorilla_metrics_default() {
+        let metrics = GorillaMetrics::default();
+        assert_eq!(metrics.tasks_completed, 0);
+        assert_eq!(metrics.uptime_secs, 0);
+        assert!(metrics.last_rampage.is_none());
+    }
+
+    #[test]
+    fn test_gorilla_metrics_serde() {
+        let metrics = GorillaMetrics {
+            tasks_completed: 50,
+            uptime_secs: 3600,
+            last_rampage: Some(Utc::now()),
+        };
+        let json = serde_json::to_string(&metrics).expect("serialize");
+        let deser: GorillaMetrics = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.tasks_completed, 50);
+        assert_eq!(deser.uptime_secs, 3600);
+        assert!(deser.last_rampage.is_some());
+    }
+
+    fn make_test_manifest() -> GorillaManifest {
+        GorillaManifest {
+            name: "TestGorilla".to_string(),
+            description: "A test gorilla".to_string(),
+            schedule: "*/5 * * * *".to_string(),
+            moves_required: vec!["read_file".to_string(), "shell_exec".to_string()],
+            settings_schema: None,
+            dashboard_metrics: vec!["uptime".to_string()],
+            system_prompt: None,
+            model: None,
+            capabilities: vec![],
+            weight_class: None,
+        }
+    }
+
+    #[test]
+    fn test_effective_system_prompt_fallback() {
+        let manifest = make_test_manifest();
+        assert_eq!(manifest.effective_system_prompt(), "A test gorilla");
+    }
+
+    #[test]
+    fn test_effective_system_prompt_explicit() {
+        let mut manifest = make_test_manifest();
+        manifest.system_prompt = Some("Custom prompt".to_string());
+        assert_eq!(manifest.effective_system_prompt(), "Custom prompt");
+    }
+
+    #[test]
+    fn test_effective_capabilities_derived() {
+        let manifest = make_test_manifest();
+        let caps = manifest.effective_capabilities();
+        assert!(caps.contains(&Capability::FileRead("**".to_string())));
+        assert!(caps.contains(&Capability::ShellExec("*".to_string())));
+    }
+
+    #[test]
+    fn test_effective_capabilities_no_duplicates() {
+        let mut manifest = make_test_manifest();
+        manifest.capabilities = vec![Capability::FileRead("**".to_string())];
+        let caps = manifest.effective_capabilities();
+        let file_read_count = caps
+            .iter()
+            .filter(|c| matches!(c, Capability::FileRead(_)))
+            .count();
+        assert_eq!(file_read_count, 1);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_read_file() {
+        let caps = capabilities_from_move("read_file");
+        assert_eq!(caps, vec![Capability::FileRead("**".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_file_read() {
+        let caps = capabilities_from_move("file_read");
+        assert_eq!(caps, vec![Capability::FileRead("**".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_write_file() {
+        let caps = capabilities_from_move("write_file");
+        assert_eq!(caps, vec![Capability::FileWrite("**".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_file_list() {
+        let caps = capabilities_from_move("file_list");
+        assert_eq!(caps, vec![Capability::FileRead("**".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_shell() {
+        let caps = capabilities_from_move("shell_exec");
+        assert_eq!(caps, vec![Capability::ShellExec("*".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_web() {
+        let caps1 = capabilities_from_move("web_fetch");
+        let caps2 = capabilities_from_move("web_search");
+        assert_eq!(caps1, vec![Capability::Network("*".to_string())]);
+        assert_eq!(caps2, vec![Capability::Network("*".to_string())]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_memory() {
+        let caps1 = capabilities_from_move("memory_store");
+        let caps2 = capabilities_from_move("memory_recall");
+        assert_eq!(caps1, vec![Capability::Memory]);
+        assert_eq!(caps2, vec![Capability::Memory]);
+    }
+
+    #[test]
+    fn test_capabilities_from_move_knowledge() {
+        for name in &[
+            "knowledge_add_entity",
+            "knowledge_add_relation",
+            "knowledge_query",
+        ] {
+            let caps = capabilities_from_move(name);
+            assert_eq!(caps, vec![Capability::KnowledgeGraph]);
+        }
+    }
+
+    #[test]
+    fn test_capabilities_from_move_unknown() {
+        let caps = capabilities_from_move("nonexistent_tool");
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn test_gorilla_manifest_serde() {
+        let manifest = GorillaManifest {
+            name: "Watcher".to_string(),
+            description: "Monitors logs".to_string(),
+            schedule: "every 5m".to_string(),
+            moves_required: vec!["read_file".to_string()],
+            settings_schema: Some(serde_json::json!({"type": "object"})),
+            dashboard_metrics: vec![],
+            system_prompt: Some("Watch carefully".to_string()),
+            model: Some(ModelConfig {
+                provider: Provider::Anthropic,
+                model: "claude-sonnet-4-20250514".to_string(),
+                api_key_env: None,
+                base_url: None,
+                max_tokens: None,
+                temperature: None,
+            }),
+            capabilities: vec![Capability::Memory],
+            weight_class: Some(WeightClass::Heavyweight),
+        };
+        let json = serde_json::to_string(&manifest).expect("serialize");
+        let deser: GorillaManifest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.name, "Watcher");
+        assert_eq!(deser.weight_class, Some(WeightClass::Heavyweight));
+    }
+}

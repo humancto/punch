@@ -404,4 +404,101 @@ mod tests {
         let msg = adapter.irc_message_to_incoming(&irc_msg);
         assert!(msg.is_none());
     }
+
+    #[test]
+    fn test_parse_irc_kick() {
+        let line = ":op!op@host KICK #channel user :Reason for kick";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "KICK");
+        assert_eq!(parsed.params, vec!["#channel", "user"]);
+        assert_eq!(parsed.trailing.as_deref(), Some("Reason for kick"));
+    }
+
+    #[test]
+    fn test_parse_irc_mode() {
+        let line = ":op!op@host MODE #channel +o user";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "MODE");
+        assert_eq!(parsed.params, vec!["#channel", "+o", "user"]);
+    }
+
+    #[test]
+    fn test_parse_irc_notice() {
+        let line = ":server NOTICE * :*** Looking up your hostname";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "NOTICE");
+        assert_eq!(parsed.params, vec!["*"]);
+        assert_eq!(parsed.trailing.as_deref(), Some("*** Looking up your hostname"));
+    }
+
+    #[test]
+    fn test_parse_irc_error_reply() {
+        let line = ":irc.example.com 433 * punchbot :Nickname is already in use";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "433");
+        assert_eq!(parsed.params, vec!["*", "punchbot"]);
+    }
+
+    #[test]
+    fn test_parse_irc_quit() {
+        let line = ":nick!user@host QUIT :Leaving";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "QUIT");
+        assert_eq!(parsed.trailing.as_deref(), Some("Leaving"));
+    }
+
+    #[test]
+    fn test_parse_irc_join() {
+        let line = ":alice!alice@host JOIN #channel";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "JOIN");
+        assert_eq!(parsed.params, vec!["#channel"]);
+    }
+
+    #[test]
+    fn test_irc_message_to_incoming_empty_trailing() {
+        let adapter = make_adapter();
+        let irc_msg = IrcProtocolMessage {
+            prefix: Some("alice!alice@host.com".to_string()),
+            command: "PRIVMSG".to_string(),
+            params: vec!["#general".to_string()],
+            trailing: Some("".to_string()),
+        };
+        assert!(adapter.irc_message_to_incoming(&irc_msg).is_none());
+    }
+
+    #[test]
+    fn test_irc_message_to_incoming_no_prefix() {
+        let adapter = make_adapter();
+        let irc_msg = IrcProtocolMessage {
+            prefix: None,
+            command: "PRIVMSG".to_string(),
+            params: vec!["#general".to_string()],
+            trailing: Some("Hello".to_string()),
+        };
+        let msg = adapter.irc_message_to_incoming(&irc_msg).unwrap();
+        assert_eq!(msg.user_id, "unknown");
+    }
+
+    #[test]
+    fn test_irc_channel_ampersand_is_group() {
+        let adapter = make_adapter();
+        let irc_msg = IrcProtocolMessage {
+            prefix: Some("user!u@h".to_string()),
+            command: "PRIVMSG".to_string(),
+            params: vec!["&channel".to_string()],
+            trailing: Some("msg".to_string()),
+        };
+        let msg = adapter.irc_message_to_incoming(&irc_msg).unwrap();
+        assert!(msg.is_group);
+    }
+
+    #[test]
+    fn test_parse_irc_no_trailing() {
+        let line = ":server 001 nick";
+        let parsed = parse_irc_message(line).unwrap();
+        assert_eq!(parsed.command, "001");
+        assert_eq!(parsed.params, vec!["nick"]);
+        assert!(parsed.trailing.is_none());
+    }
 }

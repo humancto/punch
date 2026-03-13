@@ -977,4 +977,103 @@ mod tests {
         // After pressing 'r', last_refresh should be set far in the past
         assert!(app.last_refresh < before);
     }
+
+    #[test]
+    fn current_list_len_fighters() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.active_tab = Tab::Fighters;
+        app.fighters = vec![
+            serde_json::json!({"name": "a"}),
+            serde_json::json!({"name": "b"}),
+        ];
+        assert_eq!(app.current_list_len(), 2);
+    }
+
+    #[test]
+    fn current_list_len_gorillas() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.active_tab = Tab::Gorillas;
+        app.gorillas = vec![serde_json::json!({"name": "g1"})];
+        assert_eq!(app.current_list_len(), 1);
+    }
+
+    #[test]
+    fn current_list_len_audit() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.active_tab = Tab::Audit;
+        app.audit_entries = vec![
+            serde_json::json!({"event": "start"}),
+            serde_json::json!({"event": "stop"}),
+            serde_json::json!({"event": "error"}),
+        ];
+        assert_eq!(app.current_list_len(), 3);
+    }
+
+    #[test]
+    fn current_list_len_metrics_always_zero() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.active_tab = Tab::Metrics;
+        assert_eq!(app.current_list_len(), 0);
+    }
+
+    #[test]
+    fn tab_next_prev_roundtrip() {
+        let tab = Tab::Fighters;
+        assert_eq!(tab.next().prev(), Tab::Fighters);
+
+        let tab = Tab::Gorillas;
+        assert_eq!(tab.next().prev(), Tab::Gorillas);
+
+        let tab = Tab::Audit;
+        assert_eq!(tab.next().prev(), Tab::Audit);
+
+        let tab = Tab::Metrics;
+        assert_eq!(tab.next().prev(), Tab::Metrics);
+    }
+
+    #[test]
+    fn error_message_tracking() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        assert!(app.error_message.is_none());
+
+        app.error_message = Some("Connection failed".to_string());
+        assert_eq!(app.error_message.as_deref(), Some("Connection failed"));
+
+        app.error_message = None;
+        assert!(app.error_message.is_none());
+    }
+
+    #[test]
+    fn unknown_key_does_nothing() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        let tab = app.active_tab;
+        let index = app.selected_index;
+        let quit = app.should_quit;
+
+        app.handle_key(make_key(KeyCode::Char('z')));
+        assert_eq!(app.active_tab, tab);
+        assert_eq!(app.selected_index, index);
+        assert_eq!(app.should_quit, quit);
+    }
+
+    #[test]
+    fn vim_k_at_zero_stays_at_zero() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.fighters = vec![serde_json::json!({"name": "a"})];
+        app.handle_key(make_key(KeyCode::Char('k')));
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn vim_j_at_max_stays_at_max() {
+        let mut app = TuiApp::new("http://localhost:3000");
+        app.fighters = vec![
+            serde_json::json!({"name": "a"}),
+            serde_json::json!({"name": "b"}),
+        ];
+        app.handle_key(make_key(KeyCode::Char('j')));
+        app.handle_key(make_key(KeyCode::Char('j')));
+        app.handle_key(make_key(KeyCode::Char('j'))); // should not go past 1
+        assert_eq!(app.selected_index, 1);
+    }
 }

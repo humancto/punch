@@ -211,4 +211,156 @@ mod tests {
         let other = Capability::Network("other.example.com".to_string());
         assert!(!capability_matches(&granted, &other));
     }
+
+    #[test]
+    fn test_capability_display_all_scoped() {
+        assert_eq!(
+            Capability::FileRead("src/*.rs".to_string()).to_string(),
+            "file_read(src/*.rs)"
+        );
+        assert_eq!(
+            Capability::FileWrite("out/**".to_string()).to_string(),
+            "file_write(out/**)"
+        );
+        assert_eq!(
+            Capability::ShellExec("ls*".to_string()).to_string(),
+            "shell_exec(ls*)"
+        );
+        assert_eq!(
+            Capability::Network("*.example.com".to_string()).to_string(),
+            "network(*.example.com)"
+        );
+    }
+
+    #[test]
+    fn test_capability_display_all_scopeless() {
+        assert_eq!(Capability::Memory.to_string(), "memory");
+        assert_eq!(Capability::KnowledgeGraph.to_string(), "knowledge_graph");
+        assert_eq!(Capability::BrowserControl.to_string(), "browser_control");
+        assert_eq!(Capability::AgentSpawn.to_string(), "agent_spawn");
+        assert_eq!(Capability::AgentMessage.to_string(), "agent_message");
+        assert_eq!(Capability::Schedule.to_string(), "schedule");
+        assert_eq!(Capability::EventPublish.to_string(), "event_publish");
+        assert_eq!(Capability::SourceControl.to_string(), "source_control");
+        assert_eq!(Capability::Container.to_string(), "container");
+        assert_eq!(
+            Capability::DataManipulation.to_string(),
+            "data_manipulation"
+        );
+        assert_eq!(Capability::CodeAnalysis.to_string(), "code_analysis");
+        assert_eq!(Capability::Archive.to_string(), "archive");
+        assert_eq!(Capability::Template.to_string(), "template");
+        assert_eq!(Capability::Crypto.to_string(), "crypto");
+    }
+
+    #[test]
+    fn test_all_scopeless_capability_matches() {
+        let scopeless = vec![
+            Capability::Memory,
+            Capability::KnowledgeGraph,
+            Capability::BrowserControl,
+            Capability::AgentSpawn,
+            Capability::AgentMessage,
+            Capability::Schedule,
+            Capability::EventPublish,
+            Capability::SourceControl,
+            Capability::Container,
+            Capability::DataManipulation,
+            Capability::CodeAnalysis,
+            Capability::Archive,
+            Capability::Template,
+            Capability::Crypto,
+        ];
+        for cap in &scopeless {
+            assert!(capability_matches(cap, cap), "{} should match itself", cap);
+        }
+        // Cross-variant should not match
+        assert!(!capability_matches(
+            &Capability::Memory,
+            &Capability::Schedule
+        ));
+        assert!(!capability_matches(
+            &Capability::Archive,
+            &Capability::Template
+        ));
+    }
+
+    #[test]
+    fn test_capability_serde_roundtrip() {
+        let caps = vec![
+            Capability::FileRead("**/*.rs".to_string()),
+            Capability::FileWrite("out/**".to_string()),
+            Capability::ShellExec("*".to_string()),
+            Capability::Network("*.api.com".to_string()),
+            Capability::Memory,
+            Capability::BrowserControl,
+            Capability::Crypto,
+        ];
+        for cap in &caps {
+            let json = serde_json::to_string(cap).expect("serialize");
+            let deser: Capability = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(&deser, cap);
+        }
+    }
+
+    #[test]
+    fn test_glob_matches_star_star_slash_star() {
+        let granted = Capability::FileRead("**/*".to_string());
+        let required = Capability::FileRead("deep/nested/file.txt".to_string());
+        assert!(capability_matches(&granted, &required));
+    }
+
+    #[test]
+    fn test_shell_wildcard_grants_all() {
+        let granted = Capability::ShellExec("*".to_string());
+        let required = Capability::ShellExec("rm -rf /".to_string());
+        assert!(capability_matches(&granted, &required));
+    }
+
+    #[test]
+    fn test_network_wildcard_grants_all() {
+        let granted = Capability::Network("*".to_string());
+        let required = Capability::Network("any.host.com".to_string());
+        assert!(capability_matches(&granted, &required));
+    }
+
+    #[test]
+    fn test_subdomain_wildcard_host() {
+        let granted = Capability::Network("*.example.com".to_string());
+        // Direct match of the suffix
+        assert!(capability_matches(
+            &granted,
+            &Capability::Network("example.com".to_string())
+        ));
+        // Deep subdomain
+        assert!(capability_matches(
+            &granted,
+            &Capability::Network("deep.sub.example.com".to_string())
+        ));
+    }
+
+    #[test]
+    fn test_capability_grant_construction() {
+        let grant = CapabilityGrant {
+            id: Uuid::new_v4(),
+            capability: Capability::Memory,
+            granted_by: "admin".to_string(),
+            granted_at: chrono::Utc::now(),
+            expires_at: None,
+        };
+        assert_eq!(grant.granted_by, "admin");
+        assert!(grant.expires_at.is_none());
+    }
+
+    #[test]
+    fn test_capability_grant_with_expiry() {
+        let grant = CapabilityGrant {
+            id: Uuid::new_v4(),
+            capability: Capability::Network("*".to_string()),
+            granted_by: "system".to_string(),
+            granted_at: chrono::Utc::now(),
+            expires_at: Some(chrono::Utc::now()),
+        };
+        assert!(grant.expires_at.is_some());
+    }
 }

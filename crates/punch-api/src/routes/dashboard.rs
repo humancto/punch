@@ -1003,4 +1003,179 @@ mod tests {
             .expect("header value");
         assert!(content_type.contains("text/html"));
     }
+
+    // -- Test: Status response field types --
+
+    #[tokio::test]
+    async fn test_status_system_health_is_healthy_when_no_fighters() {
+        let state = test_app_state();
+        let app = dashboard_router().with_state(state);
+
+        let resp = send_get(app, "/api/dashboard/status").await;
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("valid JSON");
+
+        // With no fighters, system should be healthy
+        assert_eq!(json["system_health"], "healthy");
+        assert_eq!(json["fighter_count"], 0);
+        assert_eq!(json["gorilla_count"], 0);
+        assert_eq!(json["active_bouts"], 0);
+    }
+
+    // -- Test: Config update with valid rate limit --
+
+    #[tokio::test]
+    async fn test_config_update_valid_rate_limit() {
+        let state = test_app_state();
+        let app = dashboard_router().with_state(state);
+
+        let resp = send_post_json(
+            app,
+            "/api/dashboard/config",
+            serde_json::json!({ "rate_limit_rpm": 100 }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("valid JSON");
+
+        assert!(json["message"].as_str().unwrap().contains("acknowledged"));
+    }
+
+    // -- Test: Config update with no changes --
+
+    #[tokio::test]
+    async fn test_config_update_no_changes() {
+        let state = test_app_state();
+        let app = dashboard_router().with_state(state);
+
+        let resp = send_post_json(
+            app,
+            "/api/dashboard/config",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("valid JSON");
+
+        assert!(json["message"].as_str().unwrap().contains("No configuration changes"));
+        assert_eq!(json["applied"], true);
+    }
+
+    // -- Test: Dashboard response types serialization --
+
+    #[test]
+    fn test_dashboard_status_response_serialization() {
+        let resp = DashboardStatusResponse {
+            uptime_secs: 3600,
+            fighter_count: 5,
+            gorilla_count: 2,
+            active_bouts: 1,
+            total_messages: 1000,
+            memory_entries: 500,
+            system_health: "healthy",
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["uptime_secs"], 3600);
+        assert_eq!(json["fighter_count"], 5);
+        assert_eq!(json["system_health"], "healthy");
+    }
+
+    #[test]
+    fn test_dashboard_fighter_summary_serialization() {
+        let summary = DashboardFighterSummary {
+            id: "f-123".to_string(),
+            name: "Alpha Fighter".to_string(),
+            description: "Test fighter".to_string(),
+            weight_class: WeightClass::Heavyweight,
+            status: FighterStatus::Idle,
+            model: "gpt-4o".to_string(),
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["name"], "Alpha Fighter");
+        assert_eq!(json["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn test_dashboard_gorilla_summary_serialization() {
+        let summary = DashboardGorillaSummary {
+            id: "g-456".to_string(),
+            name: "Kong".to_string(),
+            description: "Test gorilla".to_string(),
+            schedule: "*/5 * * * *".to_string(),
+            status: GorillaStatus::Caged,
+            last_rampage: None,
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["name"], "Kong");
+        assert_eq!(json["status"], "caged");
+        assert!(json["last_rampage"].is_null());
+    }
+
+    #[test]
+    fn test_audit_entry_serialization() {
+        let entry = AuditEntry {
+            sequence: 42,
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            kind: "fighter_status".to_string(),
+            summary: "Fighter 'Alpha' spawned".to_string(),
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["sequence"], 42);
+        assert_eq!(json["kind"], "fighter_status");
+    }
+
+    #[test]
+    fn test_dashboard_metrics_response_serialization() {
+        let resp = DashboardMetricsResponse {
+            total_tokens_used: 50000,
+            total_tool_calls: 100,
+            total_cost_usd: 1.23,
+            fighter_count: 3,
+            gorilla_count: 1,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["total_tokens_used"], 50000);
+        assert_eq!(json["total_cost_usd"], 1.23);
+    }
+
+    #[test]
+    fn test_dashboard_error_serialization() {
+        let err = DashboardError {
+            error: "something went wrong".to_string(),
+        };
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["error"], "something went wrong");
+    }
+
+    #[test]
+    fn test_audit_query_defaults() {
+        let json = r#"{}"#;
+        let query: AuditQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.limit, 50);
+        assert_eq!(query.since, 0);
+    }
+
+    #[test]
+    fn test_update_config_request_deserialization() {
+        let json = r#"{"rate_limit_rpm": 120}"#;
+        let req: UpdateConfigRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.rate_limit_rpm, Some(120));
+    }
+
+    #[test]
+    fn test_update_config_request_null() {
+        let json = r#"{}"#;
+        let req: UpdateConfigRequest = serde_json::from_str(json).unwrap();
+        assert!(req.rate_limit_rpm.is_none());
+    }
 }

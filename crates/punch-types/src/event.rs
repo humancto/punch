@@ -82,3 +82,197 @@ impl EventPayload {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fighter_spawned_serde() {
+        let event = PunchEvent::FighterSpawned {
+            fighter_id: FighterId(Uuid::nil()),
+            name: "TestFighter".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"fighter_spawned\""));
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::FighterSpawned { name, .. } => assert_eq!(name, "TestFighter"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_fighter_message_serde() {
+        let event = PunchEvent::FighterMessage {
+            fighter_id: FighterId(Uuid::nil()),
+            bout_id: Uuid::nil(),
+            role: "user".to_string(),
+            content_preview: "Hello".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"fighter_message\""));
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::FighterMessage {
+                content_preview, ..
+            } => assert_eq!(content_preview, "Hello"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_gorilla_unleashed_serde() {
+        let event = PunchEvent::GorillaUnleashed {
+            gorilla_id: GorillaId(Uuid::nil()),
+            name: "AlphaGorilla".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"gorilla_unleashed\""));
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::GorillaUnleashed { name, .. } => assert_eq!(name, "AlphaGorilla"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_tool_executed_serde() {
+        let event = PunchEvent::ToolExecuted {
+            agent_id: "agent-1".to_string(),
+            tool_name: "web_fetch".to_string(),
+            success: true,
+            duration_ms: 150,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::ToolExecuted {
+                success,
+                duration_ms,
+                ..
+            } => {
+                assert!(success);
+                assert_eq!(duration_ms, 150);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_bout_started_serde() {
+        let event = PunchEvent::BoutStarted {
+            bout_id: Uuid::nil(),
+            fighter_id: FighterId(Uuid::nil()),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"bout_started\""));
+    }
+
+    #[test]
+    fn test_bout_ended_serde() {
+        let event = PunchEvent::BoutEnded {
+            bout_id: Uuid::nil(),
+            fighter_id: FighterId(Uuid::nil()),
+            messages_exchanged: 42,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::BoutEnded {
+                messages_exchanged, ..
+            } => assert_eq!(messages_exchanged, 42),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_combo_triggered_serde() {
+        let event = PunchEvent::ComboTriggered {
+            combo_name: "deploy-pipeline".to_string(),
+            triggered_by: "admin".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"combo_triggered\""));
+    }
+
+    #[test]
+    fn test_error_event_serde() {
+        let event = PunchEvent::Error {
+            source: "kernel".to_string(),
+            message: "out of memory".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::Error { source, message } => {
+                assert_eq!(source, "kernel");
+                assert_eq!(message, "out of memory");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_event_payload_new() {
+        let event = PunchEvent::FighterSpawned {
+            fighter_id: FighterId(Uuid::nil()),
+            name: "Test".to_string(),
+        };
+        let payload = EventPayload::new(event);
+        assert!(payload.correlation_id.is_none());
+        assert!(payload.timestamp <= Utc::now());
+    }
+
+    #[test]
+    fn test_event_payload_with_correlation() {
+        let event = PunchEvent::Error {
+            source: "test".to_string(),
+            message: "msg".to_string(),
+        };
+        let corr_id = Uuid::new_v4();
+        let payload = EventPayload::new(event).with_correlation(corr_id);
+        assert_eq!(payload.correlation_id, Some(corr_id));
+    }
+
+    #[test]
+    fn test_event_payload_serde_roundtrip() {
+        let event = PunchEvent::ToolExecuted {
+            agent_id: "a1".to_string(),
+            tool_name: "read_file".to_string(),
+            success: false,
+            duration_ms: 0,
+        };
+        let payload = EventPayload::new(event);
+        let json = serde_json::to_string(&payload).expect("serialize");
+        let deser: EventPayload = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.id, payload.id);
+    }
+
+    #[test]
+    fn test_gorilla_paused_serde() {
+        let event = PunchEvent::GorillaPaused {
+            gorilla_id: GorillaId(Uuid::nil()),
+            reason: "rate limited".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"kind\":\"gorilla_paused\""));
+        let deser: PunchEvent = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            PunchEvent::GorillaPaused { reason, .. } => assert_eq!(reason, "rate limited"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_event_clone() {
+        let event = PunchEvent::FighterSpawned {
+            fighter_id: FighterId(Uuid::nil()),
+            name: "Clone".to_string(),
+        };
+        let cloned = event.clone();
+        let json1 = serde_json::to_string(&event).unwrap();
+        let json2 = serde_json::to_string(&cloned).unwrap();
+        assert_eq!(json1, json2);
+    }
+}

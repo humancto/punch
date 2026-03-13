@@ -876,6 +876,127 @@ mod tests {
     // -- top_k_similar -------------------------------------------------------
 
     #[test]
+    fn test_cosine_similarity_single_dimension() {
+        let a = vec![3.0];
+        let b = vec![5.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "same direction in 1D should be 1.0"
+        );
+    }
+
+    #[test]
+    fn test_cosine_similarity_negative_values() {
+        let a = vec![-1.0, -2.0];
+        let b = vec![-3.0, -6.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "parallel negative vectors are similar"
+        );
+    }
+
+    #[test]
+    fn test_builtin_embedder_default() {
+        let embedder = BuiltInEmbedder::default();
+        assert_eq!(embedder.dimensions(), 0);
+    }
+
+    #[test]
+    fn test_builtin_embed_empty_text() {
+        let mut embedder = BuiltInEmbedder::new();
+        embedder.fit(&["hello world", "foo bar"]);
+        let vec = embedder.embed("").unwrap();
+        assert_eq!(vec.len(), embedder.dimensions());
+        assert!(
+            vec.iter().all(|&v| v == 0.0),
+            "empty text yields zero vector"
+        );
+    }
+
+    #[test]
+    fn test_builtin_dimensions_matches_vocab() {
+        let mut embedder = BuiltInEmbedder::new();
+        embedder.fit(&["alpha beta gamma", "delta epsilon"]);
+        assert!(embedder.dimensions() > 0);
+        let vec = embedder.embed("alpha").unwrap();
+        assert_eq!(vec.len(), embedder.dimensions());
+    }
+
+    #[test]
+    fn test_openai_embedder_dimensions() {
+        let embedder = OpenAiEmbedder::new("key".into(), "model".into(), 768);
+        assert_eq!(embedder.dimensions(), 768);
+    }
+
+    #[test]
+    fn test_openai_embed_returns_error() {
+        let embedder = OpenAiEmbedder::new("key".into(), "model".into(), 768);
+        assert!(embedder.embed("test").is_err());
+    }
+
+    #[test]
+    fn test_openai_embed_batch_returns_error() {
+        let embedder = OpenAiEmbedder::new("key".into(), "model".into(), 768);
+        assert!(embedder.embed_batch(&["a", "b"]).is_err());
+    }
+
+    #[test]
+    fn test_openai_parse_response_missing_data() {
+        let resp = serde_json::json!({"no_data": true});
+        assert!(OpenAiEmbedder::parse_response(&resp).is_err());
+    }
+
+    #[test]
+    fn test_vec_bytes_single_value() {
+        let original = vec![42.0_f32];
+        let bytes = vec_to_bytes(&original);
+        assert_eq!(bytes.len(), 4);
+        let restored = bytes_to_vec(&bytes);
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn test_store_with_metadata() {
+        let store = test_store();
+        let mut meta = HashMap::new();
+        meta.insert("source".to_string(), "test".to_string());
+        let id = store.store("text with metadata", meta).unwrap();
+        assert!(!id.is_empty());
+        assert_eq!(store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_store_delete_nonexistent() {
+        let store = test_store();
+        // Deleting a non-existent ID should not error
+        store.delete("nonexistent-id").unwrap();
+        assert_eq!(store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_top_k_similar_empty_list() {
+        let query = vec![1.0, 0.0];
+        let results = top_k_similar(&query, &[], 5);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_top_k_similar_k_larger_than_list() {
+        let embeddings = vec![Embedding {
+            id: "only".into(),
+            text: "one".into(),
+            vector: vec![1.0, 0.0],
+            metadata: HashMap::new(),
+            created_at: Utc::now(),
+        }];
+        let query = vec![1.0, 0.0];
+        let results = top_k_similar(&query, &embeddings, 10);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
     fn test_top_k_similar_ordering() {
         let embeddings = vec![
             Embedding {

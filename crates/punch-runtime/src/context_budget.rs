@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn test_check_trim_moderate() {
         let budget = ContextBudget::new(1_000); // 1K token window
-        // 750 tokens * 4 chars = 3000 chars -> 75% of window
+                                                // 750 tokens * 4 chars = 3000 chars -> 75% of window
         let msgs = vec![make_message(Role::User, &"x".repeat(3000))];
         let action = budget.check_trim_needed(&msgs, &[]);
         assert_eq!(action, Some(TrimAction::Moderate));
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn test_check_trim_aggressive() {
         let budget = ContextBudget::new(1_000); // 1K token window
-        // 950 tokens * 4 chars = 3800 chars -> 95% of window
+                                                // 950 tokens * 4 chars = 3800 chars -> 95% of window
         let msgs = vec![make_message(Role::User, &"x".repeat(3800))];
         let action = budget.check_trim_needed(&msgs, &[]);
         assert_eq!(action, Some(TrimAction::Aggressive));
@@ -458,7 +458,7 @@ mod tests {
     fn test_apply_context_guard_truncates_oversized() {
         // Use a small window so the cap is small
         let budget = ContextBudget::new(100); // 100 tokens
-        // per_result_cap = 0.30 * 100 * 4 = 120 chars
+                                              // per_result_cap = 0.30 * 100 * 4 = 120 chars
         let big_result = "x".repeat(500);
         let mut msgs = vec![make_tool_message(vec![ToolCallResult {
             id: "call_1".into(),
@@ -498,5 +498,182 @@ mod tests {
         let boundary = find_char_boundary(s, 7);
         assert!(s.is_char_boundary(boundary));
         assert!(boundary <= 7);
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional context budget tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_default_context_budget() {
+        let budget = ContextBudget::default();
+        assert_eq!(budget.window_size, 200_000);
+    }
+
+    #[test]
+    fn test_estimate_tokens_empty() {
+        let budget = ContextBudget::new(200_000);
+        let tokens = budget.estimate_tokens(&[], &[]);
+        assert_eq!(tokens, 0);
+    }
+
+    #[test]
+    fn test_estimate_tokens_with_tool_calls() {
+        let budget = ContextBudget::new(200_000);
+        let msg = Message {
+            role: Role::Assistant,
+            content: "thinking".into(),
+            tool_calls: vec![punch_types::ToolCall {
+                id: "call_1".into(),
+                name: "file_read".into(),
+                input: serde_json::json!({"path": "/tmp/test.txt"}),
+            }],
+            tool_results: Vec::new(),
+            timestamp: chrono::Utc::now(),
+        };
+        let tokens = budget.estimate_tokens(&[msg], &[]);
+        assert!(tokens > 0);
+    }
+
+    #[test]
+    fn test_estimate_tokens_with_tool_results() {
+        let budget = ContextBudget::new(200_000);
+        let msg = Message {
+            role: Role::Tool,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_results: vec![punch_types::ToolCallResult {
+                id: "call_1".into(),
+                content: "x".repeat(400),
+                is_error: false,
+            }],
+            timestamp: chrono::Utc::now(),
+        };
+        let tokens = budget.estimate_tokens(&[msg], &[]);
+        assert!(tokens >= 100); // 400+ chars / 4
+    }
+
+    #[test]
+    fn test_estimate_message_tokens() {
+        let budget = ContextBudget::new(200_000);
+        let msgs = vec![make_message(Role::User, &"x".repeat(800))];
+        let tokens = budget.estimate_message_tokens(&msgs);
+        assert_eq!(tokens, 200); // 800 / 4
+    }
+
+    #[test]
+    fn test_per_result_cap_custom_window() {
+        let budget = ContextBudget::new(100_000);
+        // 30% of 100K * 4 = 120K chars
+        assert_eq!(budget.per_result_cap(), 120_000);
+    }
+
+    #[test]
+    fn test_single_result_max_custom_window() {
+        let budget = ContextBudget::new(100_000);
+        // 50% of 100K * 4 = 200K chars
+        assert_eq!(budget.single_result_max(), 200_000);
+    }
+
+    #[test]
+    fn test_truncate_result_exact_boundary() {
+        let text = "a".repeat(100);
+        let result = ContextBudget::truncate_result(&text, 100);
+        // Should not truncate when exactly at boundary
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_truncate_result_one_over() {
+        let text = "a".repeat(101);
+        let result = ContextBudget::truncate_result(&text, 100);
+        assert!(result.len() <= 150); // some slack for marker
+        assert!(result.contains("[truncated"));
+    }
+
+    #[test]
+    fn test_apply_trim_fewer_than_keep() {
+        let budget = ContextBudget::new(200_000);
+        let mut msgs: Vec<Message> = (0..3)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+
+        budget.apply_trim(&mut msgs, TrimAction::Moderate);
+        // Should not trim if fewer messages than keep count
+        assert_eq!(msgs.len(), 3);
+    }
+
+    #[test]
+    fn test_apply_trim_preserves_first_message() {
+        let budget = ContextBudget::new(200_000);
+        let mut msgs: Vec<Message> = (0..30)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+
+        budget.apply_trim(&mut msgs, TrimAction::Moderate);
+        assert!(msgs[0].content.contains("msg 0"));
+    }
+
+    #[test]
+    fn test_apply_trim_aggressive_inserts_marker() {
+        let budget = ContextBudget::new(200_000);
+        let mut msgs: Vec<Message> = (0..15)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+
+        budget.apply_trim(&mut msgs, TrimAction::Aggressive);
+        // Should have: first + marker + last 4
+        assert_eq!(msgs.len(), 6);
+        assert_eq!(msgs[1].role, Role::System);
+        assert!(msgs[1].content.contains("Context trimmed"));
+    }
+
+    #[test]
+    fn test_check_trim_below_moderate() {
+        let budget = ContextBudget::new(10_000);
+        // 6000 tokens * 4 chars = 24000 chars -> 60% of window, below 70%
+        let msgs = vec![make_message(Role::User, &"x".repeat(24_000))];
+        assert!(budget.check_trim_needed(&msgs, &[]).is_none());
+    }
+
+    #[test]
+    fn test_apply_context_guard_total_headroom_exceeded() {
+        // Very small window to trigger total headroom exceeded path
+        let budget = ContextBudget::new(10);
+        let big_result = "y".repeat(500);
+        let mut msgs = vec![
+            make_tool_message(vec![ToolCallResult {
+                id: "c1".into(),
+                content: big_result.clone(),
+                is_error: false,
+            }]),
+            make_tool_message(vec![ToolCallResult {
+                id: "c2".into(),
+                content: big_result,
+                is_error: false,
+            }]),
+        ];
+
+        let trimmed = budget.apply_context_guard(&mut msgs);
+        assert!(trimmed);
+    }
+
+    #[test]
+    fn test_find_char_boundary_at_end() {
+        let s = "hello";
+        assert_eq!(find_char_boundary(s, 100), s.len());
+    }
+
+    #[test]
+    fn test_find_char_boundary_at_zero() {
+        let s = "hello";
+        assert_eq!(find_char_boundary(s, 0), 0);
+    }
+
+    #[test]
+    fn test_trim_action_equality() {
+        assert_eq!(TrimAction::Moderate, TrimAction::Moderate);
+        assert_eq!(TrimAction::Aggressive, TrimAction::Aggressive);
+        assert_ne!(TrimAction::Moderate, TrimAction::Aggressive);
     }
 }

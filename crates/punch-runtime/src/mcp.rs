@@ -343,3 +343,92 @@ impl McpClient {
         &self.server_name
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_namespace_basic() {
+        let client = McpClient {
+            server_name: "github".to_string(),
+            child: Mutex::new(None),
+            stdin_tx: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: AtomicU64::new(1),
+            server_info: Mutex::new(None),
+        };
+
+        assert_eq!(
+            client.strip_namespace("mcp_github_create_issue"),
+            Some("create_issue")
+        );
+    }
+
+    #[test]
+    fn test_strip_namespace_no_match() {
+        let client = McpClient {
+            server_name: "github".to_string(),
+            child: Mutex::new(None),
+            stdin_tx: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: AtomicU64::new(1),
+            server_info: Mutex::new(None),
+        };
+
+        assert_eq!(client.strip_namespace("mcp_slack_send"), None);
+    }
+
+    #[test]
+    fn test_strip_namespace_exact_prefix() {
+        let client = McpClient {
+            server_name: "fs".to_string(),
+            child: Mutex::new(None),
+            stdin_tx: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: AtomicU64::new(1),
+            server_info: Mutex::new(None),
+        };
+
+        assert_eq!(
+            client.strip_namespace("mcp_fs_read_file"),
+            Some("read_file")
+        );
+        assert_eq!(client.strip_namespace("mcp_fs_"), Some(""));
+    }
+
+    #[test]
+    fn test_server_name() {
+        let client = McpClient {
+            server_name: "test-server".to_string(),
+            child: Mutex::new(None),
+            stdin_tx: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: AtomicU64::new(1),
+            server_info: Mutex::new(None),
+        };
+
+        assert_eq!(client.server_name(), "test-server");
+    }
+
+    #[test]
+    fn test_next_id_atomic() {
+        let client = McpClient {
+            server_name: "test".to_string(),
+            child: Mutex::new(None),
+            stdin_tx: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            next_id: AtomicU64::new(1),
+            server_info: Mutex::new(None),
+        };
+
+        let id1 = client.next_id.fetch_add(1, Ordering::Relaxed);
+        let id2 = client.next_id.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+    }
+}

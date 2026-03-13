@@ -224,6 +224,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_store_memory_overwrites() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate.store_memory(&fid, "key", "old_value", 0.5).await.unwrap();
+        substrate.store_memory(&fid, "key", "new_value", 0.9).await.unwrap();
+
+        let results = substrate.recall_memories(&fid, "key", 10).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, "new_value");
+        assert!((results[0].confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_recall_empty() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        let results = substrate.recall_memories(&fid, "nothing", 10).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_recall_limit() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        for i in 0..10 {
+            substrate
+                .store_memory(&fid, &format!("item_{i}"), &format!("val_{i}"), 0.5)
+                .await
+                .unwrap();
+        }
+
+        let results = substrate.recall_memories(&fid, "item", 3).await.unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_recall_ordered_by_confidence() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate.store_memory(&fid, "low_prio", "data", 0.2).await.unwrap();
+        substrate.store_memory(&fid, "high_prio", "data", 0.9).await.unwrap();
+        substrate.store_memory(&fid, "mid_prio", "data", 0.5).await.unwrap();
+
+        let results = substrate.recall_memories(&fid, "prio", 10).await.unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].key, "high_prio");
+        assert_eq!(results[2].key, "low_prio");
+    }
+
+    #[tokio::test]
+    async fn test_decay_preserves_high_confidence() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate.store_memory(&fid, "strong", "data", 1.0).await.unwrap();
+
+        // Light decay should not prune a 1.0 confidence memory
+        substrate.decay_memories(&fid, 0.1).await.unwrap();
+
+        let results = substrate.recall_memories(&fid, "strong", 10).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].confidence > 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_memory() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        // Should not error
+        substrate.delete_memory(&fid, "nonexistent").await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_delete_memory() {
         let substrate = MemorySubstrate::in_memory().unwrap();
         let fid = punch_types::FighterId::new();

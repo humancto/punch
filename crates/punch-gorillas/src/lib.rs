@@ -151,3 +151,194 @@ impl Default for GorillaLifecycle {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manifest(name: &str) -> GorillaManifest {
+        GorillaManifest {
+            name: name.to_string(),
+            description: format!("{name} description"),
+            schedule: "*/5 * * * *".to_string(),
+            moves_required: Vec::new(),
+            settings_schema: None,
+            dashboard_metrics: Vec::new(),
+            system_prompt: None,
+            model: None,
+            capabilities: Vec::new(),
+            weight_class: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_register_gorilla() {
+        let lifecycle = GorillaLifecycle::new();
+        let id = lifecycle.register(test_manifest("alpha")).await;
+        let gorillas = lifecycle.list().await;
+        assert_eq!(gorillas.len(), 1);
+        assert_eq!(gorillas[0].1, "alpha");
+        assert_eq!(gorillas[0].0, id);
+    }
+
+    #[tokio::test]
+    async fn test_gorilla_initial_status_is_caged() {
+        let lifecycle = GorillaLifecycle::new();
+        let id = lifecycle.register(test_manifest("beta")).await;
+        let status = lifecycle.get_status(id).await.unwrap();
+        assert_eq!(status, GorillaStatus::Caged);
+    }
+
+    #[tokio::test]
+    async fn test_unleash_gorilla() {
+        let lifecycle = GorillaLifecycle::new();
+        let id = lifecycle.register(test_manifest("charlie")).await;
+        lifecycle.unleash(id).await.unwrap();
+        let status = lifecycle.get_status(id).await.unwrap();
+        assert_eq!(status, GorillaStatus::Unleashed);
+    }
+
+    #[tokio::test]
+    async fn test_cage_gorilla() {
+        let lifecycle = GorillaLifecycle::new();
+        let id = lifecycle.register(test_manifest("delta")).await;
+        lifecycle.unleash(id).await.unwrap();
+        lifecycle.cage(id).await.unwrap();
+        let status = lifecycle.get_status(id).await.unwrap();
+        assert_eq!(status, GorillaStatus::Caged);
+    }
+
+    #[tokio::test]
+    async fn test_unleash_nonexistent_gorilla() {
+        let lifecycle = GorillaLifecycle::new();
+        let fake_id = GorillaId::new();
+        let result = lifecycle.unleash(fake_id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cage_nonexistent_gorilla() {
+        let lifecycle = GorillaLifecycle::new();
+        let fake_id = GorillaId::new();
+        let result = lifecycle.cage(fake_id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_status_nonexistent() {
+        let lifecycle = GorillaLifecycle::new();
+        let fake_id = GorillaId::new();
+        let result = lifecycle.get_status(fake_id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_multiple_gorillas() {
+        let lifecycle = GorillaLifecycle::new();
+        for i in 0..5 {
+            lifecycle.register(test_manifest(&format!("gorilla-{i}"))).await;
+        }
+        let gorillas = lifecycle.list().await;
+        assert_eq!(gorillas.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_default() {
+        let lifecycle = GorillaLifecycle::default();
+        let gorillas = lifecycle.list().await;
+        assert!(gorillas.is_empty());
+    }
+
+    #[test]
+    fn test_gorilla_output_serialization() {
+        let output = GorillaOutput {
+            summary: "Completed task".to_string(),
+            artifacts: vec!["report.pdf".to_string()],
+            next_run: None,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let deserialized: GorillaOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.summary, "Completed task");
+        assert_eq!(deserialized.artifacts.len(), 1);
+        assert!(deserialized.next_run.is_none());
+    }
+
+    #[test]
+    fn test_gorilla_output_with_next_run() {
+        let output = GorillaOutput {
+            summary: "Done".to_string(),
+            artifacts: Vec::new(),
+            next_run: Some(Utc::now()),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let deserialized: GorillaOutput = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.next_run.is_some());
+    }
+
+    #[test]
+    fn test_requirement_status_serialization() {
+        let req = RequirementStatus {
+            name: "api_key".to_string(),
+            met: true,
+            message: "API key is configured".to_string(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: RequirementStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "api_key");
+        assert!(deserialized.met);
+    }
+
+    #[test]
+    fn test_requirement_status_not_met() {
+        let req = RequirementStatus {
+            name: "database".to_string(),
+            met: false,
+            message: "Database not reachable".to_string(),
+        };
+        assert!(!req.met);
+        assert!(req.message.contains("not reachable"));
+    }
+
+    #[test]
+    fn test_gorilla_manifest_schedule_parsing() {
+        let manifest = GorillaManifest {
+            name: "scheduler-test".to_string(),
+            description: "test".to_string(),
+            schedule: "0 */6 * * *".to_string(),
+            moves_required: Vec::new(),
+            settings_schema: None,
+            dashboard_metrics: Vec::new(),
+            system_prompt: None,
+            model: None,
+            capabilities: Vec::new(),
+            weight_class: None,
+        };
+        assert_eq!(manifest.schedule, "0 */6 * * *");
+    }
+
+    #[test]
+    fn test_gorilla_manifest_with_moves() {
+        let manifest = GorillaManifest {
+            name: "worker".to_string(),
+            description: "worker gorilla".to_string(),
+            schedule: "*/10 * * * *".to_string(),
+            moves_required: vec!["read_file".to_string(), "web_fetch".to_string()],
+            settings_schema: None,
+            dashboard_metrics: vec!["files_processed".to_string()],
+            system_prompt: Some("You are a worker.".to_string()),
+            model: None,
+            capabilities: Vec::new(),
+            weight_class: None,
+        };
+        assert_eq!(manifest.moves_required.len(), 2);
+        assert_eq!(manifest.dashboard_metrics.len(), 1);
+        assert_eq!(manifest.effective_system_prompt(), "You are a worker.");
+    }
+
+    #[test]
+    fn test_gorilla_manifest_effective_prompt_fallback() {
+        let manifest = test_manifest("fallback");
+        // With no system_prompt, falls back to description
+        assert_eq!(manifest.effective_system_prompt(), "fallback description");
+    }
+}

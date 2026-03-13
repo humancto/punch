@@ -674,6 +674,103 @@ mod tests {
         assert!(runtime.list_plugins().is_empty());
     }
 
+    #[test]
+    fn test_manifest_validation_empty_entry_point() {
+        let mut manifest = valid_manifest();
+        manifest.entry_point = "  ".to_string();
+        let errors = PluginRegistry::validate_manifest(&manifest);
+        assert!(errors.iter().any(|e| e.contains("entry_point")));
+    }
+
+    #[test]
+    fn test_manifest_validation_zero_memory() {
+        let mut manifest = valid_manifest();
+        manifest.max_memory_bytes = 0;
+        let errors = PluginRegistry::validate_manifest(&manifest);
+        assert!(errors.iter().any(|e| e.contains("max_memory_bytes")));
+    }
+
+    #[test]
+    fn test_manifest_validation_zero_execution_ms() {
+        let mut manifest = valid_manifest();
+        manifest.max_execution_ms = 0;
+        let errors = PluginRegistry::validate_manifest(&manifest);
+        assert!(errors.iter().any(|e| e.contains("max_execution_ms")));
+    }
+
+    #[test]
+    fn test_manifest_validation_multiple_errors() {
+        let manifest = PluginManifest {
+            name: "".to_string(),
+            version: "".to_string(),
+            description: "bad".to_string(),
+            author: "x".to_string(),
+            entry_point: "".to_string(),
+            capabilities: vec![],
+            max_memory_bytes: 0,
+            max_execution_ms: 0,
+            permissions: PluginPermissions::default(),
+        };
+        let errors = PluginRegistry::validate_manifest(&manifest);
+        assert!(errors.len() >= 5, "should have multiple errors: {errors:?}");
+    }
+
+    #[test]
+    fn test_manifest_serde_roundtrip() {
+        let manifest = valid_manifest();
+        let json = serde_json::to_string(&manifest).unwrap();
+        let restored: PluginManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.name, "test-technique");
+        assert_eq!(restored.version, "1.0.0");
+    }
+
+    #[test]
+    fn test_plugin_state_equality() {
+        assert_eq!(PluginState::Loaded, PluginState::Loaded);
+        assert_ne!(PluginState::Loaded, PluginState::Running);
+        assert_ne!(PluginState::Stopped, PluginState::Error("x".into()));
+        assert_eq!(
+            PluginState::Error("foo".into()),
+            PluginState::Error("foo".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_registry_reject_invalid_manifest() {
+        let registry = PluginRegistry::new();
+        let mut manifest = valid_manifest();
+        manifest.name = "".to_string();
+        let result = registry.register(manifest, b"fake").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_registry_default() {
+        let registry = PluginRegistry::default();
+        assert_eq!(registry.plugin_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_unregister_nonexistent() {
+        let registry = PluginRegistry::new();
+        let id = Uuid::new_v4();
+        let result = registry.unregister(&id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_invoke_without_runtime() {
+        let registry = PluginRegistry::new();
+        let id = registry.register(valid_manifest(), b"fake").await.unwrap();
+        let input = PluginInput {
+            function: "execute".to_string(),
+            args: serde_json::json!({}),
+            context: serde_json::json!({}),
+        };
+        let result = registry.invoke(&id, input).await;
+        assert!(result.is_err());
+    }
+
     #[tokio::test]
     async fn test_plugin_invocation_count_incremented() {
         let runtime = Arc::new(NativePluginRuntime::new());

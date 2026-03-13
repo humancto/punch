@@ -321,4 +321,55 @@ mod tests {
         assert!(!adapter.status().connected);
         assert_eq!(adapter.session_count(), 0);
     }
+
+    #[test]
+    fn test_register_multiple_sessions() {
+        let adapter = WebChatAdapter::new();
+        let _rx1 = adapter.register_session("s1".to_string(), "Alice".to_string());
+        let _rx2 = adapter.register_session("s2".to_string(), "Bob".to_string());
+        let _rx3 = adapter.register_session("s3".to_string(), "Charlie".to_string());
+        assert_eq!(adapter.session_count(), 3);
+        assert_eq!(adapter.active_sessions().len(), 3);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_session() {
+        let adapter = WebChatAdapter::new();
+        adapter.remove_session("nonexistent");
+        assert_eq!(adapter.session_count(), 0);
+    }
+
+    #[test]
+    fn test_create_message_no_text_field() {
+        let adapter = WebChatAdapter::new();
+        let _rx = adapter.register_session("s1".to_string(), "Alice".to_string());
+        let payload = serde_json::json!({ "other": "data" });
+        assert!(adapter.create_message_from_ws("s1", &payload).is_none());
+    }
+
+    #[test]
+    fn test_create_message_no_message_id() {
+        let adapter = WebChatAdapter::new();
+        let _rx = adapter.register_session("s1".to_string(), "Alice".to_string());
+        let payload = serde_json::json!({ "text": "Hello" });
+        let msg = adapter.create_message_from_ws("s1", &payload).unwrap();
+        assert_eq!(msg.platform_message_id, "");
+    }
+
+    #[test]
+    fn test_send_multiple_messages_to_session() {
+        let adapter = WebChatAdapter::new();
+        let mut rx = adapter.register_session("s1".to_string(), "Alice".to_string());
+        adapter.send_to_session("s1", "msg1").unwrap();
+        adapter.send_to_session("s1", "msg2").unwrap();
+        assert_eq!(rx.try_recv().unwrap(), "msg1");
+        assert_eq!(rx.try_recv().unwrap(), "msg2");
+    }
+
+    #[test]
+    fn test_webchat_default() {
+        let adapter = WebChatAdapter::default();
+        assert_eq!(adapter.name(), "webchat");
+        assert_eq!(adapter.session_count(), 0);
+    }
 }

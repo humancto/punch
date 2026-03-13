@@ -2122,4 +2122,707 @@ mod tests {
             "https://bedrock-runtime.eu-west-1.amazonaws.com/model/anthropic.claude-3-sonnet/converse"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // TokenUsage tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn token_usage_default() {
+        let u = TokenUsage::default();
+        assert_eq!(u.input_tokens, 0);
+        assert_eq!(u.output_tokens, 0);
+        assert_eq!(u.total(), 0);
+    }
+
+    #[test]
+    fn token_usage_accumulate() {
+        let mut u = TokenUsage { input_tokens: 10, output_tokens: 20 };
+        let other = TokenUsage { input_tokens: 5, output_tokens: 15 };
+        u.accumulate(&other);
+        assert_eq!(u.input_tokens, 15);
+        assert_eq!(u.output_tokens, 35);
+        assert_eq!(u.total(), 50);
+    }
+
+    #[test]
+    fn token_usage_total() {
+        let u = TokenUsage { input_tokens: 100, output_tokens: 200 };
+        assert_eq!(u.total(), 300);
+    }
+
+    // -----------------------------------------------------------------------
+    // StopReason serialization
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stop_reason_serialization() {
+        let json = serde_json::to_string(&StopReason::EndTurn).unwrap();
+        assert_eq!(json, "\"end_turn\"");
+
+        let json = serde_json::to_string(&StopReason::ToolUse).unwrap();
+        assert_eq!(json, "\"tool_use\"");
+
+        let json = serde_json::to_string(&StopReason::MaxTokens).unwrap();
+        assert_eq!(json, "\"max_tokens\"");
+
+        let json = serde_json::to_string(&StopReason::Error).unwrap();
+        assert_eq!(json, "\"error\"");
+    }
+
+    #[test]
+    fn stop_reason_deserialization() {
+        let sr: StopReason = serde_json::from_str("\"end_turn\"").unwrap();
+        assert_eq!(sr, StopReason::EndTurn);
+
+        let sr: StopReason = serde_json::from_str("\"tool_use\"").unwrap();
+        assert_eq!(sr, StopReason::ToolUse);
+    }
+
+    // -----------------------------------------------------------------------
+    // Anthropic driver tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn anthropic_request_body_simple() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let body = driver.build_request_body(&simple_request());
+
+        assert_eq!(body["model"], "test-model");
+        assert_eq!(body["max_tokens"], 4096);
+        assert_eq!(body["system"], "You are helpful.");
+        assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 0.001);
+
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "Hello");
+    }
+
+    #[test]
+    fn anthropic_request_body_with_tools() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let body = driver.build_request_body(&request_with_tools());
+
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "get_weather");
+        assert!(tools[0]["input_schema"]["properties"].is_object());
+    }
+
+    #[test]
+    fn anthropic_request_body_no_system_prompt() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let req = CompletionRequest {
+            model: "test".into(),
+            messages: vec![Message::new(Role::User, "Hi")],
+            tools: Vec::new(),
+            max_tokens: 100,
+            temperature: None,
+            system_prompt: None,
+        };
+        let body = driver.build_request_body(&req);
+        assert!(body.get("system").is_none());
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn anthropic_parse_response_text() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "Hello!"}
+            ],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+            }
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Hello!");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        assert_eq!(resp.usage.input_tokens, 10);
+        assert_eq!(resp.usage.output_tokens, 5);
+        assert!(resp.message.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn anthropic_parse_response_tool_use() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "Let me check."},
+                {
+                    "type": "tool_use",
+                    "id": "tool_abc",
+                    "name": "get_weather",
+                    "input": {"city": "NYC"}
+                }
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 20, "output_tokens": 15}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Let me check.");
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].id, "tool_abc");
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+        assert_eq!(resp.message.tool_calls[0].input["city"], "NYC");
+    }
+
+    #[test]
+    fn anthropic_parse_response_max_tokens() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "content": [{"type": "text", "text": "truncated"}],
+            "stop_reason": "max_tokens",
+            "usage": {"input_tokens": 5, "output_tokens": 100}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens);
+    }
+
+    #[test]
+    fn anthropic_parse_response_unknown_stop_reason() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "content": [{"type": "text", "text": "err"}],
+            "stop_reason": "something_unknown",
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::Error);
+    }
+
+    #[test]
+    fn anthropic_request_body_with_assistant_and_tool_messages() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let req = CompletionRequest {
+            model: "test".into(),
+            messages: vec![
+                Message::new(Role::User, "Hi"),
+                Message {
+                    role: Role::Assistant,
+                    content: "I'll check".into(),
+                    tool_calls: vec![ToolCall {
+                        id: "call_1".into(),
+                        name: "file_read".into(),
+                        input: serde_json::json!({"path": "/tmp/test"}),
+                    }],
+                    tool_results: Vec::new(),
+                    timestamp: chrono::Utc::now(),
+                },
+                Message {
+                    role: Role::Tool,
+                    content: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_results: vec![punch_types::ToolCallResult {
+                        id: "call_1".into(),
+                        content: "file contents".into(),
+                        is_error: false,
+                    }],
+                    timestamp: chrono::Utc::now(),
+                },
+            ],
+            tools: Vec::new(),
+            max_tokens: 100,
+            temperature: None,
+            system_prompt: None,
+        };
+
+        let body = driver.build_request_body(&req);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[2]["role"], "user"); // Tool results go as user role
+    }
+
+    #[test]
+    fn anthropic_request_body_system_message_skipped() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let req = CompletionRequest {
+            model: "test".into(),
+            messages: vec![
+                Message::new(Role::System, "System instruction"),
+                Message::new(Role::User, "Hi"),
+            ],
+            tools: Vec::new(),
+            max_tokens: 100,
+            temperature: None,
+            system_prompt: None,
+        };
+
+        let body = driver.build_request_body(&req);
+        let messages = body["messages"].as_array().unwrap();
+        // System messages are skipped in messages array
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    // -----------------------------------------------------------------------
+    // OpenAI-compatible driver tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn openai_request_body_simple() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let body = driver.build_request_body(&simple_request());
+
+        assert_eq!(body["model"], "test-model");
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "You are helpful.");
+        assert_eq!(messages[1]["role"], "user");
+    }
+
+    #[test]
+    fn openai_request_body_with_tools() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let body = driver.build_request_body(&request_with_tools());
+
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "get_weather");
+    }
+
+    #[test]
+    fn openai_parse_response_text() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello!"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5
+            }
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Hello!");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        assert_eq!(resp.usage.input_tokens, 10);
+        assert_eq!(resp.usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn openai_parse_response_tool_calls() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{\"city\": \"NYC\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+        assert_eq!(resp.message.tool_calls[0].input["city"], "NYC");
+    }
+
+    #[test]
+    fn openai_parse_response_tool_calls_fix_stop_reason() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        // finish_reason is "stop" but there are tool_calls — should fix to ToolUse
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Using tool",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "test_tool",
+                            "arguments": "{}"
+                        }
+                    }]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn openai_parse_response_length_stop_reason() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": "cut off"},
+                "finish_reason": "length"
+            }],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens);
+    }
+
+    #[test]
+    fn openai_parse_response_no_choices_error() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+        let response_body = serde_json::json!({"choices": []});
+
+        let result = driver.parse_response(&response_body);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Gemini driver additional tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gemini_assistant_message_formatting() {
+        let driver = GeminiDriver::new("key".to_string(), None);
+        let req = CompletionRequest {
+            model: "gemini-pro".into(),
+            messages: vec![
+                Message::new(Role::User, "Hi"),
+                Message {
+                    role: Role::Assistant,
+                    content: "Let me help".into(),
+                    tool_calls: vec![ToolCall {
+                        id: "tc1".into(),
+                        name: "get_weather".into(),
+                        input: serde_json::json!({"city": "NYC"}),
+                    }],
+                    tool_results: Vec::new(),
+                    timestamp: chrono::Utc::now(),
+                },
+            ],
+            tools: Vec::new(),
+            max_tokens: 100,
+            temperature: None,
+            system_prompt: None,
+        };
+
+        let body = driver.build_request_body(&req);
+        let contents = body["contents"].as_array().unwrap();
+        assert_eq!(contents[1]["role"], "model"); // Gemini uses "model" not "assistant"
+        let parts = contents[1]["parts"].as_array().unwrap();
+        assert!(parts.len() >= 2); // text part + functionCall part
+    }
+
+    #[test]
+    fn gemini_max_tokens_stop_reason() {
+        let driver = GeminiDriver::new("key".to_string(), None);
+        let response_body = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "truncated"}],
+                    "role": "model"
+                },
+                "finishReason": "MAX_TOKENS"
+            }],
+            "usageMetadata": {"promptTokenCount": 0, "candidatesTokenCount": 0}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens);
+    }
+
+    #[test]
+    fn gemini_custom_base_url() {
+        let driver = GeminiDriver::new("key".to_string(), Some("https://custom.example.com".into()));
+        let url = driver.build_url("gemini-pro");
+        assert!(url.starts_with("https://custom.example.com/"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Ollama driver additional tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ollama_response_with_tool_calls() {
+        let driver = OllamaDriver::new(None);
+        let response_body = serde_json::json!({
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": {"city": "London"}
+                    }
+                }]
+            },
+            "done": true,
+            "prompt_eval_count": 10,
+            "eval_count": 5
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+    }
+
+    #[test]
+    fn ollama_response_not_done() {
+        let driver = OllamaDriver::new(None);
+        let response_body = serde_json::json!({
+            "message": {"role": "assistant", "content": "partial"},
+            "done": false,
+            "prompt_eval_count": 10,
+            "eval_count": 5
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens);
+    }
+
+    // -----------------------------------------------------------------------
+    // Bedrock driver additional tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bedrock_request_with_tools() {
+        let driver = BedrockDriver::new("key".into(), "secret".into(), "us-east-1".into());
+        let body = driver.build_request_body(&request_with_tools());
+
+        let tool_config = &body["toolConfig"]["tools"];
+        assert!(tool_config.is_array());
+        let tools = tool_config.as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["toolSpec"]["name"], "get_weather");
+    }
+
+    #[test]
+    fn bedrock_response_with_tool_use() {
+        let driver = BedrockDriver::new("key".into(), "secret".into(), "us-east-1".into());
+        let response_body = serde_json::json!({
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"text": "Using tool"},
+                        {"toolUse": {
+                            "toolUseId": "tu_123",
+                            "name": "get_weather",
+                            "input": {"city": "NYC"}
+                        }}
+                    ]
+                }
+            },
+            "stopReason": "tool_use",
+            "usage": {"inputTokens": 10, "outputTokens": 20}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].id, "tu_123");
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+    }
+
+    #[test]
+    fn bedrock_request_with_tool_results() {
+        let driver = BedrockDriver::new("key".into(), "secret".into(), "us-east-1".into());
+        let req = CompletionRequest {
+            model: "test".into(),
+            messages: vec![
+                Message::new(Role::User, "Hi"),
+                Message {
+                    role: Role::Tool,
+                    content: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_results: vec![punch_types::ToolCallResult {
+                        id: "tu_1".into(),
+                        content: "result data".into(),
+                        is_error: false,
+                    }],
+                    timestamp: chrono::Utc::now(),
+                },
+            ],
+            tools: Vec::new(),
+            max_tokens: 100,
+            temperature: None,
+            system_prompt: None,
+        };
+
+        let body = driver.build_request_body(&req);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages[1]["role"], "user"); // Bedrock sends tool results as user
+        let content = messages[1]["content"].as_array().unwrap();
+        assert!(content[0]["toolResult"].is_object());
+        assert_eq!(content[0]["toolResult"]["status"], "success");
+    }
+
+    #[test]
+    fn bedrock_url_different_regions() {
+        let driver = BedrockDriver::new("k".into(), "s".into(), "ap-southeast-1".into());
+        let url = driver.build_url("model-id");
+        assert!(url.contains("ap-southeast-1"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Azure OpenAI additional tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn azure_openai_delegates_parse_to_openai() {
+        let driver = AzureOpenAiDriver::new(
+            "key".into(), "res".into(), "dep".into(), None,
+        );
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": "Azure response"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Azure response");
+    }
+
+    // -----------------------------------------------------------------------
+    // default_base_url tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn default_base_url_anthropic() {
+        assert_eq!(default_base_url(&Provider::Anthropic), "https://api.anthropic.com");
+    }
+
+    #[test]
+    fn default_base_url_openai() {
+        assert_eq!(default_base_url(&Provider::OpenAI), "https://api.openai.com");
+    }
+
+    #[test]
+    fn default_base_url_google() {
+        assert_eq!(default_base_url(&Provider::Google), "https://generativelanguage.googleapis.com");
+    }
+
+    #[test]
+    fn default_base_url_ollama() {
+        assert_eq!(default_base_url(&Provider::Ollama), "http://localhost:11434");
+    }
+
+    #[test]
+    fn default_base_url_groq() {
+        assert_eq!(default_base_url(&Provider::Groq), "https://api.groq.com/openai");
+    }
+
+    #[test]
+    fn default_base_url_deepseek() {
+        assert_eq!(default_base_url(&Provider::DeepSeek), "https://api.deepseek.com");
+    }
+
+    // -----------------------------------------------------------------------
+    // hex_sha256 and hex_encode tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_hex_sha256() {
+        let hash = hex_sha256(b"");
+        assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex_encode(&[0x00, 0xff, 0x0a, 0xbc]), "00ff0abc");
+    }
+
+    #[test]
+    fn test_hmac_sha256_basic() {
+        let result = hmac_sha256(b"key", b"data");
+        assert!(!result.is_empty());
+        assert_eq!(result.len(), 32); // SHA-256 produces 32 bytes
+    }
+
+    // -----------------------------------------------------------------------
+    // create_driver error cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn create_driver_missing_api_key_env() {
+        let config = ModelConfig {
+            provider: Provider::Anthropic,
+            model: "claude-3".into(),
+            api_key_env: Some("PUNCH_TEST_NONEXISTENT_KEY_XYZ".into()),
+            base_url: None,
+            max_tokens: None,
+            temperature: None,
+        };
+        let result = create_driver(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_driver_openai_compatible_fallback() {
+        // Custom provider should fall through to OpenAI-compatible
+        unsafe { std::env::set_var("TEST_CUSTOM_KEY_DRIVER", "fake-key") };
+        let config = ModelConfig {
+            provider: Provider::Custom("my-custom".into()),
+            model: "custom-model".into(),
+            api_key_env: Some("TEST_CUSTOM_KEY_DRIVER".into()),
+            base_url: Some("https://custom.api.com".into()),
+            max_tokens: None,
+            temperature: None,
+        };
+        let result = create_driver(&config);
+        assert!(result.is_ok());
+        unsafe { std::env::remove_var("TEST_CUSTOM_KEY_DRIVER") };
+    }
 }

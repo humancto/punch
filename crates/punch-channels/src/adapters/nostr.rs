@@ -337,4 +337,73 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_compute_id_different_kind() {
+        let id_k1 = NostrEvent::compute_id("pub", 1000, 1, &[], "hello");
+        let id_k4 = NostrEvent::compute_id("pub", 1000, 4, &[], "hello");
+        assert_ne!(id_k1, id_k4);
+    }
+
+    #[test]
+    fn test_compute_id_different_pubkey() {
+        let id_a = NostrEvent::compute_id("aaa", 1000, 1, &[], "hello");
+        let id_b = NostrEvent::compute_id("bbb", 1000, 1, &[], "hello");
+        assert_ne!(id_a, id_b);
+    }
+
+    #[test]
+    fn test_compute_id_with_tags() {
+        let tags = vec![vec!["p".to_string(), "deadbeef".to_string()]];
+        let id_with = NostrEvent::compute_id("pub", 1000, 4, &tags, "hello");
+        let id_without = NostrEvent::compute_id("pub", 1000, 4, &[], "hello");
+        assert_ne!(id_with, id_without);
+    }
+
+    #[test]
+    fn test_parse_subscription_event_non_event() {
+        let msg = r#"["OK","sub-1",true,""]"#;
+        assert!(NostrAdapter::parse_subscription_event(msg).is_none());
+    }
+
+    #[test]
+    fn test_parse_subscription_event_too_short() {
+        let msg = r#"["EVENT","sub-1"]"#;
+        assert!(NostrAdapter::parse_subscription_event(msg).is_none());
+    }
+
+    #[test]
+    fn test_parse_subscription_event_invalid_json() {
+        assert!(NostrAdapter::parse_subscription_event("not json").is_none());
+    }
+
+    #[test]
+    fn test_event_to_incoming_dm_is_not_group() {
+        let adapter = make_adapter();
+        let event = adapter.build_dm("recipient", "secret");
+        let msg = adapter.event_to_incoming(&event);
+        assert!(!msg.is_group); // kind 4 is not group
+        assert_eq!(msg.metadata.get("kind").unwrap(), &serde_json::json!(4));
+    }
+
+    #[test]
+    fn test_build_text_note_has_correct_fields() {
+        let adapter = make_adapter();
+        let event = adapter.build_text_note("Test content");
+        assert_eq!(event.kind, 1);
+        assert_eq!(event.content, "Test content");
+        assert!(!event.id.is_empty());
+        assert!(!event.sig.is_empty());
+        assert_eq!(event.id.len(), 64); // SHA-256 hex
+        assert_eq!(event.sig.len(), 64);
+    }
+
+    #[test]
+    fn test_event_to_incoming_display_name_truncated() {
+        let adapter = make_adapter();
+        let event = adapter.build_text_note("hi");
+        let msg = adapter.event_to_incoming(&event);
+        assert_eq!(msg.display_name.len(), 8);
+        assert_eq!(msg.display_name, &adapter.pubkey[..8]);
+    }
 }

@@ -131,3 +131,201 @@ fn default_true() -> bool {
 fn default_rate_limit_rpm() -> u32 {
     60
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_display_all_variants() {
+        assert_eq!(Provider::Anthropic.to_string(), "anthropic");
+        assert_eq!(Provider::Google.to_string(), "google");
+        assert_eq!(Provider::OpenAI.to_string(), "openai");
+        assert_eq!(Provider::Groq.to_string(), "groq");
+        assert_eq!(Provider::DeepSeek.to_string(), "deepseek");
+        assert_eq!(Provider::Ollama.to_string(), "ollama");
+        assert_eq!(Provider::Mistral.to_string(), "mistral");
+        assert_eq!(Provider::Together.to_string(), "together");
+        assert_eq!(Provider::Fireworks.to_string(), "fireworks");
+        assert_eq!(Provider::Cerebras.to_string(), "cerebras");
+        assert_eq!(Provider::XAI.to_string(), "xai");
+        assert_eq!(Provider::Cohere.to_string(), "cohere");
+        assert_eq!(Provider::Bedrock.to_string(), "bedrock");
+        assert_eq!(Provider::AzureOpenAi.to_string(), "azure_openai");
+        assert_eq!(
+            Provider::Custom("my_provider".to_string()).to_string(),
+            "custom(my_provider)"
+        );
+    }
+
+    #[test]
+    fn test_provider_serde_roundtrip() {
+        let providers = vec![
+            Provider::Anthropic,
+            Provider::Google,
+            Provider::OpenAI,
+            Provider::Groq,
+            Provider::DeepSeek,
+            Provider::Ollama,
+            Provider::Mistral,
+            Provider::Together,
+            Provider::Fireworks,
+            Provider::Cerebras,
+            Provider::XAI,
+            Provider::Cohere,
+            Provider::Bedrock,
+            Provider::AzureOpenAi,
+            Provider::Custom("test".to_string()),
+        ];
+        for provider in &providers {
+            let json = serde_json::to_string(provider).expect("serialize provider");
+            let deser: Provider = serde_json::from_str(&json).expect("deserialize provider");
+            assert_eq!(&deser, provider);
+        }
+    }
+
+    #[test]
+    fn test_provider_serde_rename() {
+        assert_eq!(
+            serde_json::to_string(&Provider::OpenAI).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(serde_json::to_string(&Provider::XAI).unwrap(), "\"xai\"");
+        assert_eq!(
+            serde_json::to_string(&Provider::AzureOpenAi).unwrap(),
+            "\"azure_openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Anthropic).unwrap(),
+            "\"anthropic\""
+        );
+    }
+
+    #[test]
+    fn test_provider_equality() {
+        assert_eq!(Provider::Anthropic, Provider::Anthropic);
+        assert_ne!(Provider::Anthropic, Provider::Google);
+        assert_eq!(
+            Provider::Custom("x".to_string()),
+            Provider::Custom("x".to_string())
+        );
+        assert_ne!(
+            Provider::Custom("x".to_string()),
+            Provider::Custom("y".to_string())
+        );
+    }
+
+    #[test]
+    fn test_model_config_serde_roundtrip() {
+        let config = ModelConfig {
+            provider: Provider::Anthropic,
+            model: "claude-sonnet-4-20250514".to_string(),
+            api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+            base_url: None,
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: ModelConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.model, "claude-sonnet-4-20250514");
+        assert_eq!(deser.provider, Provider::Anthropic);
+        assert_eq!(deser.max_tokens, Some(4096));
+        assert_eq!(deser.temperature, Some(0.7));
+    }
+
+    #[test]
+    fn test_model_config_optional_fields() {
+        let config = ModelConfig {
+            provider: Provider::Ollama,
+            model: "llama3".to_string(),
+            api_key_env: None,
+            base_url: Some("http://localhost:11434".to_string()),
+            max_tokens: None,
+            temperature: None,
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: ModelConfig = serde_json::from_str(&json).expect("deserialize");
+        assert!(deser.api_key_env.is_none());
+        assert_eq!(deser.base_url, Some("http://localhost:11434".to_string()));
+        assert!(deser.max_tokens.is_none());
+        assert!(deser.temperature.is_none());
+    }
+
+    #[test]
+    fn test_memory_config_defaults() {
+        let json = r#"{"db_path": "/tmp/punch.db"}"#;
+        let config: MemoryConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.db_path, "/tmp/punch.db");
+        assert!(config.knowledge_graph_enabled); // default_true
+        assert!(config.max_entries.is_none());
+    }
+
+    #[test]
+    fn test_memory_config_roundtrip() {
+        let config = MemoryConfig {
+            db_path: "/data/punch.db".to_string(),
+            knowledge_graph_enabled: false,
+            max_entries: Some(10000),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: MemoryConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.db_path, "/data/punch.db");
+        assert!(!deser.knowledge_graph_enabled);
+        assert_eq!(deser.max_entries, Some(10000));
+    }
+
+    #[test]
+    fn test_channel_config_serde() {
+        let config = ChannelConfig {
+            channel_type: "slack".to_string(),
+            token_env: Some("SLACK_TOKEN".to_string()),
+            settings: HashMap::from([("channel_id".to_string(), serde_json::json!("C123456"))]),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: ChannelConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.channel_type, "slack");
+        assert_eq!(deser.token_env, Some("SLACK_TOKEN".to_string()));
+        assert_eq!(deser.settings["channel_id"], "C123456");
+    }
+
+    #[test]
+    fn test_channel_config_defaults() {
+        let json = r#"{"channel_type": "webhook"}"#;
+        let config: ChannelConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.channel_type, "webhook");
+        assert!(config.token_env.is_none());
+        assert!(config.settings.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_server_config_serde() {
+        let config = McpServerConfig {
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), "@modelcontextprotocol/server".to_string()],
+            env: HashMap::from([("NODE_ENV".to_string(), "production".to_string())]),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: McpServerConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.command, "npx");
+        assert_eq!(deser.args.len(), 2);
+        assert_eq!(deser.env["NODE_ENV"], "production");
+    }
+
+    #[test]
+    fn test_mcp_server_config_defaults() {
+        let json = r#"{"command": "python"}"#;
+        let config: McpServerConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.command, "python");
+        assert!(config.args.is_empty());
+        assert!(config.env.is_empty());
+    }
+
+    #[test]
+    fn test_provider_hash() {
+        let mut set = std::collections::HashSet::new();
+        set.insert(Provider::Anthropic);
+        set.insert(Provider::Google);
+        set.insert(Provider::Anthropic); // duplicate
+        assert_eq!(set.len(), 2);
+    }
+}

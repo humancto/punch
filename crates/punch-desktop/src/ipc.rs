@@ -304,4 +304,143 @@ mod tests {
         let deserialized: SendMessageRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.message, "Hello fighter");
     }
+
+    #[test]
+    fn test_ipc_response_ok_data_access() {
+        let data = serde_json::json!({"fighters": [{"name": "alpha"}]});
+        let resp = IpcResponse::ok(data.clone());
+        assert!(resp.success);
+        assert_eq!(resp.data.unwrap()["fighters"][0]["name"], "alpha");
+    }
+
+    #[test]
+    fn test_ipc_response_err_serialization() {
+        let resp = IpcResponse::err("connection refused");
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: IpcResponse = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.success);
+        assert_eq!(deserialized.error.as_deref(), Some("connection refused"));
+        assert!(deserialized.data.is_none());
+    }
+
+    #[test]
+    fn test_ipc_request_with_payload() {
+        let req = IpcRequest {
+            command: "spawn_fighter".to_string(),
+            payload: serde_json::json!({"name": "bravo", "system_prompt": "You are bravo."}),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: IpcRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.command, "spawn_fighter");
+        assert_eq!(deserialized.payload["name"], "bravo");
+    }
+
+    #[test]
+    fn test_spawn_fighter_response_serialization() {
+        let resp = SpawnFighterResponse {
+            id: FighterId(uuid::Uuid::nil()),
+            name: "TestFighter".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: SpawnFighterResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "TestFighter");
+        assert_eq!(deserialized.id, FighterId(uuid::Uuid::nil()));
+    }
+
+    #[test]
+    fn test_send_message_response_serialization() {
+        let resp = SendMessageResponse {
+            response: "Hello! I am the fighter.".to_string(),
+            tokens_used: 42,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: SendMessageResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.response, "Hello! I am the fighter.");
+        assert_eq!(deserialized.tokens_used, 42);
+    }
+
+    #[test]
+    fn test_system_status_optional_memory() {
+        let status = SystemStatus {
+            status: "ok".to_string(),
+            fighter_count: 0,
+            gorilla_count: 0,
+            uptime_secs: 0,
+            memory_bytes: None,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let deserialized: SystemStatus = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.memory_bytes.is_none());
+    }
+
+    #[test]
+    fn test_system_metrics_no_arena_connection() {
+        let metrics = SystemMetrics {
+            total_fighters: 0,
+            total_gorillas: 0,
+            desktop_uptime_secs: 10,
+            arena_uptime_secs: None,
+            arena_connected: false,
+            snapshot_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&metrics).unwrap();
+        let deserialized: SystemMetrics = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.arena_connected);
+        assert!(deserialized.arena_uptime_secs.is_none());
+    }
+
+    #[test]
+    fn test_config_info_auth_disabled() {
+        let config = ConfigInfo {
+            api_listen: "0.0.0.0:6660".to_string(),
+            default_provider: "anthropic".to_string(),
+            default_model: "claude-sonnet-4-20250514".to_string(),
+            auth_enabled: false,
+            rate_limit_rpm: 120,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: ConfigInfo = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.auth_enabled);
+        assert_eq!(deserialized.rate_limit_rpm, 120);
+    }
+
+    #[test]
+    fn test_gorilla_info_status_variants() {
+        for status in [
+            GorillaStatus::Caged,
+            GorillaStatus::Unleashed,
+            GorillaStatus::Rampaging,
+        ] {
+            let info = GorillaInfo {
+                id: GorillaId(uuid::Uuid::nil()),
+                name: "TestGorilla".to_string(),
+                description: "test".to_string(),
+                schedule: "*/5 * * * *".to_string(),
+                status,
+            };
+            let json = serde_json::to_string(&info).unwrap();
+            let deserialized: GorillaInfo = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized.status, status);
+        }
+    }
+
+    #[test]
+    fn test_fighter_info_status_variants() {
+        for status in [
+            FighterStatus::Idle,
+            FighterStatus::Fighting,
+            FighterStatus::KnockedOut,
+        ] {
+            let info = FighterInfo {
+                id: FighterId(uuid::Uuid::nil()),
+                name: "TestFighter".to_string(),
+                description: "test".to_string(),
+                weight_class: WeightClass::Middleweight,
+                status,
+            };
+            let json = serde_json::to_string(&info).unwrap();
+            let deserialized: FighterInfo = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized.status, status);
+        }
+    }
 }

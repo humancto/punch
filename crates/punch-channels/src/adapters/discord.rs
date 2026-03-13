@@ -328,4 +328,77 @@ mod tests {
         adapter.stop().await.unwrap();
         assert!(!adapter.status().connected);
     }
+
+    #[test]
+    fn test_parse_discord_no_author() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        let payload = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "content": "Hello"
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_discord_no_author_id() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        let payload = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "content": "Hello",
+            "author": { "username": "alice" }
+        });
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_discord_bot_false_explicitly() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        let payload = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "content": "Non-bot",
+            "author": { "id": "user1", "username": "alice", "bot": false }
+        });
+        let msg = adapter.parse_webhook_payload(&payload).unwrap();
+        assert_eq!(msg.text, "Non-bot");
+    }
+
+    #[test]
+    fn test_parse_discord_no_content() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        let payload = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "author": { "id": "user1", "username": "alice" }
+        });
+        // content defaults to "" which is empty
+        assert!(adapter.parse_webhook_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_parse_discord_dm_no_guild() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        let payload = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "content": "DM message",
+            "author": { "id": "user1", "username": "alice" }
+        });
+        let msg = adapter.parse_webhook_payload(&payload).unwrap();
+        assert!(!msg.is_group);
+    }
+
+    #[test]
+    fn test_parse_discord_message_counter() {
+        let adapter = DiscordAdapter::new("token".to_string(), None);
+        assert_eq!(adapter.status().messages_received, 0);
+        let payload = serde_json::json!({
+            "id": "msg1", "channel_id": "ch1", "content": "test",
+            "author": { "id": "u1", "username": "a" }
+        });
+        adapter.parse_webhook_payload(&payload);
+        assert_eq!(adapter.status().messages_received, 1);
+    }
 }

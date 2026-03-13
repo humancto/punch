@@ -181,4 +181,109 @@ mod tests {
         assert_eq!(deserialized.arena_url, state.arena_url);
         assert_eq!(deserialized.theme, state.theme);
     }
+
+    #[test]
+    fn test_state_connection_lifecycle() {
+        let mut state = DesktopState::new("http://localhost:6660".to_string());
+
+        // Initial state
+        assert!(!state.arena_running);
+        assert!(!state.connected);
+
+        // Connect
+        state.mark_connected();
+        assert!(state.arena_running);
+        assert!(state.connected);
+
+        // Disconnect
+        state.mark_disconnected();
+        assert!(state.arena_running); // still running
+        assert!(!state.connected);
+
+        // Reconnect
+        state.mark_connected();
+        assert!(state.connected);
+    }
+
+    #[test]
+    fn test_theme_case_insensitivity() {
+        assert_eq!("DARK".parse::<Theme>().unwrap(), Theme::Dark);
+        assert_eq!("Dark".parse::<Theme>().unwrap(), Theme::Dark);
+        assert_eq!("dark".parse::<Theme>().unwrap(), Theme::Dark);
+        assert_eq!("LIGHT".parse::<Theme>().unwrap(), Theme::Light);
+        assert_eq!("Light".parse::<Theme>().unwrap(), Theme::Light);
+        assert_eq!("SYSTEM".parse::<Theme>().unwrap(), Theme::System);
+    }
+
+    #[test]
+    fn test_theme_error_message() {
+        let result = "purple".parse::<Theme>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown theme"));
+        assert!(err.contains("purple"));
+    }
+
+    #[test]
+    fn test_dashboard_url_custom_port() {
+        let state = DesktopState::new("http://localhost:9999".to_string());
+        assert_eq!(state.dashboard_url(), "http://localhost:9999/dashboard");
+    }
+
+    #[test]
+    fn test_health_url_format() {
+        let state = DesktopState::new("http://192.168.1.100:3000".to_string());
+        assert_eq!(state.health_url(), "http://192.168.1.100:3000/health");
+    }
+
+    #[test]
+    fn test_status_url_format() {
+        let state = DesktopState::new("http://myhost:8080".to_string());
+        assert_eq!(state.status_url(), "http://myhost:8080/api/status");
+    }
+
+    #[test]
+    fn test_state_theme_switching() {
+        let mut state = DesktopState::new("http://localhost:6660".to_string());
+        assert_eq!(state.theme, Theme::Dark);
+
+        state.theme = Theme::Light;
+        assert_eq!(state.theme, Theme::Light);
+
+        state.theme = Theme::System;
+        assert_eq!(state.theme, Theme::System);
+    }
+
+    #[test]
+    fn test_auto_open_browser_default() {
+        let state = DesktopState::new("http://localhost:6660".to_string());
+        assert!(state.auto_open_browser);
+    }
+
+    #[test]
+    fn test_state_deserialization_from_json() {
+        let json = r#"{
+            "arena_url": "http://localhost:7777",
+            "arena_running": true,
+            "connected": true,
+            "started_at": "2024-01-01T00:00:00Z",
+            "theme": "light",
+            "auto_open_browser": false
+        }"#;
+        let state: DesktopState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.arena_url, "http://localhost:7777");
+        assert!(state.arena_running);
+        assert!(state.connected);
+        assert_eq!(state.theme, Theme::Light);
+        assert!(!state.auto_open_browser);
+    }
+
+    #[test]
+    fn test_theme_serialization_roundtrip() {
+        for theme in [Theme::Dark, Theme::Light, Theme::System] {
+            let json = serde_json::to_string(&theme).unwrap();
+            let back: Theme = serde_json::from_str(&json).unwrap();
+            assert_eq!(theme, back);
+        }
+    }
 }

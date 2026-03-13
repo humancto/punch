@@ -548,4 +548,217 @@ mod tests {
         let fake_id = TriggerId::new();
         assert!(engine.check_webhook(&fake_id).is_none());
     }
+
+    #[test]
+    fn trigger_engine_default() {
+        let engine = TriggerEngine::default();
+        assert!(engine.list_triggers().is_empty());
+    }
+
+    #[test]
+    fn trigger_id_display() {
+        let id = TriggerId::new();
+        let s = format!("{}", id);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn trigger_id_default() {
+        let id = TriggerId::default();
+        assert!(!id.0.is_nil());
+    }
+
+    #[test]
+    fn get_trigger_returns_correct_data() {
+        let engine = TriggerEngine::new();
+        let trigger = make_keyword_trigger(vec!["hello"]);
+        let id = engine.register_trigger(trigger);
+
+        let retrieved = engine.get_trigger(&id).unwrap();
+        assert_eq!(retrieved.name, "test-keyword");
+        assert!(retrieved.enabled);
+        assert_eq!(retrieved.fire_count, 0);
+    }
+
+    #[test]
+    fn get_trigger_nonexistent_returns_none() {
+        let engine = TriggerEngine::new();
+        let id = TriggerId::new();
+        assert!(engine.get_trigger(&id).is_none());
+    }
+
+    #[test]
+    fn remove_nonexistent_trigger_does_not_panic() {
+        let engine = TriggerEngine::new();
+        let id = TriggerId::new();
+        engine.remove_trigger(&id); // Should not panic.
+    }
+
+    #[tokio::test]
+    async fn keyword_trigger_fire_count_increments() {
+        let engine = TriggerEngine::new();
+        let trigger = make_keyword_trigger(vec!["count"]);
+        let id = engine.register_trigger(trigger);
+
+        engine.check_keyword("count me").await;
+        engine.check_keyword("count again").await;
+        engine.check_keyword("count three").await;
+
+        let t = engine.get_trigger(&id).unwrap();
+        assert_eq!(t.fire_count, 3);
+    }
+
+    #[tokio::test]
+    async fn event_trigger_fire_count_increments() {
+        let engine = TriggerEngine::new();
+        let trigger = make_event_trigger("error");
+        let id = engine.register_trigger(trigger);
+
+        let event = PunchEvent::Error {
+            source: "test".to_string(),
+            message: "oops".to_string(),
+        };
+        engine.check_event(&event).await;
+        engine.check_event(&event).await;
+
+        let t = engine.get_trigger(&id).unwrap();
+        assert_eq!(t.fire_count, 2);
+    }
+
+    #[test]
+    fn webhook_trigger_fire_count_increments() {
+        let engine = TriggerEngine::new();
+        let trigger = Trigger {
+            id: TriggerId::new(),
+            name: "webhook-count".to_string(),
+            condition: TriggerCondition::Webhook { secret: Some("secret".to_string()) },
+            action: TriggerAction::Log { message: "fired".to_string() },
+            enabled: true,
+            created_at: Utc::now(),
+            fire_count: 0,
+            max_fires: 0,
+        };
+        let id = engine.register_trigger(trigger);
+
+        engine.check_webhook(&id);
+        engine.check_webhook(&id);
+
+        let t = engine.get_trigger(&id).unwrap();
+        assert_eq!(t.fire_count, 2);
+    }
+
+    #[test]
+    fn webhook_trigger_disabled_returns_none() {
+        let engine = TriggerEngine::new();
+        let trigger = Trigger {
+            id: TriggerId::new(),
+            name: "disabled-webhook".to_string(),
+            condition: TriggerCondition::Webhook { secret: None },
+            action: TriggerAction::Log { message: "nope".to_string() },
+            enabled: false,
+            created_at: Utc::now(),
+            fire_count: 0,
+            max_fires: 0,
+        };
+        let id = trigger.id;
+        engine.register_trigger(trigger);
+
+        assert!(engine.check_webhook(&id).is_none());
+    }
+
+    #[test]
+    fn webhook_trigger_max_fires_reached() {
+        let engine = TriggerEngine::new();
+        let trigger = Trigger {
+            id: TriggerId::new(),
+            name: "limited-webhook".to_string(),
+            condition: TriggerCondition::Webhook { secret: None },
+            action: TriggerAction::Log { message: "limited".to_string() },
+            enabled: true,
+            created_at: Utc::now(),
+            fire_count: 0,
+            max_fires: 1,
+        };
+        let id = engine.register_trigger(trigger);
+
+        assert!(engine.check_webhook(&id).is_some());
+        // Second should fail (max_fires=1 reached).
+        assert!(engine.check_webhook(&id).is_none());
+    }
+
+    #[test]
+    fn check_webhook_on_non_webhook_trigger_returns_none() {
+        let engine = TriggerEngine::new();
+        let trigger = make_keyword_trigger(vec!["test"]);
+        let id = engine.register_trigger(trigger);
+
+        assert!(engine.check_webhook(&id).is_none());
+    }
+
+    #[test]
+    fn disabled_schedule_trigger_excluded() {
+        let engine = TriggerEngine::new();
+        let mut trigger = make_schedule_trigger(60);
+        trigger.enabled = false;
+        engine.register_trigger(trigger);
+
+        let schedules = engine.get_schedule_triggers();
+        assert!(schedules.is_empty());
+    }
+
+    #[test]
+    fn list_triggers_returns_summaries() {
+        let engine = TriggerEngine::new();
+        let t1 = make_keyword_trigger(vec!["a", "b"]);
+        let t2 = make_event_trigger("fighter_spawned");
+        let t3 = make_schedule_trigger(120);
+        let t4 = Trigger {
+            id: TriggerId::new(),
+            name: "webhook".to_string(),
+            condition: TriggerCondition::Webhook { secret: None },
+            action: TriggerAction::Log { message: "wh".to_string() },
+            enabled: true,
+            created_at: Utc::now(),
+            fire_count: 0,
+            max_fires: 0,
+        };
+
+        engine.register_trigger(t1);
+        engine.register_trigger(t2);
+        engine.register_trigger(t3);
+        engine.register_trigger(t4);
+
+        let summaries = engine.list_triggers();
+        assert_eq!(summaries.len(), 4);
+
+        // Check condition_type descriptions.
+        let types: Vec<String> = summaries.iter().map(|(_, s)| s.condition_type.clone()).collect();
+        assert!(types.iter().any(|t| t.contains("keyword")));
+        assert!(types.iter().any(|t| t.contains("event")));
+        assert!(types.iter().any(|t| t.contains("schedule")));
+        assert!(types.iter().any(|t| t == "webhook"));
+    }
+
+    #[tokio::test]
+    async fn multiple_keyword_triggers_fire_independently() {
+        let engine = TriggerEngine::new();
+        let t1 = make_keyword_trigger(vec!["alpha"]);
+        let t2 = make_keyword_trigger(vec!["beta"]);
+        let id1 = engine.register_trigger(t1);
+        let id2 = engine.register_trigger(t2);
+
+        // Only alpha matches.
+        let matches = engine.check_keyword("alpha is here").await;
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0], id1);
+
+        // Only beta matches.
+        let matches = engine.check_keyword("beta is here").await;
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0], id2);
+
+        // Both match.
+        let matches = engine.check_keyword("alpha and beta together").await;
+        assert_eq!(matches.len(), 2);
+    }
 }

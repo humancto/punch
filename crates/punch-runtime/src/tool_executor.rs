@@ -4301,4 +4301,679 @@ mod tests {
             tools.len()
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Tool dispatch coverage — verify every tool name routes correctly
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_dispatch_unknown_tool() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("nonexistent_tool", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_ref().unwrap().contains("nonexistent_tool"));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_file_read_missing_path() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::FileRead("**".into())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("file_read", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("missing 'path'"));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_file_write_missing_params() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::FileWrite("**".into())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("file_write", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("missing 'path'"));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_file_write_missing_content() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::FileWrite("**".into())];
+        let input = serde_json::json!({"path": "/tmp/test.txt"});
+
+        let result = execute_tool("file_write", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("missing 'content'"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SSRF protection tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_private_ip_link_local() {
+        assert!(is_private_ip(&"169.254.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_broadcast() {
+        assert!(is_private_ip(&"255.255.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_unspecified() {
+        assert!(is_private_ip(&"0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_v6_loopback() {
+        assert!(is_private_ip(&"::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_v6_unspecified() {
+        assert!(is_private_ip(&"::".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_172_16_range() {
+        assert!(is_private_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"172.31.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_not_private_public_ips() {
+        assert!(!is_private_ip(&"8.8.4.4".parse().unwrap()));
+        assert!(!is_private_ip(&"142.250.80.46".parse().unwrap()));
+        assert!(!is_private_ip(&"104.16.132.229".parse().unwrap()));
+    }
+
+    // -----------------------------------------------------------------------
+    // JSON path query tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_json_path_query_nested() {
+        let data = serde_json::json!({"a": {"b": {"c": 42}}});
+        assert_eq!(json_path_query(&data, "a.b.c"), serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_json_path_query_array_index() {
+        let data = serde_json::json!({"items": [10, 20, 30]});
+        assert_eq!(json_path_query(&data, "items.2"), serde_json::json!(30));
+    }
+
+    #[test]
+    fn test_json_path_query_missing_key() {
+        let data = serde_json::json!({"a": 1});
+        assert_eq!(json_path_query(&data, "b"), serde_json::json!(null));
+    }
+
+    #[test]
+    fn test_json_path_query_empty_path() {
+        let data = serde_json::json!({"a": 1});
+        assert_eq!(json_path_query(&data, ""), data);
+    }
+
+    #[test]
+    fn test_json_path_query_deeply_nested() {
+        let data = serde_json::json!({"l1": {"l2": {"l3": {"l4": "deep"}}}});
+        assert_eq!(json_path_query(&data, "l1.l2.l3.l4"), serde_json::json!("deep"));
+    }
+
+    #[test]
+    fn test_json_path_query_array_of_objects() {
+        let data = serde_json::json!({"users": [{"name": "Alice"}, {"name": "Bob"}]});
+        assert_eq!(json_path_query(&data, "users.0.name"), serde_json::json!("Alice"));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_path tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let result = resolve_path(std::path::Path::new("/tmp"), "/etc/hosts").unwrap();
+        assert_eq!(result, std::path::PathBuf::from("/etc/hosts"));
+    }
+
+    #[test]
+    fn test_resolve_path_relative() {
+        let result = resolve_path(std::path::Path::new("/home/user"), "file.txt").unwrap();
+        assert_eq!(result, std::path::PathBuf::from("/home/user/file.txt"));
+    }
+
+    #[test]
+    fn test_resolve_path_dot_prefix() {
+        let result = resolve_path(std::path::Path::new("/work"), "./src/lib.rs").unwrap();
+        assert_eq!(result, std::path::PathBuf::from("/work/./src/lib.rs"));
+    }
+
+    // -----------------------------------------------------------------------
+    // compute_hash tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_compute_hash_sha256() {
+        let hash = compute_hash("sha256", b"test").unwrap();
+        assert_eq!(
+            hash,
+            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        );
+    }
+
+    #[test]
+    fn test_compute_hash_sha512() {
+        let hash = compute_hash("sha512", b"test").unwrap();
+        // SHA-512 of "test" is known
+        assert!(!hash.is_empty());
+        assert_eq!(hash.len(), 128); // SHA-512 produces 128 hex chars
+    }
+
+    #[test]
+    fn test_compute_hash_md5_rejected() {
+        let result = compute_hash("md5", b"test");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compute_hash_unknown_algo() {
+        let result = compute_hash("blake2", b"test");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compute_hash_sha256_empty() {
+        let hash = compute_hash("sha256", b"").unwrap();
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_html_tags tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_strip_html_nested_tags() {
+        assert_eq!(strip_html_tags("<div><span>text</span></div>"), "text");
+    }
+
+    #[test]
+    fn test_strip_html_empty() {
+        assert_eq!(strip_html_tags(""), "");
+    }
+
+    #[test]
+    fn test_strip_html_no_tags() {
+        assert_eq!(strip_html_tags("plain text"), "plain text");
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional regex and data manipulation tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_regex_match_no_match() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "pattern": r"\d+",
+            "text": "no numbers here",
+            "global": false
+        });
+
+        let result = execute_tool("regex_match", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["matched"], false);
+    }
+
+    #[tokio::test]
+    async fn test_regex_match_global() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "pattern": r"\d+",
+            "text": "abc 123 def 456 ghi 789",
+            "global": true
+        });
+
+        let result = execute_tool("regex_match", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let matches = result.output["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_regex_match_invalid_pattern() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "pattern": r"[invalid",
+            "text": "test"
+        });
+
+        let result = execute_tool("regex_match", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("invalid regex"));
+    }
+
+    #[tokio::test]
+    async fn test_json_query_string_data() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "data": r#"{"key": "value"}"#,
+            "path": "key"
+        });
+
+        let result = execute_tool("json_query", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output, serde_json::json!("value"));
+    }
+
+    #[tokio::test]
+    async fn test_json_transform_filter() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "data": [
+                {"name": "Alice", "role": "admin"},
+                {"name": "Bob", "role": "user"},
+                {"name": "Carol", "role": "admin"}
+            ],
+            "filter_key": "role",
+            "filter_value": "admin"
+        });
+
+        let result = execute_tool("json_transform", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let arr = result.output.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_yaml_parse_nested_mapping() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "content": "server:\n  host: localhost\n  port: 8080"
+        });
+
+        let result = execute_tool("yaml_parse", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["server"]["host"], "localhost");
+        assert_eq!(result.output["server"]["port"], 8080);
+    }
+
+    #[tokio::test]
+    async fn test_yaml_parse_invalid() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "content": ":\n  - invalid:\nyaml: [{"
+        });
+
+        let result = execute_tool("yaml_parse", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("parse YAML"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Template render edge cases
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_template_render_missing_variable() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Template];
+
+        let input = serde_json::json!({
+            "template": "Hello, {{name}}! Age: {{age}}",
+            "variables": {"name": "Alice"}
+        });
+
+        let result = execute_tool("template_render", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let rendered = result.output.as_str().unwrap();
+        assert!(rendered.contains("Alice"));
+        // Missing variable should stay as placeholder
+        assert!(rendered.contains("{{age}}"));
+    }
+
+    #[tokio::test]
+    async fn test_template_render_no_variables_in_template() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Template];
+
+        let input = serde_json::json!({
+            "template": "No variables here",
+            "variables": {}
+        });
+
+        let result = execute_tool("template_render", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output, "No variables here");
+    }
+
+    // -----------------------------------------------------------------------
+    // Hash tools edge cases
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_hash_compute_sha512() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Crypto];
+
+        let input = serde_json::json!({
+            "algorithm": "sha512",
+            "input": "test"
+        });
+
+        let result = execute_tool("hash_compute", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["algorithm"], "sha512");
+        let hash = result.output["hash"].as_str().unwrap();
+        assert_eq!(hash.len(), 128);
+    }
+
+    #[tokio::test]
+    async fn test_hash_compute_no_input_or_file() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Crypto];
+
+        let input = serde_json::json!({"algorithm": "sha256"});
+
+        let result = execute_tool("hash_compute", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("must provide"));
+    }
+
+    #[tokio::test]
+    async fn test_hash_verify_mismatch() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Crypto];
+
+        let input = serde_json::json!({
+            "algorithm": "sha256",
+            "input": "hello",
+            "expected": "0000000000000000000000000000000000000000000000000000000000000000"
+        });
+
+        let result = execute_tool("hash_verify", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["matches"], false);
+    }
+
+    // -----------------------------------------------------------------------
+    // Text tool edge cases
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_text_count_empty() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({"text": ""});
+
+        let result = execute_tool("text_count", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["lines"], 0);
+        assert_eq!(result.output["words"], 0);
+        assert_eq!(result.output["characters"], 0);
+        assert_eq!(result.output["bytes"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_text_diff_identical() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "old_text": "same text",
+            "new_text": "same text"
+        });
+
+        let result = execute_tool("text_diff", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["has_changes"], false);
+    }
+
+    // -----------------------------------------------------------------------
+    // Env tools
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_env_get_nonexistent_var() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        let input = serde_json::json!({"name": "PUNCH_NONEXISTENT_VAR_12345"});
+
+        let result = execute_tool("env_get", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.output["value"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_env_list_with_prefix() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        let input = serde_json::json!({"prefix": "PATH"});
+
+        let result = execute_tool("env_list", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        // PATH should be in the results
+        let count = result.output["count"].as_u64().unwrap();
+        assert!(count >= 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Capability edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_require_capability_multiple_grants() {
+        let caps = vec![
+            Capability::FileRead("src/**".into()),
+            Capability::FileRead("tests/**".into()),
+        ];
+        assert!(require_capability(&caps, &Capability::FileRead("src/main.rs".into())).is_ok());
+        assert!(require_capability(&caps, &Capability::FileRead("tests/test.rs".into())).is_ok());
+    }
+
+    #[test]
+    fn test_require_capability_empty_caps() {
+        let caps: Vec<Capability> = vec![];
+        assert!(require_capability(&caps, &Capability::Memory).is_err());
+    }
+
+    #[test]
+    fn test_require_capability_wrong_type() {
+        let caps = vec![Capability::FileRead("**".into())];
+        assert!(require_capability(&caps, &Capability::FileWrite("test.txt".into())).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // File read/write round-trip
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_file_write_and_read_roundtrip() {
+        let context = make_test_context(None);
+        let temp_file = context.working_dir.join("punch_roundtrip_test.txt");
+        let caps = vec![
+            Capability::FileRead("**".into()),
+            Capability::FileWrite("**".into()),
+        ];
+
+        // Write
+        let write_input = serde_json::json!({
+            "path": temp_file.to_string_lossy(),
+            "content": "roundtrip content"
+        });
+        let write_result = execute_tool("file_write", &write_input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(write_result.success);
+
+        // Read back
+        let read_input = serde_json::json!({
+            "path": temp_file.to_string_lossy()
+        });
+        let read_result = execute_tool("file_read", &read_input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(read_result.success);
+        assert_eq!(read_result.output, "roundtrip content");
+
+        let _ = tokio::fs::remove_file(&temp_file).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // File list test
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_file_list_temp_dir() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::FileRead("**".into())];
+
+        let input = serde_json::json!({"path": "."});
+
+        let result = execute_tool("file_list", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        // Temp dir should have at least some entries
+        assert!(result.output.as_array().is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // Capability denied for data tools
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_json_query_denied_without_capability() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory]; // Wrong capability
+
+        let input = serde_json::json!({
+            "data": {"key": "value"},
+            "path": "key"
+        });
+
+        let result = execute_tool("json_query", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("capability"));
+    }
+
+    #[tokio::test]
+    async fn test_template_render_denied_without_capability() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory];
+
+        let input = serde_json::json!({
+            "template": "{{name}}",
+            "variables": {"name": "test"}
+        });
+
+        let result = execute_tool("template_render", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("capability"));
+    }
+
+    #[tokio::test]
+    async fn test_hash_compute_denied_without_capability() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory];
+
+        let input = serde_json::json!({
+            "algorithm": "sha256",
+            "input": "test"
+        });
+
+        let result = execute_tool("hash_compute", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("capability"));
+    }
 }
