@@ -128,7 +128,10 @@ async fn run_test(platform: &str, config_path: Option<String>) -> i32 {
             }),
         ),
         _ => {
-            eprintln!("  [X] Unknown platform: {}. Use: telegram, discord, slack", platform);
+            eprintln!(
+                "  [X] Unknown platform: {}. Use: telegram, discord, slack",
+                platform
+            );
             return 1;
         }
     };
@@ -152,7 +155,10 @@ async fn run_test(platform: &str, config_path: Option<String>) -> i32 {
                 }
             } else {
                 println!("  Status: {} FAILED", status.as_u16());
-                println!("  Body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+                println!(
+                    "  Body: {}",
+                    serde_json::to_string_pretty(&body).unwrap_or_default()
+                );
             }
         }
         Err(e) => {

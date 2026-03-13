@@ -64,10 +64,7 @@ impl TelegramAdapter {
     ///   }
     /// }
     /// ```
-    pub fn parse_webhook_payload(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Option<IncomingMessage> {
+    pub fn parse_webhook_payload(&self, payload: &serde_json::Value) -> Option<IncomingMessage> {
         let message = payload
             .get("message")
             .or_else(|| payload.get("edited_message"))?;
@@ -114,15 +111,8 @@ impl TelegramAdapter {
     }
 
     /// Send a message via the Telegram Bot API.
-    async fn api_send_message(
-        &self,
-        chat_id: &str,
-        text: &str,
-    ) -> PunchResult<()> {
-        let url = format!(
-            "https://api.telegram.org/bot{}/sendMessage",
-            self.bot_token
-        );
+    async fn api_send_message(&self, chat_id: &str, text: &str) -> PunchResult<()> {
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
 
         let chunks = split_message(text, TELEGRAM_MSG_LIMIT);
         for chunk in chunks {

@@ -10,14 +10,12 @@
 //! - OnError::RetryOnce behaviour
 //! - Final run status tracking
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
-use punch_kernel::{
-    OnError, Ring, Workflow, WorkflowId, WorkflowRunStatus, WorkflowStep,
-};
+use punch_kernel::{OnError, Ring, Workflow, WorkflowId, WorkflowRunStatus, WorkflowStep};
 use punch_memory::MemorySubstrate;
 use punch_runtime::{CompletionRequest, CompletionResponse, LlmDriver, StopReason, TokenUsage};
 use punch_types::{ModelConfig, Provider, PunchConfig, PunchResult};
@@ -120,7 +118,9 @@ fn test_config() -> PunchConfig {
 
 fn create_ring(driver: Arc<dyn LlmDriver>) -> Arc<Ring> {
     let config = test_config();
-    let memory = Arc::new(MemorySubstrate::new(std::path::Path::new(":memory:")).expect("memory should init"));
+    let memory = Arc::new(
+        MemorySubstrate::new(std::path::Path::new(":memory:")).expect("memory should init"),
+    );
     Arc::new(Ring::new(config, memory, driver))
 }
 
@@ -174,7 +174,9 @@ async fn test_workflow_two_step_pipeline() {
 
     // Step 1 should have received the original input.
     assert!(
-        run.step_results[0].response.contains("Analyze: Rust programming language"),
+        run.step_results[0]
+            .response
+            .contains("Analyze: Rust programming language"),
         "Step 1 should contain the original input. Got: {}",
         run.step_results[0].response
     );
@@ -490,10 +492,7 @@ async fn test_workflow_skip_step_with_recovery() {
 
     #[async_trait]
     impl LlmDriver for AlternatingDriver {
-        async fn complete(
-            &self,
-            request: CompletionRequest,
-        ) -> PunchResult<CompletionResponse> {
+        async fn complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
             let count = self.call_count.fetch_add(1, Ordering::SeqCst);
 
             if count % 2 == 0 {

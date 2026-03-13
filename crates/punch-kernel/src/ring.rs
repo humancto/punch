@@ -354,6 +354,8 @@ impl Ring {
             context_window: None,
             tool_timeout_secs: None,
             coordinator,
+            approval_engine: None,
+            sandbox: None,
         };
 
         let result = run_fighter_loop(params).await;

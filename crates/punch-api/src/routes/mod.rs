@@ -1,10 +1,13 @@
 //! Route module organisation for The Arena API.
 
+pub mod a2a;
 pub mod channels;
 pub mod chat;
+pub mod dashboard;
 pub mod fighters;
 pub mod gorillas;
 pub mod health;
+pub mod openai_compat;
 pub mod triggers;
 pub mod workflows;
 
@@ -18,8 +21,10 @@ pub fn api_router() -> Router<AppState> {
         .merge(health::router())
         .merge(fighters::router())
         .merge(gorillas::router())
-        .merge(chat::router())
+        .merge(openai_compat::router())
         .merge(workflows::router())
         .merge(channels::router())
         .merge(triggers::router())
+        .merge(dashboard::dashboard_router())
+        .merge(a2a::router())
 }

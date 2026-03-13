@@ -5,12 +5,18 @@
 //! Skills are bundles of tools, requirements, and domain-specific prompts
 //! that can be loaded into a fighter to grant it new capabilities.
 
+pub mod marketplace;
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use punch_types::ToolDefinition;
+
+pub use marketplace::{
+    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
+};
 
 // ---------------------------------------------------------------------------
 // Core types

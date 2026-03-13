@@ -7,6 +7,8 @@
 //! safely across async tasks.
 
 pub mod bouts;
+pub mod consolidation;
+pub mod embeddings;
 pub mod fighters;
 pub mod knowledge;
 pub mod memories;
@@ -15,7 +17,13 @@ pub mod substrate;
 pub mod usage;
 
 pub use bouts::{BoutId, BoutSummary};
+pub use consolidation::{ConsolidationConfig, ConsolidationResult, MemoryConsolidator};
+pub use embeddings::{
+    cosine_similarity, top_k_similar, BuiltInEmbedder, Embedder, Embedding, EmbeddingConfig,
+    EmbeddingProvider, EmbeddingStore, OpenAiEmbedder,
+};
 pub use knowledge::{KnowledgeEntity, KnowledgeRelation};
 pub use memories::MemoryEntry;
 pub use substrate::MemorySubstrate;
+pub use migrations::{Migration, MigrationEngine, MigrationStatus};
 pub use usage::{UsageEvent, UsageSummary};

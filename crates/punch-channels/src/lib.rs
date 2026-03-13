@@ -42,7 +42,19 @@ pub enum ChannelPlatform {
     Mastodon,
     Reddit,
     Twitch,
+    GitHub,
+    Line,
     WebChat,
+    GoogleChat,
+    Bluesky,
+    LinkedIn,
+    Sms,
+    DingTalk,
+    Feishu,
+    Nostr,
+    Mattermost,
+    Zulip,
+    RocketChat,
     Custom(String),
 }
 
@@ -61,7 +73,19 @@ impl std::fmt::Display for ChannelPlatform {
             Self::Mastodon => write!(f, "mastodon"),
             Self::Reddit => write!(f, "reddit"),
             Self::Twitch => write!(f, "twitch"),
+            Self::GitHub => write!(f, "github"),
+            Self::Line => write!(f, "line"),
             Self::WebChat => write!(f, "webchat"),
+            Self::GoogleChat => write!(f, "google_chat"),
+            Self::Bluesky => write!(f, "bluesky"),
+            Self::LinkedIn => write!(f, "linkedin"),
+            Self::Sms => write!(f, "sms"),
+            Self::DingTalk => write!(f, "dingtalk"),
+            Self::Feishu => write!(f, "feishu"),
+            Self::Nostr => write!(f, "nostr"),
+            Self::Mattermost => write!(f, "mattermost"),
+            Self::Zulip => write!(f, "zulip"),
+            Self::RocketChat => write!(f, "rocketchat"),
             Self::Custom(name) => write!(f, "custom({})", name),
         }
     }
@@ -238,9 +262,7 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             chunks.push(remaining);
             break;
         }
-        let split_at = remaining[..max_len]
-            .rfind('\n')
-            .unwrap_or(max_len);
+        let split_at = remaining[..max_len].rfind('\n').unwrap_or(max_len);
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk);
         remaining = rest

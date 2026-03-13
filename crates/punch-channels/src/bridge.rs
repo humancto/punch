@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use punch_types::FighterId;
 
-use crate::router::ChannelRouter;
 use crate::ChannelPlatform;
+use crate::router::ChannelRouter;
 
 /// Kernel operations needed by channel adapters.
 ///
@@ -18,11 +18,7 @@ use crate::ChannelPlatform;
 #[async_trait]
 pub trait ChannelBridgeHandle: Send + Sync {
     /// Send a message to a fighter and get the text response.
-    async fn send_message(
-        &self,
-        fighter_id: FighterId,
-        message: &str,
-    ) -> Result<String, String>;
+    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String>;
 
     /// Find a fighter by name, returning its ID.
     async fn find_fighter_by_name(&self, name: &str) -> Result<Option<FighterId>, String>;

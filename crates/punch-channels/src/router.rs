@@ -127,10 +127,10 @@ impl ChannelRouter {
 
         // 3. Check channel defaults (resolve name to ID via cache)
         let platform_str = platform.to_string();
-        if let Some(fighter_name) = self.channel_defaults.get(&platform_str) {
-            if let Some(fighter_id) = self.fighter_cache.get(fighter_name.value()) {
-                return Some(*fighter_id);
-            }
+        if let Some(fighter_name) = self.channel_defaults.get(&platform_str)
+            && let Some(fighter_id) = self.fighter_cache.get(fighter_name.value())
+        {
+            return Some(*fighter_id);
         }
 
         // 4. System default

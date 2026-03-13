@@ -96,6 +96,20 @@ pub enum Commands {
         command: TriggerCommands,
     },
 
+    /// Launch the interactive ringside monitor (TUI dashboard)
+    Tui,
+
+    /// Open the Punch dashboard in a browser or native webview
+    Desktop {
+        /// Port for the Arena server (overrides config)
+        #[arg(short, long)]
+        port: Option<u16>,
+
+        /// Launch in native webview mode (requires `desktop` feature)
+        #[arg(long)]
+        native: bool,
+    },
+
     /// Print version information
     Version,
 }

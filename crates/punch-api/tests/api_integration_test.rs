@@ -5,16 +5,18 @@
 //!
 //! Run: cargo test -p punch-api --test api_integration_test -- --nocapture
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
-use punch_api::server::build_router;
 use punch_api::AppState;
+use punch_api::routes::a2a::A2AState;
+use punch_api::server::build_router;
 use punch_kernel::Ring;
 use punch_memory::MemorySubstrate;
 use punch_runtime::{CompletionRequest, CompletionResponse, LlmDriver, StopReason, TokenUsage};
+use punch_types::a2a::A2ARegistry;
 use punch_types::config::MemoryConfig;
 use punch_types::{ModelConfig, Provider, PunchConfig, PunchResult};
 
@@ -111,7 +113,12 @@ async fn start_test_server_with_auth(api_key: &str) -> TestServer {
     let state = AppState {
         ring: ring.clone(),
         started_at: chrono::Utc::now(),
-        config: Arc::new(config),
+        config: Arc::new(config.clone()),
+        a2a: A2AState::new(A2ARegistry::our_card(
+            "test-agent",
+            "http://localhost:0",
+            vec![],
+        )),
     };
 
     let app = build_router(state, api_key, 60);
@@ -140,7 +147,12 @@ async fn start_test_server_with_rate_limit(rpm: u32) -> TestServer {
     let state = AppState {
         ring: ring.clone(),
         started_at: chrono::Utc::now(),
-        config: Arc::new(config),
+        config: Arc::new(config.clone()),
+        a2a: A2AState::new(A2ARegistry::our_card(
+            "test-agent",
+            "http://localhost:0",
+            vec![],
+        )),
     };
 
     let app = build_router(state, "", rpm);
@@ -242,7 +254,12 @@ async fn test_chat_completions_non_streaming() {
     assert_eq!(choices.len(), 1);
     assert_eq!(choices[0]["index"], 0);
     assert_eq!(choices[0]["message"]["role"], "assistant");
-    assert!(choices[0]["message"]["content"].as_str().unwrap().contains("Hello"));
+    assert!(
+        choices[0]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Hello")
+    );
     assert_eq!(choices[0]["finish_reason"], "stop");
 
     // Check usage.
@@ -273,10 +290,12 @@ async fn test_chat_completions_auto_spawn_fighter() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["object"], "chat.completion");
-    assert!(body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Hello from auto-spawn"));
+    assert!(
+        body["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Hello from auto-spawn")
+    );
 }
 
 #[tokio::test]
@@ -298,7 +317,12 @@ async fn test_chat_completions_missing_user_message() {
 
     assert_eq!(resp.status(), 400);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["error"]["message"].as_str().unwrap().contains("user message"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("user message")
+    );
 }
 
 #[tokio::test]
@@ -322,7 +346,12 @@ async fn test_chat_completions_streaming() {
     assert_eq!(resp.status(), 200);
 
     // Verify it's an SSE response.
-    let content_type = resp.headers().get("content-type").unwrap().to_str().unwrap();
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(
         content_type.contains("text/event-stream"),
         "Expected SSE content type, got: {}",
@@ -331,9 +360,18 @@ async fn test_chat_completions_streaming() {
 
     // Read the full body and parse SSE events.
     let body = resp.text().await.unwrap();
-    assert!(body.contains("data: "), "SSE body should contain data events");
-    assert!(body.contains("[DONE]"), "SSE body should contain [DONE] sentinel");
-    assert!(body.contains("chat.completion.chunk"), "SSE body should contain chunk objects");
+    assert!(
+        body.contains("data: "),
+        "SSE body should contain data events"
+    );
+    assert!(
+        body.contains("[DONE]"),
+        "SSE body should contain [DONE] sentinel"
+    );
+    assert!(
+        body.contains("chat.completion.chunk"),
+        "SSE body should contain chunk objects"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +438,12 @@ async fn test_auth_rejects_no_token() {
         .unwrap();
     assert_eq!(resp.status(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Missing"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Missing")
+    );
 }
 
 #[tokio::test]
@@ -417,7 +460,12 @@ async fn test_auth_rejects_wrong_token() {
         .unwrap();
     assert_eq!(resp.status(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Invalid"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid")
+    );
 }
 
 #[tokio::test]

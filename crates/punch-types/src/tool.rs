@@ -16,6 +16,11 @@ pub enum ToolCategory {
     Media,
     SourceControl,
     Container,
+    Data,
+    CodeAnalysis,
+    Archive,
+    Template,
+    Crypto,
 }
 
 impl std::fmt::Display for ToolCategory {
@@ -33,6 +38,11 @@ impl std::fmt::Display for ToolCategory {
             Self::Media => write!(f, "media"),
             Self::SourceControl => write!(f, "source_control"),
             Self::Container => write!(f, "container"),
+            Self::Data => write!(f, "data"),
+            Self::CodeAnalysis => write!(f, "code_analysis"),
+            Self::Archive => write!(f, "archive"),
+            Self::Template => write!(f, "template"),
+            Self::Crypto => write!(f, "crypto"),
         }
     }
 }

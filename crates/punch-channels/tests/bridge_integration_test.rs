@@ -6,9 +6,9 @@
 //! No external services are contacted — all communication is in-process.
 
 use async_trait::async_trait;
-use punch_channels::bridge::{process_incoming_message, ChannelBridgeHandle};
-use punch_channels::router::ChannelRouter;
 use punch_channels::ChannelPlatform;
+use punch_channels::bridge::{ChannelBridgeHandle, process_incoming_message};
+use punch_channels::router::ChannelRouter;
 use punch_types::FighterId;
 use std::sync::Mutex;
 
@@ -37,11 +37,7 @@ impl MockBridgeHandle {
 
 #[async_trait]
 impl ChannelBridgeHandle for MockBridgeHandle {
-    async fn send_message(
-        &self,
-        fighter_id: FighterId,
-        message: &str,
-    ) -> Result<String, String> {
+    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String> {
         self.received
             .lock()
             .unwrap()

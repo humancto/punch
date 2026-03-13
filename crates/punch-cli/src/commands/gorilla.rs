@@ -281,7 +281,10 @@ async fn run_test(name: String, config_path: Option<String>) -> i32 {
     let manifest = match find_gorilla_manifest(&name) {
         Some(m) => m,
         None => {
-            eprintln!("  [X] Gorilla '{}' not found in bundled or user gorillas.", name);
+            eprintln!(
+                "  [X] Gorilla '{}' not found in bundled or user gorillas.",
+                name
+            );
             eprintln!("  Searched in:");
             eprintln!("    - crates/punch-gorillas/bundled/");
             eprintln!("    - ~/.punch/gorillas/");
@@ -294,8 +297,14 @@ async fn run_test(name: String, config_path: Option<String>) -> i32 {
     println!("  Schedule: {}", manifest.schedule);
     println!("  Capabilities: {:?}", manifest.effective_capabilities());
 
-    let effective_model = manifest.model.clone().unwrap_or_else(|| config.default_model.clone());
-    println!("  Model: {} ({})", effective_model.model, effective_model.provider);
+    let effective_model = manifest
+        .model
+        .clone()
+        .unwrap_or_else(|| config.default_model.clone());
+    println!(
+        "  Model: {} ({})",
+        effective_model.model, effective_model.provider
+    );
     println!();
     println!("  Running single autonomous tick...");
     println!();
@@ -385,12 +394,11 @@ fn find_gorilla_manifest(name: &str) -> Option<punch_types::GorillaManifest> {
                 continue;
             }
 
-            if let Ok(contents) = std::fs::read_to_string(&toml_path) {
-                if let Ok(manifest) = toml::from_str::<punch_types::GorillaManifest>(&contents) {
-                    if manifest.name.eq_ignore_ascii_case(name) {
-                        return Some(manifest);
-                    }
-                }
+            if let Ok(contents) = std::fs::read_to_string(&toml_path)
+                && let Ok(manifest) = toml::from_str::<punch_types::GorillaManifest>(&contents)
+                && manifest.name.eq_ignore_ascii_case(name)
+            {
+                return Some(manifest);
             }
         }
     }

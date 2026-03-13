@@ -12,10 +12,10 @@ use punch_channels::ChannelAdapter;
 use serde::Serialize;
 use tracing::{info, warn};
 
+use punch_channels::ChannelPlatform;
 use punch_channels::adapters::{DiscordAdapter, SlackAdapter, TelegramAdapter};
 use punch_channels::bridge::{self, ChannelBridgeHandle};
 use punch_channels::router::ChannelRouter;
-use punch_channels::ChannelPlatform;
 use punch_types::FighterId;
 
 use crate::AppState;
@@ -23,18 +23,9 @@ use crate::AppState;
 /// Build the channel webhook routes.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/api/channels/discord/webhook",
-            post(discord_webhook),
-        )
-        .route(
-            "/api/channels/telegram/webhook",
-            post(telegram_webhook),
-        )
-        .route(
-            "/api/channels/slack/events",
-            post(slack_events),
-        )
+        .route("/api/channels/discord/webhook", post(discord_webhook))
+        .route("/api/channels/telegram/webhook", post(telegram_webhook))
+        .route("/api/channels/slack/events", post(slack_events))
 }
 
 #[derive(Serialize)]
@@ -51,11 +42,7 @@ struct RingBridgeHandle {
 
 #[async_trait::async_trait]
 impl ChannelBridgeHandle for RingBridgeHandle {
-    async fn send_message(
-        &self,
-        fighter_id: FighterId,
-        message: &str,
-    ) -> Result<String, String> {
+    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String> {
         match self
             .ring
             .send_message(&fighter_id, message.to_string())

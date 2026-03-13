@@ -14,7 +14,9 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use punch_memory::MemorySubstrate;
-use punch_runtime::{FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities};
+use punch_runtime::{
+    FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities,
+};
 use punch_types::{
     FighterId, FighterManifest, GorillaId, GorillaManifest, ModelConfig, PunchResult, WeightClass,
 };
@@ -47,7 +49,10 @@ pub fn fighter_manifest_from_gorilla(
     manifest: &GorillaManifest,
     default_model: &ModelConfig,
 ) -> FighterManifest {
-    let model = manifest.model.clone().unwrap_or_else(|| default_model.clone());
+    let model = manifest
+        .model
+        .clone()
+        .unwrap_or_else(|| default_model.clone());
     let capabilities = manifest.effective_capabilities();
     let weight_class = manifest.weight_class.unwrap_or(WeightClass::Middleweight);
     let system_prompt = manifest.effective_system_prompt();
@@ -113,6 +118,8 @@ pub async fn run_gorilla_tick(
         context_window: None,
         tool_timeout_secs: None,
         coordinator: None,
+        approval_engine: None,
+        sandbox: None,
     };
 
     run_fighter_loop(params).await

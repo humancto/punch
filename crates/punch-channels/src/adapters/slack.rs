@@ -61,10 +61,7 @@ impl SlackAdapter {
     /// Check if this is a URL verification challenge from Slack.
     ///
     /// Returns Some(challenge_value) if this is a challenge, None otherwise.
-    pub fn check_url_verification(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Option<String> {
+    pub fn check_url_verification(&self, payload: &serde_json::Value) -> Option<String> {
         if payload["type"].as_str() == Some("url_verification") {
             payload["challenge"].as_str().map(String::from)
         } else {
@@ -106,12 +103,10 @@ impl SlackAdapter {
         // Skip subtypes (joins, leaves, bot messages, etc.) except message_changed
         let subtype = event["subtype"].as_str();
         let (msg_data, _is_edit) = match subtype {
-            Some("message_changed") => {
-                match event.get("message") {
-                    Some(inner) => (inner, true),
-                    None => return None,
-                }
-            }
+            Some("message_changed") => match event.get("message") {
+                Some(inner) => (inner, true),
+                None => return None,
+            },
             Some(_) => return None,
             None => (event, false),
         };
@@ -126,10 +121,10 @@ impl SlackAdapter {
             .or_else(|| event["user"].as_str())?;
 
         // Filter out own messages
-        if let Some(ref bid) = *self.bot_user_id.read().await {
-            if user_id == bid {
-                return None;
-            }
+        if let Some(ref bid) = *self.bot_user_id.read().await
+            && user_id == bid
+        {
+            return None;
         }
 
         let channel = event["channel"].as_str()?;
@@ -165,11 +160,7 @@ impl SlackAdapter {
     }
 
     /// Send a message via Slack Web API chat.postMessage.
-    async fn api_send_message(
-        &self,
-        channel_id: &str,
-        text: &str,
-    ) -> PunchResult<()> {
+    async fn api_send_message(&self, channel_id: &str, text: &str) -> PunchResult<()> {
         let chunks = split_message(text, SLACK_MSG_LIMIT);
 
         for chunk in chunks {
@@ -256,10 +247,7 @@ mod tests {
 
     #[test]
     fn test_slack_adapter_creation() {
-        let adapter = SlackAdapter::new(
-            "xoxb-test".to_string(),
-            Some("secret".to_string()),
-        );
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some("secret".to_string()));
         assert_eq!(adapter.name(), "slack");
         assert_eq!(adapter.platform(), ChannelPlatform::Slack);
     }

@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "MCP templates and credential vault for the Punch Agent Combat System"
+description = "MCP templates, credential vault, and WASM plugin sandbox for the Punch Agent Combat System"
 
 [dependencies]
 punch-types = { path = "../punch-types" }
@@ -19,3 +19,13 @@ aes-gcm = { workspace = true }
 zeroize = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+wasmi = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wat = { workspace = true }

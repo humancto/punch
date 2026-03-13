@@ -1,10 +1,15 @@
 //! # punch-extensions
 //!
-//! MCP templates and credential vault for the Punch Agent Combat System.
+//! MCP templates, credential vault, and WASM plugin sandbox for the
+//! Punch Agent Combat System.
 //!
-//! Provides [`McpTemplate`] for defining MCP server configurations and
+//! Provides [`McpTemplate`] for defining MCP server configurations,
 //! [`CredentialVault`] for securely storing and retrieving secrets using
-//! AES-256-GCM encryption.
+//! AES-256-GCM encryption, and a [`plugin`] module for loading and
+//! executing imported techniques in a sandboxed arena.
+
+pub mod plugin;
+pub mod wasm_runtime;
 
 use std::collections::HashMap;
 

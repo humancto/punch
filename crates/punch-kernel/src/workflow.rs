@@ -16,9 +16,7 @@ use uuid::Uuid;
 
 use punch_memory::MemorySubstrate;
 use punch_runtime::{FighterLoopParams, LlmDriver, run_fighter_loop, tools_for_capabilities};
-use punch_types::{
-    FighterId, FighterManifest, ModelConfig, PunchError, PunchResult, WeightClass,
-};
+use punch_types::{FighterId, FighterManifest, ModelConfig, PunchError, PunchResult, WeightClass};
 
 // ---------------------------------------------------------------------------
 // ID types
@@ -380,6 +378,7 @@ impl WorkflowEngine {
 
     /// Execute a single workflow step, creating a temporary fighter and running
     /// it through the fighter loop.
+    #[allow(clippy::too_many_arguments)]
     async fn execute_single_step(
         &self,
         step: &WorkflowStep,
@@ -427,7 +426,10 @@ impl WorkflowEngine {
         }
 
         let bout_id = memory.create_bout(&fighter_id).await.map_err(|e| {
-            PunchError::Internal(format!("failed to create bout for step '{}': {e}", step.name))
+            PunchError::Internal(format!(
+                "failed to create bout for step '{}': {e}",
+                step.name
+            ))
         })?;
 
         let available_tools = tools_for_capabilities(&fighter_manifest.capabilities);
@@ -445,6 +447,8 @@ impl WorkflowEngine {
             context_window: None,
             tool_timeout_secs: Some(timeout_secs),
             coordinator: None,
+            approval_engine: None,
+            sandbox: None,
         };
 
         let loop_result = tokio::time::timeout(
@@ -612,10 +616,7 @@ mod tests {
             "step3",
             &step_results,
         );
-        assert_eq!(
-            result,
-            "Analysis: analysis result, Review: review result"
-        );
+        assert_eq!(result, "Analysis: analysis result, Review: review result");
     }
 
     #[test]

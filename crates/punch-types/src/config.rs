@@ -59,6 +59,9 @@ pub enum Provider {
     #[serde(rename = "xai")]
     XAI,
     Cohere,
+    Bedrock,
+    #[serde(rename = "azure_openai")]
+    AzureOpenAi,
     Custom(String),
 }
 
@@ -77,6 +80,8 @@ impl std::fmt::Display for Provider {
             Self::Cerebras => write!(f, "cerebras"),
             Self::XAI => write!(f, "xai"),
             Self::Cohere => write!(f, "cohere"),
+            Self::Bedrock => write!(f, "bedrock"),
+            Self::AzureOpenAi => write!(f, "azure_openai"),
             Self::Custom(name) => write!(f, "custom({})", name),
         }
     }

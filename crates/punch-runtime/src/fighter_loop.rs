@@ -21,8 +21,8 @@ use tracing::{debug, error, info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    AgentCoordinator, FighterId, FighterManifest, Message, PunchError, PunchResult, Role,
-    ToolCallResult, ToolDefinition,
+    AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
+    Role, SandboxEnforcer, ToolCallResult, ToolDefinition,
 };
 
 use crate::context_budget::ContextBudget;
@@ -61,6 +61,12 @@ pub struct FighterLoopParams {
     pub tool_timeout_secs: Option<u64>,
     /// Optional agent coordinator for inter-agent tools.
     pub coordinator: Option<Arc<dyn AgentCoordinator>>,
+    /// Optional policy engine for approval-gated tool execution.
+    /// When present, the referee checks every move before the fighter can throw it.
+    pub approval_engine: Option<Arc<PolicyEngine>>,
+    /// Optional subprocess sandbox (containment ring) for shell and filesystem tools.
+    /// When present, commands are validated and environments are sanitized before execution.
+    pub sandbox: Option<Arc<SandboxEnforcer>>,
 }
 
 /// Result of a completed fighter loop run.
@@ -139,6 +145,10 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         fighter_id: params.fighter_id,
         memory: Arc::clone(&params.memory),
         coordinator: params.coordinator.clone(),
+        approval_engine: params.approval_engine.clone(),
+        sandbox: params.sandbox.clone(),
+        bleed_detector: None,
+        browser_pool: None,
     };
 
     // 4. Main loop.

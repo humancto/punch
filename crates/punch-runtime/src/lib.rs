@@ -24,8 +24,9 @@ pub mod tools;
 
 pub use context_budget::{ContextBudget, TrimAction};
 pub use driver::{
-    AnthropicDriver, CompletionRequest, CompletionResponse, LlmDriver, OpenAiCompatibleDriver,
-    StopReason, TokenUsage, create_driver,
+    AnthropicDriver, AzureOpenAiDriver, BedrockDriver, CompletionRequest, CompletionResponse,
+    GeminiDriver, LlmDriver, OllamaDriver, OpenAiCompatibleDriver, StopReason, TokenUsage,
+    create_driver,
 };
 pub use fighter_loop::{FighterLoopParams, FighterLoopResult, run_fighter_loop};
 pub use guard::{GuardConfig, GuardVerdict, LoopGuard, LoopGuardVerdict};

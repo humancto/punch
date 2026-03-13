@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punch Arena Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    padding: 1.5rem;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  h2 {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+  .header-info { color: var(--text-muted); font-size: 0.85rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+  }
+  .stat {
+    text-align: center;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: 6px;
+  }
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .health-healthy { color: var(--green); }
+  .health-degraded { color: var(--red); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  th {
+    text-align: left;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .status-idle, .status-caged { color: var(--text-muted); }
+  .status-fighting, .status-unleashed, .status-rampaging { color: var(--green); }
+  .status-resting { color: var(--yellow); }
+  .status-knocked_out, .status-injured { color: var(--red); }
+  .status-training { color: var(--purple); }
+  .audit-entry {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .audit-entry:last-child { border-bottom: none; }
+  .audit-kind {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: var(--bg);
+    color: var(--accent);
+    font-size: 0.7rem;
+    margin-right: 0.5rem;
+    font-weight: 600;
+  }
+  .audit-time { color: var(--text-muted); font-size: 0.7rem; margin-left: 0.5rem; }
+  .empty { color: var(--text-muted); font-style: italic; padding: 1rem 0; }
+  #ws-status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.4rem;
+  }
+  .ws-connected { background: var(--green); }
+  .ws-disconnected { background: var(--red); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Punch Arena Dashboard</h1>
+  <div class="header-info">
+    <span id="ws-status" class="ws-disconnected" title="WebSocket status"></span>
+    Auto-refresh: 10s | <span id="last-update">--</span>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>System Status</h2>
+    <div id="status-content" class="stats"><div class="empty">Loading...</div></div>
+  </div>
+  <div class="card">
+    <h2>Metrics</h2>
+    <div id="metrics-content" class="stats"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Fighter Roster</h2>
+    <div id="fighters-content"><div class="empty">Loading...</div></div>
+  </div>
+  <div class="card">
+    <h2>Gorilla Enclosure</h2>
+    <div id="gorillas-content"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Audit Trail</h2>
+  <div id="audit-content"><div class="empty">Loading...</div></div>
+</div>
+
+<script>
+// All dynamic content is escaped via esc() (uses textContent) before DOM insertion.
+(function() {
+  "use strict";
+  var BASE = window.location.origin;
+
+  // Escapes HTML entities to prevent XSS when building markup strings.
+  function esc(s) {
+    var d = document.createElement("div");
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function fetchJson(path) {
+    return fetch(BASE + path)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; });
+  }
+
+  function setSafeHTML(id, html) {
+    var el = document.getElementById(id);
+    if (el) { el.innerHTML = html; }
+  }
+
+  function renderStatus(data) {
+    if (!data) return '<div class="empty">Failed to load status</div>';
+    var hc = data.system_health === "healthy" ? "health-healthy" : "health-degraded";
+    return [
+      '<div class="stat"><div class="stat-value">' + esc(data.uptime_secs) + 's</div><div class="stat-label">Uptime</div></div>',
+      '<div class="stat"><div class="stat-value">' + esc(data.fighter_count) + '</div><div class="stat-label">Fighters</div></div>',
+      '<div class="stat"><div class="stat-value">' + esc(data.gorilla_count) + '</div><div class="stat-label">Gorillas</div></div>',
+      '<div class="stat"><div class="stat-value">' + esc(data.active_bouts) + '</div><div class="stat-label">Active Bouts</div></div>',
+      '<div class="stat"><div class="stat-value">' + esc(data.total_messages) + '</div><div class="stat-label">Messages</div></div>',
+      '<div class="stat"><div class="stat-value ' + hc + '">' + esc(data.system_health) + '</div><div class="stat-label">Health</div></div>'
+    ].join("");
+  }
+
+  function renderMetrics(data) {
+    if (!data) return '<div class="empty">Failed to load metrics</div>';
+    return [
+      '<div class="stat"><div class="stat-value">' + esc(data.total_tokens_used.toLocaleString()) + '</div><div class="stat-label">Tokens Used</div></div>',
+      '<div class="stat"><div class="stat-value">' + esc(data.total_tool_calls) + '</div><div class="stat-label">Tool Calls</div></div>',
+      '<div class="stat"><div class="stat-value">$' + esc(data.total_cost_usd.toFixed(4)) + '</div><div class="stat-label">Total Cost</div></div>'
+    ].join("");
+  }
+
+  function renderFighters(data) {
+    if (!data || data.length === 0) return '<div class="empty">No fighters in the arena</div>';
+    var rows = ["<table><tr><th>Name</th><th>Weight</th><th>Model</th><th>Status</th></tr>"];
+    for (var i = 0; i < data.length; i++) {
+      var f = data[i];
+      rows.push("<tr><td>" + esc(f.name) + "</td><td>" + esc(f.weight_class) + "</td><td>" + esc(f.model) + '</td><td class="status-' + esc(f.status) + '">' + esc(f.status) + "</td></tr>");
+    }
+    rows.push("</table>");
+    return rows.join("");
+  }
+
+  function renderGorillas(data) {
+    if (!data || data.length === 0) return '<div class="empty">No gorillas registered</div>';
+    var rows = ["<table><tr><th>Name</th><th>Schedule</th><th>Status</th></tr>"];
+    for (var i = 0; i < data.length; i++) {
+      var g = data[i];
+      rows.push("<tr><td>" + esc(g.name) + "</td><td>" + esc(g.schedule) + '</td><td class="status-' + esc(g.status) + '">' + esc(g.status) + "</td></tr>");
+    }
+    rows.push("</table>");
+    return rows.join("");
+  }
+
+  function renderAudit(data) {
+    if (!data || data.length === 0) return '<div class="empty">No audit entries</div>';
+    var parts = [];
+    for (var i = 0; i < data.length; i++) {
+      var e = data[i];
+      parts.push('<div class="audit-entry"><span class="audit-kind">' + esc(e.kind) + "</span>" + esc(e.summary) + '<span class="audit-time">#' + esc(e.sequence) + "</span></div>");
+    }
+    return parts.join("");
+  }
+
+  function refresh() {
+    Promise.all([
+      fetchJson("/api/dashboard/status"),
+      fetchJson("/api/dashboard/fighters"),
+      fetchJson("/api/dashboard/gorillas"),
+      fetchJson("/api/dashboard/audit?limit=20"),
+      fetchJson("/api/dashboard/metrics")
+    ]).then(function(results) {
+      setSafeHTML("status-content", renderStatus(results[0]));
+      setSafeHTML("fighters-content", renderFighters(results[1]));
+      setSafeHTML("gorillas-content", renderGorillas(results[2]));
+      setSafeHTML("audit-content", renderAudit(results[3]));
+      setSafeHTML("metrics-content", renderMetrics(results[4]));
+      document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+    });
+  }
+
+  function connectWebSocket() {
+    var proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + window.location.host + "/api/dashboard/events");
+    var dot = document.getElementById("ws-status");
+
+    ws.onopen = function() { dot.className = "ws-connected"; };
+    ws.onclose = function() { dot.className = "ws-disconnected"; setTimeout(connectWebSocket, 3000); };
+    ws.onerror = function() { ws.close(); };
+    ws.onmessage = function() { refresh(); };
+  }
+
+  refresh();
+  setInterval(refresh, 10000);
+  connectWebSocket();
+})();
+</script>
+</body>
+</html>

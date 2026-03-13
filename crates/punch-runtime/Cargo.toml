@@ -21,11 +21,19 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }
+hmac = { workspace = true }
 base64 = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+regex = { workspace = true }
+serde_yaml = { workspace = true }
+walkdir = { workspace = true }
+dashmap = { workspace = true }
+glob = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

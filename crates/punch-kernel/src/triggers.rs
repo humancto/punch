@@ -79,7 +79,10 @@ pub enum TriggerAction {
     /// Spawn a fighter from a template name.
     SpawnFighter { template_name: String },
     /// Send a message to a specific fighter.
-    SendMessage { fighter_id: FighterId, message: String },
+    SendMessage {
+        fighter_id: FighterId,
+        message: String,
+    },
     /// Execute a workflow by ID.
     ExecuteWorkflow { workflow_id: String, input: String },
     /// Trigger a single gorilla tick.
@@ -246,17 +249,16 @@ impl TriggerEngine {
             if let TriggerCondition::Event {
                 event_kind: pattern,
             } = &trigger.condition
+                && (pattern == "*" || pattern == &event_kind)
             {
-                if pattern == "*" || pattern == &event_kind {
-                    trigger.fire_count += 1;
-                    matched.push(trigger.id);
-                    debug!(
-                        trigger_id = %trigger.id,
-                        name = %trigger.name,
-                        event_kind = %event_kind,
-                        "event trigger fired"
-                    );
-                }
+                trigger.fire_count += 1;
+                matched.push(trigger.id);
+                debug!(
+                    trigger_id = %trigger.id,
+                    name = %trigger.name,
+                    event_kind = %event_kind,
+                    "event trigger fired"
+                );
             }
         }
 

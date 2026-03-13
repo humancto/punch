@@ -3,8 +3,8 @@
 //! Uses a mock LLM driver that returns a canned response so we can validate
 //! the full lifecycle without making real API calls.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
@@ -95,9 +95,7 @@ fn test_gorilla_manifest(schedule: &str) -> GorillaManifest {
         moves_required: vec!["memory_store".to_string(), "memory_recall".to_string()],
         settings_schema: None,
         dashboard_metrics: Vec::new(),
-        system_prompt: Some(
-            "You are a test gorilla. Simply acknowledge the tick.".to_string(),
-        ),
+        system_prompt: Some("You are a test gorilla. Simply acknowledge the tick.".to_string()),
         model: None,
         capabilities: Vec::new(),
         weight_class: None,
@@ -131,7 +129,11 @@ async fn gorilla_single_tick_with_mock_driver() {
 
     assert!(!result.response.is_empty(), "response should not be empty");
     assert_eq!(driver.calls(), 1, "should have made exactly one LLM call");
-    assert_eq!(result.usage.total(), 120, "should report correct token usage");
+    assert_eq!(
+        result.usage.total(),
+        120,
+        "should report correct token usage"
+    );
 }
 
 #[tokio::test]
@@ -327,7 +329,11 @@ async fn gorilla_run_tick_via_ring() {
 
     // Run a single tick via the Ring method.
     let result = ring.run_gorilla_tick(&gorilla_id).await;
-    assert!(result.is_ok(), "ring.run_gorilla_tick should succeed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "ring.run_gorilla_tick should succeed: {:?}",
+        result
+    );
 
     let result = result.unwrap();
     assert!(!result.response.is_empty());

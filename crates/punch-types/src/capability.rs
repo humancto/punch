@@ -31,6 +31,20 @@ pub enum Capability {
     Schedule,
     /// Publish events to the event bus.
     EventPublish,
+    /// Source control operations (git).
+    SourceControl,
+    /// Container operations (docker).
+    Container,
+    /// Data manipulation (JSON, YAML, regex).
+    DataManipulation,
+    /// Code analysis (search, symbols).
+    CodeAnalysis,
+    /// Archive operations (create, extract, list tar.gz).
+    Archive,
+    /// Template rendering operations.
+    Template,
+    /// Cryptographic hash operations.
+    Crypto,
 }
 
 impl std::fmt::Display for Capability {
@@ -47,6 +61,13 @@ impl std::fmt::Display for Capability {
             Self::AgentMessage => write!(f, "agent_message"),
             Self::Schedule => write!(f, "schedule"),
             Self::EventPublish => write!(f, "event_publish"),
+            Self::SourceControl => write!(f, "source_control"),
+            Self::Container => write!(f, "container"),
+            Self::DataManipulation => write!(f, "data_manipulation"),
+            Self::CodeAnalysis => write!(f, "code_analysis"),
+            Self::Archive => write!(f, "archive"),
+            Self::Template => write!(f, "template"),
+            Self::Crypto => write!(f, "crypto"),
         }
     }
 }
@@ -91,6 +112,13 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
         (Capability::AgentMessage, Capability::AgentMessage) => true,
         (Capability::Schedule, Capability::Schedule) => true,
         (Capability::EventPublish, Capability::EventPublish) => true,
+        (Capability::SourceControl, Capability::SourceControl) => true,
+        (Capability::Container, Capability::Container) => true,
+        (Capability::DataManipulation, Capability::DataManipulation) => true,
+        (Capability::CodeAnalysis, Capability::CodeAnalysis) => true,
+        (Capability::Archive, Capability::Archive) => true,
+        (Capability::Template, Capability::Template) => true,
+        (Capability::Crypto, Capability::Crypto) => true,
         _ => false,
     }
 }

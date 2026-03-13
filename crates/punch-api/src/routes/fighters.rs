@@ -141,7 +141,8 @@ async fn send_message(
 
     // Pass the Ring as an AgentCoordinator so fighters with AgentSpawn/AgentMessage
     // capabilities can use inter-agent tools.
-    let coordinator: Arc<dyn AgentCoordinator> = Arc::clone(&state.ring) as Arc<dyn AgentCoordinator>;
+    let coordinator: Arc<dyn AgentCoordinator> =
+        Arc::clone(&state.ring) as Arc<dyn AgentCoordinator>;
 
     let result = state
         .ring

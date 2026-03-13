@@ -175,10 +175,7 @@ async fn execute_workflow(
 
 /// GET /api/workflows/:id/runs — list runs for a workflow.
 #[instrument(skip(state))]
-async fn list_runs(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Json<Vec<WorkflowRun>> {
+async fn list_runs(State(state): State<AppState>, Path(id): Path<Uuid>) -> Json<Vec<WorkflowRun>> {
     let workflow_id = WorkflowId(id);
     let runs = state
         .ring

@@ -7,6 +7,7 @@
 //! engine, and the metering engine. It is the single entry point through which
 //! the rest of the system interacts with the agent runtime.
 
+pub mod a2a_executor;
 pub mod background;
 pub mod event_bus;
 pub mod metering;
@@ -16,6 +17,7 @@ pub mod scheduler;
 pub mod triggers;
 pub mod workflow;
 
+pub use a2a_executor::A2ATaskExecutor;
 pub use background::{BackgroundExecutor, fighter_manifest_from_gorilla, run_gorilla_tick};
 pub use event_bus::EventBus;
 pub use metering::{MeteringEngine, ModelPrice, SpendPeriod};

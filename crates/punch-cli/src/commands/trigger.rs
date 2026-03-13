@@ -32,16 +32,14 @@ async fn run_list() -> i32 {
                                 println!("No triggers registered.");
                             } else {
                                 println!(
-                                    "{:<38} {:<20} {:<15} {:<8} {}",
-                                    "ID", "NAME", "TYPE", "ENABLED", "FIRES"
+                                    "{:<38} {:<20} {:<15} {:<8} FIRES",
+                                    "ID", "NAME", "TYPE", "ENABLED"
                                 );
                                 println!("{}", "-".repeat(90));
                                 for t in arr {
                                     println!(
                                         "{:<38} {:<20} {:<15} {:<8} {}",
-                                        t["id"]["0"].as_str().unwrap_or(
-                                            &t["id"].to_string()
-                                        ),
+                                        t["id"]["0"].as_str().unwrap_or(&t["id"].to_string()),
                                         t["name"].as_str().unwrap_or("?"),
                                         t["condition_type"].as_str().unwrap_or("?"),
                                         t["enabled"].as_bool().unwrap_or(false),
@@ -79,7 +77,9 @@ async fn run_add(trigger_type: &str, config_json: &str) -> i32 {
         Ok(v) => v,
         Err(e) => {
             eprintln!("  [X] Invalid JSON config: {}", e);
-            eprintln!("      Example: punch trigger add keyword '{{\"name\":\"deploy-trigger\",\"keywords\":[\"deploy\"],\"action\":{{\"action\":\"log\",\"message\":\"deploy triggered\"}}}}'");
+            eprintln!(
+                "      Example: punch trigger add keyword '{{\"name\":\"deploy-trigger\",\"keywords\":[\"deploy\"],\"action\":{{\"action\":\"log\",\"message\":\"deploy triggered\"}}}}'"
+            );
             return 1;
         }
     };
@@ -160,10 +160,7 @@ async fn run_add(trigger_type: &str, config_json: &str) -> i32 {
                                 .as_str()
                                 .unwrap_or(&result["id"].to_string())
                         );
-                        println!(
-                            "  Name: {}",
-                            result["name"].as_str().unwrap_or("?")
-                        );
+                        println!("  Name: {}", result["name"].as_str().unwrap_or("?"));
                         0
                     }
                     Err(e) => {

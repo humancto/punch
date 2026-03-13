@@ -12,6 +12,7 @@ members = [
     "crates/punch-gorillas",
     "crates/punch-extensions",
     "crates/punch-wire",
+    "crates/punch-desktop",
     "crates/xtask",
 ]
 
@@ -70,13 +71,28 @@ nix = { version = "0.29", features = ["signal", "process"] }
 notify = "7"
 # Glob
 glob = "0.3"
+# YAML
+serde_yaml = "0.9"
+# Directory walking
+walkdir = "2"
 # Base64
 base64 = "0.22"
+# Email
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport"] }
 # URL
 url = "2"
 urlencoding = "2"
+# WASM
+wasmi = "0.40"
+wat = "1"
 # Bytes
 bytes = "1"
+# Compression / archive
+flate2 = "1"
+tar = "0.4"
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
 
 [profile.release]
 opt-level = 3

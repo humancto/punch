@@ -29,4 +29,14 @@ toml = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 reqwest = { workspace = true, features = ["json", "blocking"] }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+anyhow = { workspace = true }
 dirs = "6"
+
+[features]
+default = []
+# Enable native webview window (requires tao + wry system dependencies).
+# TODO: Add wry and tao as optional dependencies when they compile cleanly:
+#   desktop = ["dep:wry", "dep:tao"]
+desktop = []

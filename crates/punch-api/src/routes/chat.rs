@@ -11,17 +11,15 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::IntoResponse;
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
 
-use punch_types::{
-    AgentCoordinator, FighterManifest, ModelConfig, Provider, WeightClass,
-};
+use punch_types::{AgentCoordinator, FighterManifest, ModelConfig, Provider, WeightClass};
 
 use crate::AppState;
 
@@ -202,14 +200,16 @@ async fn chat_completions(
     if user_message.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::to_value(&OaiErrorResponse {
-                error: OaiError {
-                    message: "No user message found in messages array".to_string(),
-                    r#type: "invalid_request_error",
-                    code: Some("missing_user_message"),
-                },
-            })
-            .unwrap_or_default()),
+            Json(
+                serde_json::to_value(&OaiErrorResponse {
+                    error: OaiError {
+                        message: "No user message found in messages array".to_string(),
+                        r#type: "invalid_request_error",
+                        code: Some("missing_user_message"),
+                    },
+                })
+                .unwrap_or_default(),
+            ),
         )
             .into_response();
     }
@@ -271,9 +271,8 @@ async fn chat_completions(
         match result {
             Ok(result) => {
                 // Send the full response as SSE chunks.
-                let (tx, rx) = tokio::sync::mpsc::channel::<
-                    Result<SseEvent, std::convert::Infallible>,
-                >(16);
+                let (tx, rx) =
+                    tokio::sync::mpsc::channel::<Result<SseEvent, std::convert::Infallible>>(16);
 
                 let model = body.model.clone();
                 let rid = request_id.clone();
@@ -315,8 +314,9 @@ async fn chat_completions(
                         }],
                     };
                     let _ = tx
-                        .send(Ok(SseEvent::default()
-                            .data(serde_json::to_string(&content_chunk).unwrap_or_default())))
+                        .send(Ok(SseEvent::default().data(
+                            serde_json::to_string(&content_chunk).unwrap_or_default(),
+                        )))
                         .await;
 
                     // Final chunk: finish_reason
@@ -334,10 +334,10 @@ async fn chat_completions(
                             finish_reason: Some("stop"),
                         }],
                     };
-                    let _ = tx
-                        .send(Ok(SseEvent::default()
+                    let _ =
+                        tx.send(Ok(SseEvent::default()
                             .data(serde_json::to_string(&final_chunk).unwrap_or_default())))
-                        .await;
+                            .await;
 
                     // [DONE] sentinel
                     let _ = tx.send(Ok(SseEvent::default().data("[DONE]"))).await;
@@ -357,14 +357,16 @@ async fn chat_completions(
                 };
                 (
                     status,
-                    Json(serde_json::to_value(&OaiErrorResponse {
-                        error: OaiError {
-                            message: e.to_string(),
-                            r#type: "api_error",
-                            code,
-                        },
-                    })
-                    .unwrap_or_default()),
+                    Json(
+                        serde_json::to_value(&OaiErrorResponse {
+                            error: OaiError {
+                                message: e.to_string(),
+                                r#type: "api_error",
+                                code,
+                            },
+                        })
+                        .unwrap_or_default(),
+                    ),
                 )
                     .into_response()
             }
@@ -411,14 +413,16 @@ async fn chat_completions(
                 };
                 (
                     status,
-                    Json(serde_json::to_value(&OaiErrorResponse {
-                        error: OaiError {
-                            message: e.to_string(),
-                            r#type: "api_error",
-                            code,
-                        },
-                    })
-                    .unwrap_or_default()),
+                    Json(
+                        serde_json::to_value(&OaiErrorResponse {
+                            error: OaiError {
+                                message: e.to_string(),
+                                r#type: "api_error",
+                                code,
+                            },
+                        })
+                        .unwrap_or_default(),
+                    ),
                 )
                     .into_response()
             }
@@ -444,19 +448,18 @@ async fn list_models(State(state): State<AppState>) -> impl IntoResponse {
             .as_deref()
             .unwrap_or("http://localhost:11434");
 
-        if let Ok(resp) = reqwest::get(format!("{}/api/tags", base_url)).await {
-            if let Ok(body) = resp.json::<serde_json::Value>().await {
-                if let Some(ollama_models) = body["models"].as_array() {
-                    for m in ollama_models {
-                        if let Some(name) = m["name"].as_str() {
-                            models.push(ModelObject {
-                                id: name.to_string(),
-                                object: "model",
-                                created,
-                                owned_by: "ollama".to_string(),
-                            });
-                        }
-                    }
+        if let Ok(resp) = reqwest::get(format!("{}/api/tags", base_url)).await
+            && let Ok(body) = resp.json::<serde_json::Value>().await
+            && let Some(ollama_models) = body["models"].as_array()
+        {
+            for m in ollama_models {
+                if let Some(name) = m["name"].as_str() {
+                    models.push(ModelObject {
+                        id: name.to_string(),
+                        object: "model",
+                        created,
+                        owned_by: "ollama".to_string(),
+                    });
                 }
             }
         }

@@ -3,17 +3,20 @@
 //! Executes built-in tools (moves) with capability checking, timeout
 //! enforcement, and SSRF protection for network-facing tools.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
+use dashmap::DashMap;
 use tokio::process::Command;
 use tracing::{debug, instrument};
 
 use punch_memory::MemorySubstrate;
 use punch_types::{
-    AgentCoordinator, Capability, FighterId, PunchError, PunchResult, ToolResult,
+    AgentCoordinator, ApprovalDecision, BrowserPool, Capability, FighterId, PolicyEngine,
+    PunchError, PunchResult, SandboxEnforcer, Sensitivity, ShellBleedDetector, ToolResult,
     capability::capability_matches,
 };
 
@@ -28,6 +31,22 @@ pub struct ToolExecutionContext {
     /// Optional agent coordinator for inter-agent tools (agent_spawn, agent_message, agent_list).
     /// This is `None` when the fighter does not have agent coordination capabilities.
     pub coordinator: Option<Arc<dyn AgentCoordinator>>,
+    /// Optional policy engine for approval-gated tool execution.
+    /// When present, every tool call is checked against the configured policies
+    /// before dispatching. The referee must approve the move.
+    pub approval_engine: Option<Arc<PolicyEngine>>,
+    /// Optional subprocess sandbox (containment ring) for shell and filesystem tools.
+    /// When present, commands are validated and environments are sanitized before execution.
+    pub sandbox: Option<Arc<SandboxEnforcer>>,
+    /// Optional shell bleed detector — scans shell commands for leaked secrets
+    /// before the move lands. If a Secret or Confidential bleed is detected,
+    /// the command is blocked.
+    pub bleed_detector: Option<Arc<ShellBleedDetector>>,
+    /// Optional browser session pool for browser automation tools.
+    /// When present, browser scouting moves (navigate, screenshot, click, etc.)
+    /// can manage sessions through the pool. The actual CDP driver is plugged in
+    /// separately — without it, browser tools report "browser not available".
+    pub browser_pool: Option<Arc<BrowserPool>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -78,6 +97,34 @@ async fn execute_tool_inner(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
+    // --- Approval gate: check the referee before throwing the move ---
+    if let Some(ref engine) = context.approval_engine {
+        let decision = engine.evaluate(name, input, &context.fighter_id).await?;
+        match decision {
+            ApprovalDecision::Allow => {
+                // Move approved — proceed to dispatch.
+            }
+            ApprovalDecision::Deny(reason) => {
+                debug!(tool = %name, reason = %reason, "tool call denied by approval policy");
+                return Ok(ToolResult {
+                    success: false,
+                    output: serde_json::json!(null),
+                    error: Some(format!("denied by policy: {}", reason)),
+                    duration_ms: 0,
+                });
+            }
+            ApprovalDecision::NeedsApproval(reason) => {
+                debug!(tool = %name, reason = %reason, "tool call needs approval");
+                return Ok(ToolResult {
+                    success: false,
+                    output: serde_json::json!(null),
+                    error: Some(format!("approval required: {}", reason)),
+                    duration_ms: 0,
+                });
+            }
+        }
+    }
+
     match name {
         "file_read" => tool_file_read(input, capabilities, context).await,
         "file_write" => tool_file_write(input, capabilities, context).await,
@@ -93,6 +140,60 @@ async fn execute_tool_inner(
         "agent_spawn" => tool_agent_spawn(input, capabilities, context).await,
         "agent_message" => tool_agent_message(input, capabilities, context).await,
         "agent_list" => tool_agent_list(capabilities, context).await,
+        "patch_apply" => tool_patch_apply(input, capabilities, context).await,
+        "browser_navigate" => tool_browser_navigate(input, capabilities, context).await,
+        "browser_screenshot" => tool_browser_screenshot(input, capabilities, context).await,
+        "browser_click" => tool_browser_click(input, capabilities, context).await,
+        "browser_type" => tool_browser_type(input, capabilities, context).await,
+        "browser_content" => tool_browser_content(input, capabilities, context).await,
+        // Git / Source Control
+        "git_status" => tool_git_status(input, capabilities, context).await,
+        "git_diff" => tool_git_diff(input, capabilities, context).await,
+        "git_log" => tool_git_log(input, capabilities, context).await,
+        "git_commit" => tool_git_commit(input, capabilities, context).await,
+        "git_branch" => tool_git_branch(input, capabilities, context).await,
+        // Container
+        "docker_ps" => tool_docker_ps(input, capabilities).await,
+        "docker_run" => tool_docker_run(input, capabilities).await,
+        "docker_build" => tool_docker_build(input, capabilities, context).await,
+        "docker_logs" => tool_docker_logs(input, capabilities).await,
+        // HTTP
+        "http_request" => tool_http_request(input, capabilities).await,
+        "http_post" => tool_http_post(input, capabilities).await,
+        // Data manipulation
+        "json_query" => tool_json_query(input, capabilities).await,
+        "json_transform" => tool_json_transform(input, capabilities).await,
+        "yaml_parse" => tool_yaml_parse(input, capabilities).await,
+        "regex_match" => tool_regex_match(input, capabilities).await,
+        "regex_replace" => tool_regex_replace(input, capabilities).await,
+        // Process
+        "process_list" => tool_process_list(input, capabilities, context).await,
+        "process_kill" => tool_process_kill(input, capabilities).await,
+        // Schedule
+        "schedule_task" => tool_schedule_task(input, capabilities, context).await,
+        "schedule_list" => tool_schedule_list(capabilities).await,
+        "schedule_cancel" => tool_schedule_cancel(input, capabilities).await,
+        // Code analysis
+        "code_search" => tool_code_search(input, capabilities, context).await,
+        "code_symbols" => tool_code_symbols(input, capabilities, context).await,
+        // Archive
+        "archive_create" => tool_archive_create(input, capabilities, context).await,
+        "archive_extract" => tool_archive_extract(input, capabilities, context).await,
+        "archive_list" => tool_archive_list(input, capabilities, context).await,
+        // Template
+        "template_render" => tool_template_render(input, capabilities).await,
+        // Crypto / Hash
+        "hash_compute" => tool_hash_compute(input, capabilities, context).await,
+        "hash_verify" => tool_hash_verify(input, capabilities, context).await,
+        // Environment
+        "env_get" => tool_env_get(input, capabilities).await,
+        "env_list" => tool_env_list(input, capabilities).await,
+        // Text
+        "text_diff" => tool_text_diff(input, capabilities).await,
+        "text_count" => tool_text_count(input, capabilities).await,
+        // File (extended)
+        "file_search" => tool_file_search(input, capabilities, context).await,
+        "file_info" => tool_file_info(input, capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -146,6 +247,14 @@ async fn tool_file_read(
 
     require_capability(capabilities, &Capability::FileRead(path_display.clone()))?;
 
+    // If a sandbox is active, validate the path through the containment ring.
+    if let Some(ref sandbox) = context.sandbox {
+        sandbox.validate_path(&path).map_err(|v| PunchError::Tool {
+            tool: "file_read".into(),
+            message: v.to_string(),
+        })?;
+    }
+
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => {
             debug!(path = %path_display, bytes = content.len(), "file read");
@@ -184,6 +293,14 @@ async fn tool_file_write(
 
     require_capability(capabilities, &Capability::FileWrite(path_display.clone()))?;
 
+    // If a sandbox is active, validate the path through the containment ring.
+    if let Some(ref sandbox) = context.sandbox {
+        sandbox.validate_path(&path).map_err(|v| PunchError::Tool {
+            tool: "file_write".into(),
+            message: v.to_string(),
+        })?;
+    }
+
     // Ensure parent directory exists.
     if let Some(parent) = path.parent()
         && !parent.exists()
@@ -217,6 +334,170 @@ async fn tool_file_write(
             duration_ms: 0,
         }),
     }
+}
+
+/// Apply a unified diff patch to a file — execute a combo correction move.
+///
+/// Reads the target file, parses the diff, validates it against the current
+/// content, applies the patch, and writes the result back.
+async fn tool_patch_apply(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let path_str = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "patch_apply".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
+    let diff_text = input["diff"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "patch_apply".into(),
+        message: "missing 'diff' parameter".into(),
+    })?;
+
+    let path = resolve_path(&context.working_dir, path_str)?;
+    let path_display = path.display().to_string();
+
+    // Patch application requires file write capability.
+    require_capability(capabilities, &Capability::FileWrite(path_display.clone()))?;
+
+    // Validate path through sandbox if active.
+    if let Some(ref sandbox) = context.sandbox {
+        sandbox.validate_path(&path).map_err(|v| PunchError::Tool {
+            tool: "patch_apply".into(),
+            message: v.to_string(),
+        })?;
+    }
+
+    // Parse the diff.
+    let patch_set = punch_types::parse_unified_diff(diff_text).map_err(|e| PunchError::Tool {
+        tool: "patch_apply".into(),
+        message: format!("failed to parse diff: {}", e),
+    })?;
+
+    if patch_set.patches.is_empty() {
+        return Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some("diff contains no file patches".into()),
+            duration_ms: 0,
+        });
+    }
+
+    // Use the first patch in the set (the tool operates on a single file).
+    let file_patch = &patch_set.patches[0];
+
+    // Read the current file content (empty string for new files).
+    let original = if file_patch.is_new_file {
+        String::new()
+    } else {
+        tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| PunchError::Tool {
+                tool: "patch_apply".into(),
+                message: format!("failed to read '{}': {}", path_display, e),
+            })?
+    };
+
+    // Validate before applying.
+    let conflicts = punch_types::validate_patch(&original, file_patch);
+    if !conflicts.is_empty() {
+        let conflict_desc: Vec<String> = conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "hunk {}: line {} — expected {:?}, found {:?} ({:?})",
+                    c.hunk_index + 1,
+                    c.line_number,
+                    c.expected_line,
+                    c.actual_line,
+                    c.conflict_type
+                )
+            })
+            .collect();
+
+        // Try fuzzy application with a small fuzz factor.
+        match punch_types::apply_patch_fuzzy(&original, file_patch, 3) {
+            Ok(patched) => {
+                // Fuzzy succeeded — write with a warning.
+                if let Some(parent) = path.parent()
+                    && !parent.exists()
+                {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| PunchError::Tool {
+                            tool: "patch_apply".into(),
+                            message: format!(
+                                "failed to create directory '{}': {}",
+                                parent.display(),
+                                e
+                            ),
+                        })?;
+                }
+                tokio::fs::write(&path, &patched)
+                    .await
+                    .map_err(|e| PunchError::Tool {
+                        tool: "patch_apply".into(),
+                        message: format!("failed to write '{}': {}", path_display, e),
+                    })?;
+                debug!(path = %path_display, "patch applied with fuzzy matching");
+                return Ok(ToolResult {
+                    success: true,
+                    output: serde_json::json!(format!(
+                        "patch applied to {} with fuzzy matching (offset adjustments needed). Warnings: {}",
+                        path_display,
+                        conflict_desc.join("; ")
+                    )),
+                    error: None,
+                    duration_ms: 0,
+                });
+            }
+            Err(_) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: serde_json::json!(null),
+                    error: Some(format!(
+                        "patch conflicts detected: {}",
+                        conflict_desc.join("; ")
+                    )),
+                    duration_ms: 0,
+                });
+            }
+        }
+    }
+
+    // Clean application.
+    let patched =
+        punch_types::apply_patch(&original, file_patch).map_err(|e| PunchError::Tool {
+            tool: "patch_apply".into(),
+            message: format!("failed to apply patch: {}", e),
+        })?;
+
+    // Ensure parent directory exists.
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| PunchError::Tool {
+                tool: "patch_apply".into(),
+                message: format!("failed to create directory '{}': {}", parent.display(), e),
+            })?;
+    }
+
+    tokio::fs::write(&path, &patched)
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "patch_apply".into(),
+            message: format!("failed to write '{}': {}", path_display, e),
+        })?;
+
+    debug!(path = %path_display, "patch applied cleanly");
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!(format!("patch applied cleanly to {}", path_display)),
+        error: None,
+        duration_ms: 0,
+    })
 }
 
 async fn tool_file_list(
@@ -271,20 +552,79 @@ async fn tool_shell_exec(
         &Capability::ShellExec(command_str.to_string()),
     )?;
 
+    // Shell bleed detection: scan the command for leaked secrets before the
+    // punch lands. Secret and Confidential bleeds block the move outright.
+    if let Some(ref detector) = context.bleed_detector {
+        let warnings = detector.scan_command(command_str);
+        let blocked: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.severity >= Sensitivity::Confidential)
+            .collect();
+
+        if !blocked.is_empty() {
+            let details: Vec<String> = blocked
+                .iter()
+                .map(|w| {
+                    format!(
+                        "[{}] {} (severity: {})",
+                        w.pattern_name, w.location, w.severity
+                    )
+                })
+                .collect();
+            return Ok(ToolResult {
+                success: false,
+                output: serde_json::json!(null),
+                error: Some(format!(
+                    "shell bleed detected — command blocked: {}",
+                    details.join("; ")
+                )),
+                duration_ms: 0,
+            });
+        }
+
+        // Internal-severity warnings: log but allow execution.
+        for w in &warnings {
+            if w.severity == Sensitivity::Internal {
+                tracing::warn!(
+                    pattern = %w.pattern_name,
+                    location = %w.location,
+                    "shell bleed warning (internal severity) — allowing execution"
+                );
+            }
+        }
+    }
+
     // Note: Shell execution is capability-gated. The command string comes from
     // the LLM and is validated via the ShellExec capability pattern before
     // execution. This is intentional for an agent runtime that needs to run
     // arbitrary commands on behalf of the user.
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command_str)
-        .current_dir(&context.working_dir)
-        .output()
-        .await
-        .map_err(|e| PunchError::Tool {
+    //
+    // If a sandbox is active, the command enters the containment ring:
+    // validated, environment-sanitized, and directory-restricted.
+    let output = if let Some(ref sandbox) = context.sandbox {
+        let mut cmd = sandbox
+            .build_command(command_str)
+            .map_err(|v| PunchError::Tool {
+                tool: "shell_exec".into(),
+                message: v.to_string(),
+            })?;
+        cmd.current_dir(&context.working_dir);
+        cmd.output().await.map_err(|e| PunchError::Tool {
             tool: "shell_exec".into(),
             message: format!("failed to execute command: {}", e),
-        })?;
+        })?
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg(command_str)
+            .current_dir(&context.working_dir)
+            .output()
+            .await
+            .map_err(|e| PunchError::Tool {
+                tool: "shell_exec".into(),
+                message: format!("failed to execute command: {}", e),
+            })?
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -770,11 +1110,12 @@ async fn tool_agent_spawn(
     use punch_types::{FighterManifest, ModelConfig, Provider, WeightClass};
 
     // Parse capabilities for the child agent if provided.
-    let child_capabilities: Vec<punch_types::Capability> = if let Some(caps) = input.get("capabilities") {
-        serde_json::from_value(caps.clone()).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let child_capabilities: Vec<punch_types::Capability> =
+        if let Some(caps) = input.get("capabilities") {
+            serde_json::from_value(caps.clone()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
     let manifest = FighterManifest {
         name: name.to_string(),
@@ -918,6 +1259,2192 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Browser automation tool handlers — ring-side scouting moves
+// ---------------------------------------------------------------------------
+
+/// Helper: check BrowserControl capability and verify the browser pool is available.
+fn require_browser_pool<'a>(
+    capabilities: &[Capability],
+    context: &'a ToolExecutionContext,
+) -> PunchResult<&'a Arc<BrowserPool>> {
+    require_capability(capabilities, &Capability::BrowserControl)?;
+    context
+        .browser_pool
+        .as_ref()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "browser".into(),
+            message: "browser not available — no CDP driver configured".into(),
+        })
+}
+
+async fn tool_browser_navigate(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let _pool = require_browser_pool(capabilities, context)?;
+
+    let url = input["url"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "browser_navigate".into(),
+        message: "missing 'url' parameter".into(),
+    })?;
+
+    debug!(url = %url, "browser_navigate requested (no CDP driver)");
+
+    Ok(ToolResult {
+        success: false,
+        output: serde_json::json!({
+            "action": "navigate",
+            "url": url,
+            "message": "browser pool is available but no CDP driver is configured — install a BrowserDriver to enable navigation"
+        }),
+        error: Some("no CDP driver configured".into()),
+        duration_ms: 0,
+    })
+}
+
+async fn tool_browser_screenshot(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let _pool = require_browser_pool(capabilities, context)?;
+
+    let full_page = input["full_page"].as_bool().unwrap_or(false);
+
+    debug!(full_page = %full_page, "browser_screenshot requested (no CDP driver)");
+
+    Ok(ToolResult {
+        success: false,
+        output: serde_json::json!({
+            "action": "screenshot",
+            "full_page": full_page,
+            "message": "browser pool is available but no CDP driver is configured — install a BrowserDriver to enable screenshots"
+        }),
+        error: Some("no CDP driver configured".into()),
+        duration_ms: 0,
+    })
+}
+
+async fn tool_browser_click(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let _pool = require_browser_pool(capabilities, context)?;
+
+    let selector = input["selector"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "browser_click".into(),
+        message: "missing 'selector' parameter".into(),
+    })?;
+
+    debug!(selector = %selector, "browser_click requested (no CDP driver)");
+
+    Ok(ToolResult {
+        success: false,
+        output: serde_json::json!({
+            "action": "click",
+            "selector": selector,
+            "message": "browser pool is available but no CDP driver is configured — install a BrowserDriver to enable clicking"
+        }),
+        error: Some("no CDP driver configured".into()),
+        duration_ms: 0,
+    })
+}
+
+async fn tool_browser_type(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let _pool = require_browser_pool(capabilities, context)?;
+
+    let selector = input["selector"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "browser_type".into(),
+        message: "missing 'selector' parameter".into(),
+    })?;
+    let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "browser_type".into(),
+        message: "missing 'text' parameter".into(),
+    })?;
+
+    debug!(selector = %selector, text_len = text.len(), "browser_type requested (no CDP driver)");
+
+    Ok(ToolResult {
+        success: false,
+        output: serde_json::json!({
+            "action": "type",
+            "selector": selector,
+            "text_length": text.len(),
+            "message": "browser pool is available but no CDP driver is configured — install a BrowserDriver to enable typing"
+        }),
+        error: Some("no CDP driver configured".into()),
+        duration_ms: 0,
+    })
+}
+
+async fn tool_browser_content(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let _pool = require_browser_pool(capabilities, context)?;
+
+    let selector = input["selector"].as_str();
+
+    debug!(selector = ?selector, "browser_content requested (no CDP driver)");
+
+    Ok(ToolResult {
+        success: false,
+        output: serde_json::json!({
+            "action": "get_content",
+            "selector": selector,
+            "message": "browser pool is available but no CDP driver is configured — install a BrowserDriver to enable content extraction"
+        }),
+        error: Some("no CDP driver configured".into()),
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Git / Source Control tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_git_status(
+    _input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SourceControl)?;
+
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&context.working_dir)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "git_status".into(),
+            message: format!("failed to run git status: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "status": stdout,
+            "stderr": stderr,
+        }),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_git_diff(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SourceControl)?;
+
+    let staged = input["staged"].as_bool().unwrap_or(false);
+    let mut args = vec!["diff".to_string()];
+    if staged {
+        args.push("--staged".to_string());
+    }
+    if let Some(path) = input["path"].as_str() {
+        args.push("--".to_string());
+        args.push(path.to_string());
+    }
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(&context.working_dir)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "git_diff".into(),
+            message: format!("failed to run git diff: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!(stdout),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_git_log(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SourceControl)?;
+
+    let count = input["count"].as_u64().unwrap_or(10);
+    let output = Command::new("git")
+        .args(["log", "--oneline", "-n", &count.to_string()])
+        .current_dir(&context.working_dir)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "git_log".into(),
+            message: format!("failed to run git log: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!(stdout),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_git_commit(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SourceControl)?;
+
+    let message = input["message"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "git_commit".into(),
+        message: "missing 'message' parameter".into(),
+    })?;
+
+    // Stage files if specified.
+    if let Some(files) = input["files"].as_array() {
+        let file_args: Vec<&str> = files.iter().filter_map(|f| f.as_str()).collect();
+        if !file_args.is_empty() {
+            let mut add_args = vec!["add"];
+            add_args.extend(file_args);
+            let add_output = Command::new("git")
+                .args(&add_args)
+                .current_dir(&context.working_dir)
+                .output()
+                .await
+                .map_err(|e| PunchError::Tool {
+                    tool: "git_commit".into(),
+                    message: format!("failed to stage files: {}", e),
+                })?;
+
+            if !add_output.status.success() {
+                let stderr = String::from_utf8_lossy(&add_output.stderr);
+                return Ok(ToolResult {
+                    success: false,
+                    output: serde_json::json!(null),
+                    error: Some(format!("git add failed: {}", stderr)),
+                    duration_ms: 0,
+                });
+            }
+        }
+    }
+
+    let output = Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(&context.working_dir)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "git_commit".into(),
+            message: format!("failed to run git commit: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!(stdout),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_git_branch(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SourceControl)?;
+
+    let action = input["action"].as_str().unwrap_or("list");
+
+    let output = match action {
+        "list" => {
+            Command::new("git")
+                .args(["branch", "--list"])
+                .current_dir(&context.working_dir)
+                .output()
+                .await
+        }
+        "create" => {
+            let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+                tool: "git_branch".into(),
+                message: "missing 'name' parameter for create".into(),
+            })?;
+            Command::new("git")
+                .args(["branch", name])
+                .current_dir(&context.working_dir)
+                .output()
+                .await
+        }
+        "switch" => {
+            let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+                tool: "git_branch".into(),
+                message: "missing 'name' parameter for switch".into(),
+            })?;
+            Command::new("git")
+                .args(["checkout", name])
+                .current_dir(&context.working_dir)
+                .output()
+                .await
+        }
+        other => {
+            return Ok(ToolResult {
+                success: false,
+                output: serde_json::json!(null),
+                error: Some(format!(
+                    "unknown action '{}', expected list/create/switch",
+                    other
+                )),
+                duration_ms: 0,
+            });
+        }
+    }
+    .map_err(|e| PunchError::Tool {
+        tool: "git_branch".into(),
+        message: format!("failed to run git branch: {}", e),
+    })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!(stdout),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Container tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_docker_ps(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Container)?;
+
+    let show_all = input["all"].as_bool().unwrap_or(false);
+    let mut args = vec![
+        "ps",
+        "--format",
+        "{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
+    ];
+    if show_all {
+        args.push("-a");
+    }
+
+    let output = Command::new("docker")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "docker_ps".into(),
+            message: format!("failed to run docker ps: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let containers: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.splitn(4, '\t').collect();
+            serde_json::json!({
+                "id": parts.first().unwrap_or(&""),
+                "image": parts.get(1).unwrap_or(&""),
+                "status": parts.get(2).unwrap_or(&""),
+                "name": parts.get(3).unwrap_or(&""),
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!(containers),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_docker_run(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Container)?;
+
+    let image = input["image"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "docker_run".into(),
+        message: "missing 'image' parameter".into(),
+    })?;
+
+    let detach = input["detach"].as_bool().unwrap_or(false);
+    let mut args = vec!["run".to_string()];
+
+    if detach {
+        args.push("-d".to_string());
+    }
+
+    if let Some(name) = input["name"].as_str() {
+        args.push("--name".to_string());
+        args.push(name.to_string());
+    }
+
+    if let Some(env) = input["env"].as_object() {
+        for (key, val) in env {
+            args.push("-e".to_string());
+            args.push(format!("{}={}", key, val.as_str().unwrap_or_default()));
+        }
+    }
+
+    if let Some(ports) = input["ports"].as_array() {
+        for port in ports {
+            if let Some(p) = port.as_str() {
+                args.push("-p".to_string());
+                args.push(p.to_string());
+            }
+        }
+    }
+
+    args.push(image.to_string());
+
+    if let Some(cmd) = input["command"].as_str() {
+        // Split the command string on whitespace for the container command.
+        for part in cmd.split_whitespace() {
+            args.push(part.to_string());
+        }
+    }
+
+    let output = Command::new("docker")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "docker_run".into(),
+            message: format!("failed to run docker run: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "stdout": stdout.trim(),
+            "stderr": stderr.trim(),
+        }),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_docker_build(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Container)?;
+
+    let build_path = input["path"].as_str().unwrap_or(".");
+    let resolved_path = resolve_path(&context.working_dir, build_path)?;
+
+    let mut args = vec!["build".to_string()];
+
+    if let Some(tag) = input["tag"].as_str() {
+        args.push("-t".to_string());
+        args.push(tag.to_string());
+    }
+
+    if let Some(dockerfile) = input["dockerfile"].as_str() {
+        args.push("-f".to_string());
+        args.push(dockerfile.to_string());
+    }
+
+    args.push(resolved_path.display().to_string());
+
+    let output = Command::new("docker")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "docker_build".into(),
+            message: format!("failed to run docker build: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // Truncate long build output.
+    let truncated_stdout = if stdout.len() > 10_000 {
+        format!("{}... [truncated]", &stdout[..10_000])
+    } else {
+        stdout
+    };
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "stdout": truncated_stdout,
+            "stderr": stderr,
+        }),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(stderr)
+        },
+        duration_ms: 0,
+    })
+}
+
+async fn tool_docker_logs(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Container)?;
+
+    let container = input["container"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "docker_logs".into(),
+            message: "missing 'container' parameter".into(),
+        })?;
+
+    let tail = input["tail"].as_u64().unwrap_or(100);
+
+    let output = Command::new("docker")
+        .args(["logs", "--tail", &tail.to_string(), container])
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "docker_logs".into(),
+            message: format!("failed to run docker logs: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "logs": format!("{}{}", stdout, stderr),
+        }),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(format!("docker logs failed: {}", stderr))
+        },
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// HTTP tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_http_request(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    let url_str = input["url"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "http_request".into(),
+        message: "missing 'url' parameter".into(),
+    })?;
+
+    let parsed_url = url::Url::parse(url_str).map_err(|e| PunchError::Tool {
+        tool: "http_request".into(),
+        message: format!("invalid URL: {}", e),
+    })?;
+
+    if let Some(host) = parsed_url.host_str() {
+        require_capability(capabilities, &Capability::Network(host.to_string()))?;
+    }
+
+    let method_str = input["method"].as_str().unwrap_or("GET");
+    let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(30);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| PunchError::Tool {
+            tool: "http_request".into(),
+            message: format!("failed to create HTTP client: {}", e),
+        })?;
+
+    let method = method_str
+        .parse::<reqwest::Method>()
+        .map_err(|e| PunchError::Tool {
+            tool: "http_request".into(),
+            message: format!("invalid HTTP method '{}': {}", method_str, e),
+        })?;
+
+    let mut req = client.request(method, url_str);
+
+    if let Some(headers) = input["headers"].as_object() {
+        for (key, val) in headers {
+            if let Some(v) = val.as_str() {
+                req = req.header(key.as_str(), v);
+            }
+        }
+    }
+
+    if let Some(body) = input["body"].as_str() {
+        req = req.body(body.to_string());
+    }
+
+    let response = req.send().await.map_err(|e| PunchError::Tool {
+        tool: "http_request".into(),
+        message: format!("request failed: {}", e),
+    })?;
+
+    let status = response.status().as_u16();
+    let resp_headers: HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    let body = response.text().await.map_err(|e| PunchError::Tool {
+        tool: "http_request".into(),
+        message: format!("failed to read response body: {}", e),
+    })?;
+
+    let truncated = if body.len() > 100_000 {
+        format!(
+            "{}... [truncated, {} total bytes]",
+            &body[..100_000],
+            body.len()
+        )
+    } else {
+        body
+    };
+
+    Ok(ToolResult {
+        success: (200..300).contains(&(status as usize)),
+        output: serde_json::json!({
+            "status": status,
+            "headers": resp_headers,
+            "body": truncated,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_http_post(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    let url_str = input["url"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "http_post".into(),
+        message: "missing 'url' parameter".into(),
+    })?;
+
+    let json_body = input.get("json").ok_or_else(|| PunchError::Tool {
+        tool: "http_post".into(),
+        message: "missing 'json' parameter".into(),
+    })?;
+
+    let parsed_url = url::Url::parse(url_str).map_err(|e| PunchError::Tool {
+        tool: "http_post".into(),
+        message: format!("invalid URL: {}", e),
+    })?;
+
+    if let Some(host) = parsed_url.host_str() {
+        require_capability(capabilities, &Capability::Network(host.to_string()))?;
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| PunchError::Tool {
+            tool: "http_post".into(),
+            message: format!("failed to create HTTP client: {}", e),
+        })?;
+
+    let mut req = client.post(url_str).json(json_body);
+
+    if let Some(headers) = input["headers"].as_object() {
+        for (key, val) in headers {
+            if let Some(v) = val.as_str() {
+                req = req.header(key.as_str(), v);
+            }
+        }
+    }
+
+    let response = req.send().await.map_err(|e| PunchError::Tool {
+        tool: "http_post".into(),
+        message: format!("request failed: {}", e),
+    })?;
+
+    let status = response.status().as_u16();
+    let body = response.text().await.map_err(|e| PunchError::Tool {
+        tool: "http_post".into(),
+        message: format!("failed to read response body: {}", e),
+    })?;
+
+    let truncated = if body.len() > 100_000 {
+        format!(
+            "{}... [truncated, {} total bytes]",
+            &body[..100_000],
+            body.len()
+        )
+    } else {
+        body
+    };
+
+    Ok(ToolResult {
+        success: (200..300).contains(&(status as usize)),
+        output: serde_json::json!({
+            "status": status,
+            "body": truncated,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Data manipulation tool implementations
+// ---------------------------------------------------------------------------
+
+/// Traverse a JSON value along a dot-separated path.
+fn json_path_query(data: &serde_json::Value, path: &str) -> serde_json::Value {
+    let mut current = data;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        // Try as array index first.
+        if let Ok(idx) = segment.parse::<usize>()
+            && let Some(val) = current.get(idx)
+        {
+            current = val;
+            continue;
+        }
+        // Try as object key.
+        if let Some(val) = current.get(segment) {
+            current = val;
+        } else {
+            return serde_json::json!(null);
+        }
+    }
+    current.clone()
+}
+
+async fn tool_json_query(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let path = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "json_query".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
+
+    let data = input.get("data").ok_or_else(|| PunchError::Tool {
+        tool: "json_query".into(),
+        message: "missing 'data' parameter".into(),
+    })?;
+
+    // If data is a string, try to parse it as JSON.
+    let parsed_data = if let Some(s) = data.as_str() {
+        serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!(s))
+    } else {
+        data.clone()
+    };
+
+    let result = json_path_query(&parsed_data, path);
+
+    Ok(ToolResult {
+        success: true,
+        output: result,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_json_transform(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let data = input.get("data").ok_or_else(|| PunchError::Tool {
+        tool: "json_transform".into(),
+        message: "missing 'data' parameter".into(),
+    })?;
+
+    // If data is a string, try to parse it as JSON.
+    let mut parsed_data = if let Some(s) = data.as_str() {
+        serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!(s))
+    } else {
+        data.clone()
+    };
+
+    // Apply key extraction.
+    if let Some(extract_keys) = input["extract"].as_array() {
+        let keys: Vec<&str> = extract_keys.iter().filter_map(|k| k.as_str()).collect();
+        if let Some(arr) = parsed_data.as_array() {
+            let filtered: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|item| {
+                    let mut obj = serde_json::Map::new();
+                    for key in &keys {
+                        if let Some(val) = item.get(*key) {
+                            obj.insert(key.to_string(), val.clone());
+                        }
+                    }
+                    serde_json::Value::Object(obj)
+                })
+                .collect();
+            parsed_data = serde_json::json!(filtered);
+        } else if let Some(obj) = parsed_data.as_object() {
+            let mut result = serde_json::Map::new();
+            for key in &keys {
+                if let Some(val) = obj.get(*key) {
+                    result.insert(key.to_string(), val.clone());
+                }
+            }
+            parsed_data = serde_json::Value::Object(result);
+        }
+    }
+
+    // Apply key renaming.
+    if let Some(rename_map) = input["rename"].as_object() {
+        if let Some(arr) = parsed_data.as_array() {
+            let renamed: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|item| {
+                    if let Some(obj) = item.as_object() {
+                        let mut new_obj = serde_json::Map::new();
+                        for (k, v) in obj {
+                            let new_key = rename_map.get(k).and_then(|r| r.as_str()).unwrap_or(k);
+                            new_obj.insert(new_key.to_string(), v.clone());
+                        }
+                        serde_json::Value::Object(new_obj)
+                    } else {
+                        item.clone()
+                    }
+                })
+                .collect();
+            parsed_data = serde_json::json!(renamed);
+        } else if let Some(obj) = parsed_data.as_object() {
+            let mut new_obj = serde_json::Map::new();
+            for (k, v) in obj {
+                let new_key = rename_map.get(k).and_then(|r| r.as_str()).unwrap_or(k);
+                new_obj.insert(new_key.to_string(), v.clone());
+            }
+            parsed_data = serde_json::Value::Object(new_obj);
+        }
+    }
+
+    // Apply array filtering.
+    if let Some(filter_key) = input["filter_key"].as_str()
+        && let Some(filter_value) = input["filter_value"].as_str()
+        && let Some(arr) = parsed_data.as_array()
+    {
+        let filtered: Vec<serde_json::Value> = arr
+            .iter()
+            .filter(|item| {
+                item.get(filter_key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s == filter_value)
+            })
+            .cloned()
+            .collect();
+        parsed_data = serde_json::json!(filtered);
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output: parsed_data,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_yaml_parse(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let content = input["content"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "yaml_parse".into(),
+        message: "missing 'content' parameter".into(),
+    })?;
+
+    let parsed: serde_json::Value =
+        serde_yaml::from_str(content).map_err(|e| PunchError::Tool {
+            tool: "yaml_parse".into(),
+            message: format!("failed to parse YAML: {}", e),
+        })?;
+
+    Ok(ToolResult {
+        success: true,
+        output: parsed,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_regex_match(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let pattern_str = input["pattern"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "regex_match".into(),
+        message: "missing 'pattern' parameter".into(),
+    })?;
+    let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "regex_match".into(),
+        message: "missing 'text' parameter".into(),
+    })?;
+    let global = input["global"].as_bool().unwrap_or(false);
+
+    let re = regex::Regex::new(pattern_str).map_err(|e| PunchError::Tool {
+        tool: "regex_match".into(),
+        message: format!("invalid regex: {}", e),
+    })?;
+
+    if global {
+        let matches: Vec<serde_json::Value> = re
+            .captures_iter(text)
+            .map(|cap| {
+                let groups: Vec<serde_json::Value> = cap
+                    .iter()
+                    .map(|m| m.map_or(serde_json::json!(null), |m| serde_json::json!(m.as_str())))
+                    .collect();
+                serde_json::json!(groups)
+            })
+            .collect();
+
+        Ok(ToolResult {
+            success: true,
+            output: serde_json::json!({ "matches": matches }),
+            error: None,
+            duration_ms: 0,
+        })
+    } else if let Some(cap) = re.captures(text) {
+        let groups: Vec<serde_json::Value> = cap
+            .iter()
+            .map(|m| m.map_or(serde_json::json!(null), |m| serde_json::json!(m.as_str())))
+            .collect();
+
+        Ok(ToolResult {
+            success: true,
+            output: serde_json::json!({ "matched": true, "groups": groups }),
+            error: None,
+            duration_ms: 0,
+        })
+    } else {
+        Ok(ToolResult {
+            success: true,
+            output: serde_json::json!({ "matched": false, "groups": [] }),
+            error: None,
+            duration_ms: 0,
+        })
+    }
+}
+
+async fn tool_regex_replace(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let pattern_str = input["pattern"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "regex_replace".into(),
+        message: "missing 'pattern' parameter".into(),
+    })?;
+    let replacement = input["replacement"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "regex_replace".into(),
+            message: "missing 'replacement' parameter".into(),
+        })?;
+    let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "regex_replace".into(),
+        message: "missing 'text' parameter".into(),
+    })?;
+
+    let re = regex::Regex::new(pattern_str).map_err(|e| PunchError::Tool {
+        tool: "regex_replace".into(),
+        message: format!("invalid regex: {}", e),
+    })?;
+
+    let result = re.replace_all(text, replacement).to_string();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!(result),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Process tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_process_list(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::ShellExec("*".to_string()))?;
+
+    let filter = input["filter"].as_str();
+
+    // Use `ps` to get process list in a portable manner.
+    let output = Command::new("ps")
+        .args(["aux"])
+        .current_dir(&context.working_dir)
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "process_list".into(),
+            message: format!("failed to run ps: {}", e),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    let header = lines.first().copied().unwrap_or("");
+    let processes: Vec<serde_json::Value> = lines
+        .iter()
+        .skip(1)
+        .filter(|line| {
+            if let Some(f) = filter {
+                line.contains(f)
+            } else {
+                true
+            }
+        })
+        .take(100) // Limit output
+        .map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            serde_json::json!({
+                "user": parts.first().unwrap_or(&""),
+                "pid": parts.get(1).unwrap_or(&""),
+                "cpu": parts.get(2).unwrap_or(&""),
+                "mem": parts.get(3).unwrap_or(&""),
+                "command": parts.get(10..).map(|s| s.join(" ")).unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "header": header,
+            "processes": processes,
+            "count": processes.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_process_kill(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::ShellExec("*".to_string()))?;
+
+    let pid = input["pid"].as_u64().ok_or_else(|| PunchError::Tool {
+        tool: "process_kill".into(),
+        message: "missing 'pid' parameter".into(),
+    })?;
+
+    let signal = input["signal"].as_str().unwrap_or("TERM");
+
+    let output = Command::new("kill")
+        .args([&format!("-{}", signal), &pid.to_string()])
+        .output()
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "process_kill".into(),
+            message: format!("failed to run kill: {}", e),
+        })?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ToolResult {
+        success: output.status.success(),
+        output: serde_json::json!({
+            "pid": pid,
+            "signal": signal,
+            "killed": output.status.success(),
+        }),
+        error: if output.status.success() {
+            None
+        } else {
+            Some(format!("kill failed: {}", stderr))
+        },
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Schedule tool implementations (in-memory DashMap scheduler)
+// ---------------------------------------------------------------------------
+
+/// Represents a scheduled task entry.
+#[derive(Clone, Debug, serde::Serialize)]
+struct ScheduledTask {
+    id: String,
+    name: String,
+    command: String,
+    delay_secs: u64,
+    interval_secs: Option<u64>,
+    status: String,
+}
+
+/// Global in-memory task registry.
+static SCHEDULED_TASKS: LazyLock<DashMap<String, ScheduledTask>> = LazyLock::new(DashMap::new);
+
+/// Global cancellation token registry.
+static TASK_CANCELLERS: LazyLock<DashMap<String, tokio::sync::watch::Sender<bool>>> =
+    LazyLock::new(DashMap::new);
+
+async fn tool_schedule_task(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Schedule)?;
+
+    let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "schedule_task".into(),
+        message: "missing 'name' parameter".into(),
+    })?;
+    let command = input["command"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "schedule_task".into(),
+        message: "missing 'command' parameter".into(),
+    })?;
+    let delay_secs = input["delay_secs"]
+        .as_u64()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "schedule_task".into(),
+            message: "missing 'delay_secs' parameter".into(),
+        })?;
+    let interval_secs = input["interval_secs"].as_u64();
+
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let task = ScheduledTask {
+        id: task_id.clone(),
+        name: name.to_string(),
+        command: command.to_string(),
+        delay_secs,
+        interval_secs,
+        status: "scheduled".to_string(),
+    };
+
+    SCHEDULED_TASKS.insert(task_id.clone(), task);
+
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+    TASK_CANCELLERS.insert(task_id.clone(), cancel_tx);
+
+    // Spawn the delayed task.
+    let task_id_clone = task_id.clone();
+    let command_owned = command.to_string();
+    let working_dir = context.working_dir.clone();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+
+        loop {
+            if *cancel_rx.borrow() {
+                break;
+            }
+
+            // Execute the command.
+            let _output = Command::new("sh")
+                .arg("-c")
+                .arg(&command_owned)
+                .current_dir(&working_dir)
+                .output()
+                .await;
+
+            // Update task status.
+            if let Some(mut entry) = SCHEDULED_TASKS.get_mut(&task_id_clone) {
+                entry.status = "executed".to_string();
+            }
+
+            // If not recurring, exit.
+            let Some(interval) = interval_secs else {
+                break;
+            };
+
+            // Wait for the next interval or cancellation.
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(interval)) => {}
+                _ = cancel_rx.changed() => {
+                    break;
+                }
+            }
+        }
+
+        // Clean up on completion.
+        if interval_secs.is_none() {
+            SCHEDULED_TASKS.remove(&task_id_clone);
+            TASK_CANCELLERS.remove(&task_id_clone);
+        }
+    });
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "task_id": task_id,
+            "name": name,
+            "delay_secs": delay_secs,
+            "interval_secs": interval_secs,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_schedule_list(capabilities: &[Capability]) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Schedule)?;
+
+    let tasks: Vec<serde_json::Value> = SCHEDULED_TASKS
+        .iter()
+        .map(|entry| {
+            let task = entry.value();
+            serde_json::json!({
+                "id": task.id,
+                "name": task.name,
+                "command": task.command,
+                "delay_secs": task.delay_secs,
+                "interval_secs": task.interval_secs,
+                "status": task.status,
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!(tasks),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_schedule_cancel(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Schedule)?;
+
+    let task_id = input["task_id"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "schedule_cancel".into(),
+        message: "missing 'task_id' parameter".into(),
+    })?;
+
+    // Send cancellation signal.
+    if let Some(sender) = TASK_CANCELLERS.get(task_id) {
+        let _ = sender.send(true);
+    }
+
+    // Remove from registries.
+    let removed = SCHEDULED_TASKS.remove(task_id).is_some();
+    TASK_CANCELLERS.remove(task_id);
+
+    Ok(ToolResult {
+        success: removed,
+        output: serde_json::json!({
+            "task_id": task_id,
+            "cancelled": removed,
+        }),
+        error: if removed {
+            None
+        } else {
+            Some(format!("task '{}' not found", task_id))
+        },
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Code analysis tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_code_search(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::CodeAnalysis)?;
+
+    let pattern_str = input["pattern"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "code_search".into(),
+        message: "missing 'pattern' parameter".into(),
+    })?;
+    let search_path = input["path"].as_str().unwrap_or(".");
+    let file_pattern = input["file_pattern"].as_str();
+    let max_results = input["max_results"].as_u64().unwrap_or(50) as usize;
+
+    let resolved_path = resolve_path(&context.working_dir, search_path)?;
+
+    let re = regex::Regex::new(pattern_str).map_err(|e| PunchError::Tool {
+        tool: "code_search".into(),
+        message: format!("invalid regex: {}", e),
+    })?;
+
+    let file_glob = file_pattern.and_then(|p| glob::Pattern::new(p).ok());
+
+    let mut results = Vec::new();
+
+    for entry in walkdir::WalkDir::new(&resolved_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        // Apply file pattern filter.
+        if let Some(ref glob_pat) = file_glob
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && !glob_pat.matches(name)
+        {
+            continue;
+        }
+
+        // Skip binary files (check first 512 bytes).
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+
+        for (line_num, line) in content.lines().enumerate() {
+            if results.len() >= max_results {
+                break;
+            }
+            if re.is_match(line) {
+                let rel_path = path
+                    .strip_prefix(&resolved_path)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string();
+                results.push(serde_json::json!({
+                    "file": rel_path,
+                    "line": line_num + 1,
+                    "text": line.chars().take(200).collect::<String>(),
+                }));
+            }
+        }
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "matches": results,
+            "count": results.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_code_symbols(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::CodeAnalysis)?;
+
+    let path_str = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "code_symbols".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
+
+    let path = resolve_path(&context.working_dir, path_str)?;
+
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "code_symbols".into(),
+            message: format!("failed to read '{}': {}", path.display(), e),
+        })?;
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    // Regex patterns for common languages.
+    let patterns: Vec<(&str, &str)> = match ext {
+        "rs" => vec![
+            ("function", r"(?m)^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)"),
+            ("struct", r"(?m)^\s*(?:pub\s+)?struct\s+(\w+)"),
+            ("enum", r"(?m)^\s*(?:pub\s+)?enum\s+(\w+)"),
+            ("trait", r"(?m)^\s*(?:pub\s+)?trait\s+(\w+)"),
+            ("impl", r"(?m)^\s*impl(?:<[^>]*>)?\s+(\w+)"),
+        ],
+        "py" => vec![
+            ("function", r"(?m)^\s*def\s+(\w+)"),
+            ("class", r"(?m)^\s*class\s+(\w+)"),
+        ],
+        "js" | "ts" | "jsx" | "tsx" => vec![
+            (
+                "function",
+                r"(?m)^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)",
+            ),
+            ("class", r"(?m)^\s*(?:export\s+)?class\s+(\w+)"),
+            (
+                "const_fn",
+                r"(?m)^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>",
+            ),
+        ],
+        "go" => vec![
+            ("function", r"(?m)^func\s+(?:\([^)]*\)\s+)?(\w+)"),
+            ("type", r"(?m)^type\s+(\w+)\s+struct"),
+            ("interface", r"(?m)^type\s+(\w+)\s+interface"),
+        ],
+        "java" | "kt" => vec![
+            (
+                "class",
+                r"(?m)^\s*(?:public|private|protected)?\s*(?:static\s+)?class\s+(\w+)",
+            ),
+            (
+                "method",
+                r"(?m)^\s*(?:public|private|protected)?\s*(?:static\s+)?\w+\s+(\w+)\s*\(",
+            ),
+        ],
+        _ => vec![
+            (
+                "function",
+                r"(?m)^\s*(?:pub\s+)?(?:async\s+)?(?:fn|function|def)\s+(\w+)",
+            ),
+            ("class", r"(?m)^\s*(?:pub\s+)?(?:class|struct|enum)\s+(\w+)"),
+        ],
+    };
+
+    let mut symbols = Vec::new();
+
+    for (kind, pattern) in patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            for cap in re.captures_iter(&content) {
+                if let Some(name_match) = cap.get(1) {
+                    // Find line number.
+                    let byte_offset = name_match.start();
+                    let line_num = content[..byte_offset].matches('\n').count() + 1;
+                    symbols.push(serde_json::json!({
+                        "kind": kind,
+                        "name": name_match.as_str(),
+                        "line": line_num,
+                    }));
+                }
+            }
+        }
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "file": path_str,
+            "symbols": symbols,
+            "count": symbols.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Archive tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_archive_create(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Archive)?;
+
+    let output_path_str = input["output_path"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "archive_create".into(),
+            message: "missing 'output_path' parameter".into(),
+        })?;
+    let paths = input["paths"]
+        .as_array()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "archive_create".into(),
+            message: "missing 'paths' parameter".into(),
+        })?;
+
+    let output_path = resolve_path(&context.working_dir, output_path_str)?;
+
+    // Ensure parent directory exists.
+    if let Some(parent) = output_path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| PunchError::Tool {
+            tool: "archive_create".into(),
+            message: format!("failed to create directory: {}", e),
+        })?;
+    }
+
+    let file = std::fs::File::create(&output_path).map_err(|e| PunchError::Tool {
+        tool: "archive_create".into(),
+        message: format!("failed to create archive file: {}", e),
+    })?;
+
+    let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut builder = tar::Builder::new(enc);
+
+    let mut file_count = 0u64;
+    for path_val in paths {
+        let Some(path_str) = path_val.as_str() else {
+            continue;
+        };
+        let resolved = resolve_path(&context.working_dir, path_str)?;
+        if resolved.is_dir() {
+            builder
+                .append_dir_all(path_str, &resolved)
+                .map_err(|e| PunchError::Tool {
+                    tool: "archive_create".into(),
+                    message: format!("failed to add directory '{}': {}", path_str, e),
+                })?;
+            file_count += 1;
+        } else if resolved.is_file() {
+            builder
+                .append_path_with_name(&resolved, path_str)
+                .map_err(|e| PunchError::Tool {
+                    tool: "archive_create".into(),
+                    message: format!("failed to add file '{}': {}", path_str, e),
+                })?;
+            file_count += 1;
+        }
+    }
+
+    builder.finish().map_err(|e| PunchError::Tool {
+        tool: "archive_create".into(),
+        message: format!("failed to finalize archive: {}", e),
+    })?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "archive": output_path.display().to_string(),
+            "entries": file_count,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_archive_extract(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Archive)?;
+
+    let archive_path_str = input["archive_path"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "archive_extract".into(),
+            message: "missing 'archive_path' parameter".into(),
+        })?;
+    let destination_str = input["destination"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "archive_extract".into(),
+            message: "missing 'destination' parameter".into(),
+        })?;
+
+    let archive_path = resolve_path(&context.working_dir, archive_path_str)?;
+    let destination = resolve_path(&context.working_dir, destination_str)?;
+
+    let file = std::fs::File::open(&archive_path).map_err(|e| PunchError::Tool {
+        tool: "archive_extract".into(),
+        message: format!("failed to open archive: {}", e),
+    })?;
+
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+
+    std::fs::create_dir_all(&destination).map_err(|e| PunchError::Tool {
+        tool: "archive_extract".into(),
+        message: format!("failed to create destination directory: {}", e),
+    })?;
+
+    archive.unpack(&destination).map_err(|e| PunchError::Tool {
+        tool: "archive_extract".into(),
+        message: format!("failed to extract archive: {}", e),
+    })?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "destination": destination.display().to_string(),
+            "message": "archive extracted successfully",
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_archive_list(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Archive)?;
+
+    let archive_path_str = input["archive_path"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "archive_list".into(),
+            message: "missing 'archive_path' parameter".into(),
+        })?;
+
+    let archive_path = resolve_path(&context.working_dir, archive_path_str)?;
+
+    let file = std::fs::File::open(&archive_path).map_err(|e| PunchError::Tool {
+        tool: "archive_list".into(),
+        message: format!("failed to open archive: {}", e),
+    })?;
+
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+
+    let mut entries_list = Vec::new();
+    for entry in archive.entries().map_err(|e| PunchError::Tool {
+        tool: "archive_list".into(),
+        message: format!("failed to read archive entries: {}", e),
+    })? {
+        let entry = entry.map_err(|e| PunchError::Tool {
+            tool: "archive_list".into(),
+            message: format!("failed to read entry: {}", e),
+        })?;
+        let path = entry
+            .path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "<invalid path>".to_string());
+        let size = entry.size();
+        let is_dir = entry.header().entry_type().is_dir();
+        entries_list.push(serde_json::json!({
+            "path": path,
+            "size": size,
+            "is_directory": is_dir,
+        }));
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "entries": entries_list,
+            "count": entries_list.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Template tool implementation
+// ---------------------------------------------------------------------------
+
+async fn tool_template_render(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Template)?;
+
+    let template = input["template"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "template_render".into(),
+        message: "missing 'template' parameter".into(),
+    })?;
+    let variables = input["variables"]
+        .as_object()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "template_render".into(),
+            message: "missing 'variables' parameter (must be an object)".into(),
+        })?;
+
+    // Simple {{variable}} substitution using regex.
+    let re = regex::Regex::new(r"\{\{(\w+)\}\}").map_err(|e| PunchError::Tool {
+        tool: "template_render".into(),
+        message: format!("internal regex error: {}", e),
+    })?;
+
+    let rendered = re.replace_all(template, |caps: &regex::Captures| {
+        let var_name = &caps[1];
+        variables
+            .get(var_name)
+            .map(|v| {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
+            })
+            .unwrap_or_else(|| format!("{{{{{}}}}}", var_name))
+    });
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!(rendered.to_string()),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Crypto / Hash tool implementations
+// ---------------------------------------------------------------------------
+
+/// Compute the hex-encoded hash of bytes using the specified algorithm.
+fn compute_hash(algorithm: &str, data: &[u8]) -> PunchResult<String> {
+    use sha2::Digest;
+    match algorithm {
+        "sha256" => {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(data);
+            Ok(format!("{:x}", hasher.finalize()))
+        }
+        "sha512" => {
+            let mut hasher = sha2::Sha512::new();
+            hasher.update(data);
+            Ok(format!("{:x}", hasher.finalize()))
+        }
+        "md5" => {
+            // Simple MD5 implementation note: MD5 is cryptographically insecure.
+            // We compute it via shell `md5sum` or `md5` for portability.
+            // For in-process computation, we use a basic implementation.
+            // Since we don't have an md5 crate, compute via sha256 as fallback
+            // with a clear message. For now, shell out to md5sum.
+            Err(PunchError::Tool {
+                tool: "hash_compute".into(),
+                message: "MD5 is not supported in-process (insecure and deprecated). Use sha256 or sha512 instead.".into(),
+            })
+        }
+        other => Err(PunchError::Tool {
+            tool: "hash_compute".into(),
+            message: format!("unsupported algorithm '{}', use sha256 or sha512", other),
+        }),
+    }
+}
+
+async fn tool_hash_compute(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Crypto)?;
+
+    let algorithm = input["algorithm"].as_str().unwrap_or("sha256");
+
+    let data = if let Some(input_str) = input["input"].as_str() {
+        input_str.as_bytes().to_vec()
+    } else if let Some(file_path) = input["file"].as_str() {
+        let path = resolve_path(&context.working_dir, file_path)?;
+        std::fs::read(&path).map_err(|e| PunchError::Tool {
+            tool: "hash_compute".into(),
+            message: format!("failed to read file '{}': {}", path.display(), e),
+        })?
+    } else {
+        return Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some("must provide either 'input' (string) or 'file' (path) parameter".into()),
+            duration_ms: 0,
+        });
+    };
+
+    let hash = compute_hash(algorithm, &data)?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "algorithm": algorithm,
+            "hash": hash,
+            "bytes_hashed": data.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_hash_verify(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::Crypto)?;
+
+    let algorithm = input["algorithm"].as_str().unwrap_or("sha256");
+    let expected = input["expected"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "hash_verify".into(),
+        message: "missing 'expected' parameter".into(),
+    })?;
+
+    let data = if let Some(input_str) = input["input"].as_str() {
+        input_str.as_bytes().to_vec()
+    } else if let Some(file_path) = input["file"].as_str() {
+        let path = resolve_path(&context.working_dir, file_path)?;
+        std::fs::read(&path).map_err(|e| PunchError::Tool {
+            tool: "hash_verify".into(),
+            message: format!("failed to read file '{}': {}", path.display(), e),
+        })?
+    } else {
+        return Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some("must provide either 'input' (string) or 'file' (path) parameter".into()),
+            duration_ms: 0,
+        });
+    };
+
+    let actual = compute_hash(algorithm, &data)?;
+    let matches = actual.eq_ignore_ascii_case(expected);
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "algorithm": algorithm,
+            "expected": expected,
+            "actual": actual,
+            "matches": matches,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Environment tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_env_get(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::ShellExec("*".to_string()))?;
+
+    let name = input["name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "env_get".into(),
+        message: "missing 'name' parameter".into(),
+    })?;
+
+    match std::env::var(name) {
+        Ok(value) => Ok(ToolResult {
+            success: true,
+            output: serde_json::json!({
+                "name": name,
+                "value": value,
+            }),
+            error: None,
+            duration_ms: 0,
+        }),
+        Err(_) => Ok(ToolResult {
+            success: true,
+            output: serde_json::json!({
+                "name": name,
+                "value": null,
+                "message": format!("environment variable '{}' is not set", name),
+            }),
+            error: None,
+            duration_ms: 0,
+        }),
+    }
+}
+
+async fn tool_env_list(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::ShellExec("*".to_string()))?;
+
+    let prefix = input["prefix"].as_str();
+
+    let vars: Vec<serde_json::Value> = std::env::vars()
+        .filter(|(key, _)| {
+            if let Some(p) = prefix {
+                key.starts_with(p)
+            } else {
+                true
+            }
+        })
+        .map(|(key, value)| {
+            serde_json::json!({
+                "name": key,
+                "value": value,
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "variables": vars,
+            "count": vars.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Text tool implementations
+// ---------------------------------------------------------------------------
+
+async fn tool_text_diff(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let old_text = input["old_text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "text_diff".into(),
+        message: "missing 'old_text' parameter".into(),
+    })?;
+    let new_text = input["new_text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "text_diff".into(),
+        message: "missing 'new_text' parameter".into(),
+    })?;
+    let label = input["label"].as_str().unwrap_or("file");
+
+    let diff = punch_types::generate_unified_diff(old_text, new_text, label, label);
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "diff": diff,
+            "has_changes": !diff.is_empty() && diff.contains("@@"),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_text_count(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::DataManipulation)?;
+
+    let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "text_count".into(),
+        message: "missing 'text' parameter".into(),
+    })?;
+
+    let lines = text.lines().count();
+    let words = text.split_whitespace().count();
+    let characters = text.chars().count();
+    let bytes = text.len();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "lines": lines,
+            "words": words,
+            "characters": characters,
+            "bytes": bytes,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// File tool implementations (extended)
+// ---------------------------------------------------------------------------
+
+async fn tool_file_search(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    // File search requires file read capability.
+    require_capability(capabilities, &Capability::FileRead("**".to_string()))?;
+
+    let pattern_str = input["pattern"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "file_search".into(),
+        message: "missing 'pattern' parameter".into(),
+    })?;
+    let search_path = input["path"].as_str().unwrap_or(".");
+    let max_results = input["max_results"].as_u64().unwrap_or(100) as usize;
+
+    let resolved_path = resolve_path(&context.working_dir, search_path)?;
+
+    let glob_pat = glob::Pattern::new(pattern_str).map_err(|e| PunchError::Tool {
+        tool: "file_search".into(),
+        message: format!("invalid glob pattern: {}", e),
+    })?;
+
+    let mut results = Vec::new();
+
+    for entry in walkdir::WalkDir::new(&resolved_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && glob_pat.matches(name)
+        {
+            let rel_path = path
+                .strip_prefix(&resolved_path)
+                .unwrap_or(path)
+                .display()
+                .to_string();
+            let is_dir = path.is_dir();
+            results.push(serde_json::json!({
+                "path": rel_path,
+                "is_directory": is_dir,
+            }));
+        }
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "matches": results,
+            "count": results.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_file_info(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let path_str = input["path"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "file_info".into(),
+        message: "missing 'path' parameter".into(),
+    })?;
+
+    let path = resolve_path(&context.working_dir, path_str)?;
+    let path_display = path.display().to_string();
+
+    require_capability(capabilities, &Capability::FileRead(path_display.clone()))?;
+
+    let metadata = std::fs::metadata(&path).map_err(|e| PunchError::Tool {
+        tool: "file_info".into(),
+        message: format!("failed to get metadata for '{}': {}", path_display, e),
+    })?;
+
+    let file_type = if metadata.is_file() {
+        "file"
+    } else if metadata.is_dir() {
+        "directory"
+    } else if metadata.is_symlink() {
+        "symlink"
+    } else {
+        "other"
+    };
+
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs())
+        })
+        .unwrap_or(0);
+
+    #[cfg(unix)]
+    let permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        format!("{:o}", metadata.permissions().mode())
+    };
+    #[cfg(not(unix))]
+    let permissions = if metadata.permissions().readonly() {
+        "readonly".to_string()
+    } else {
+        "read-write".to_string()
+    };
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "path": path_display,
+            "type": file_type,
+            "size_bytes": metadata.len(),
+            "modified_unix": modified,
+            "permissions": permissions,
+            "readonly": metadata.permissions().readonly(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -974,14 +3501,16 @@ mod tests {
         }
     }
 
-    fn make_test_context(
-        coordinator: Option<Arc<dyn AgentCoordinator>>,
-    ) -> ToolExecutionContext {
+    fn make_test_context(coordinator: Option<Arc<dyn AgentCoordinator>>) -> ToolExecutionContext {
         ToolExecutionContext {
             working_dir: std::env::temp_dir(),
             fighter_id: FighterId(uuid::Uuid::new_v4()),
             memory: Arc::new(MemorySubstrate::in_memory().unwrap()),
             coordinator,
+            approval_engine: None,
+            sandbox: None,
+            bleed_detector: None,
+            browser_pool: None,
         }
     }
 
@@ -1203,9 +3732,15 @@ mod tests {
         let results = parse_duckduckgo_results(mock_html);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0]["title"].as_str().unwrap(), "Example Page One");
-        assert_eq!(results[0]["url"].as_str().unwrap(), "https://example.com/page1");
+        assert_eq!(
+            results[0]["url"].as_str().unwrap(),
+            "https://example.com/page1"
+        );
         assert_eq!(results[1]["title"].as_str().unwrap(), "Example Page Two");
-        assert_eq!(results[1]["url"].as_str().unwrap(), "https://example.org/page2");
+        assert_eq!(
+            results[1]["url"].as_str().unwrap(),
+            "https://example.org/page2"
+        );
     }
 
     #[test]
@@ -1237,5 +3772,533 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.unwrap().contains("coordinator not available"));
+    }
+
+    // -- Approval engine integration tests --
+
+    #[tokio::test]
+    async fn test_tool_call_blocked_by_approval_policy() {
+        use punch_types::{ApprovalPolicy, DenyAllHandler, PolicyEngine, RiskLevel};
+
+        let engine = PolicyEngine::new(
+            vec![ApprovalPolicy {
+                name: "block-file-reads".into(),
+                tool_patterns: vec!["file_read".into()],
+                risk_level: RiskLevel::High,
+                auto_approve: false,
+                max_auto_approvals: None,
+            }],
+            Arc::new(DenyAllHandler),
+        );
+
+        let mut context = make_test_context(None);
+        context.approval_engine = Some(Arc::new(engine));
+
+        let caps = vec![Capability::FileRead("**".into())];
+        let input = serde_json::json!({"path": "/etc/passwd"});
+
+        let result = execute_tool("file_read", &input, &caps, &context)
+            .await
+            .expect("execute_tool should not error");
+
+        assert!(!result.success);
+        let error = result.error.expect("should have error message");
+        assert!(
+            error.contains("denied by policy"),
+            "expected 'denied by policy' in error, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tool_call_allowed_by_approval_policy() {
+        use punch_types::{ApprovalPolicy, AutoApproveHandler, PolicyEngine, RiskLevel};
+
+        let engine = PolicyEngine::new(
+            vec![ApprovalPolicy {
+                name: "allow-file-reads".into(),
+                tool_patterns: vec!["file_read".into()],
+                risk_level: RiskLevel::Low,
+                auto_approve: true,
+                max_auto_approvals: None,
+            }],
+            Arc::new(AutoApproveHandler),
+        );
+
+        let mut context = make_test_context(None);
+        context.approval_engine = Some(Arc::new(engine));
+
+        // Write a temp file to read.
+        let temp_file = context.working_dir.join("punch_approval_test.txt");
+        tokio::fs::write(&temp_file, "approval test content")
+            .await
+            .expect("write temp file");
+
+        let caps = vec![Capability::FileRead("**".into())];
+        let input = serde_json::json!({"path": temp_file.to_string_lossy()});
+
+        let result = execute_tool("file_read", &input, &caps, &context)
+            .await
+            .expect("execute_tool should not error");
+
+        assert!(
+            result.success,
+            "tool call should succeed: {:?}",
+            result.error
+        );
+
+        // Clean up.
+        let _ = tokio::fs::remove_file(&temp_file).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // Browser tool tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_browser_navigate_requires_capability() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory]; // no BrowserControl
+
+        let input = serde_json::json!({"url": "https://example.com"});
+        let result = execute_tool("browser_navigate", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        let error = result.error.expect("should have error");
+        assert!(
+            error.contains("capability denied") || error.contains("missing capability"),
+            "expected capability denied, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_browser_navigate_no_pool() {
+        let context = make_test_context(None); // browser_pool is None
+        let caps = vec![Capability::BrowserControl];
+
+        let input = serde_json::json!({"url": "https://example.com"});
+        let result = execute_tool("browser_navigate", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        let error = result.error.expect("should have error");
+        assert!(
+            error.contains("browser not available"),
+            "expected 'browser not available', got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_browser_navigate_with_pool_no_driver() {
+        use punch_types::{BrowserConfig, BrowserPool};
+
+        let pool = Arc::new(BrowserPool::new(BrowserConfig::default(), 5));
+        let mut context = make_test_context(None);
+        context.browser_pool = Some(pool);
+
+        let caps = vec![Capability::BrowserControl];
+        let input = serde_json::json!({"url": "https://example.com"});
+
+        let result = execute_tool("browser_navigate", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        // Pool is available but no CDP driver, so the tool reports failure gracefully.
+        assert!(!result.success);
+        let error = result.error.expect("should have error");
+        assert!(
+            error.contains("no CDP driver"),
+            "expected 'no CDP driver', got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_browser_screenshot_with_pool() {
+        use punch_types::{BrowserConfig, BrowserPool};
+
+        let pool = Arc::new(BrowserPool::new(BrowserConfig::default(), 5));
+        let mut context = make_test_context(None);
+        context.browser_pool = Some(pool);
+
+        let caps = vec![Capability::BrowserControl];
+        let input = serde_json::json!({"full_page": true});
+
+        let result = execute_tool("browser_screenshot", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        assert_eq!(result.output["full_page"], true);
+    }
+
+    #[tokio::test]
+    async fn test_browser_click_missing_selector() {
+        use punch_types::{BrowserConfig, BrowserPool};
+
+        let pool = Arc::new(BrowserPool::new(BrowserConfig::default(), 5));
+        let mut context = make_test_context(None);
+        context.browser_pool = Some(pool);
+
+        let caps = vec![Capability::BrowserControl];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("browser_click", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        let error = result.error.expect("should have error");
+        assert!(
+            error.contains("missing 'selector'"),
+            "expected missing selector error, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_browser_type_missing_params() {
+        use punch_types::{BrowserConfig, BrowserPool};
+
+        let pool = Arc::new(BrowserPool::new(BrowserConfig::default(), 5));
+        let mut context = make_test_context(None);
+        context.browser_pool = Some(pool);
+
+        let caps = vec![Capability::BrowserControl];
+
+        // Missing 'text' param
+        let input = serde_json::json!({"selector": "#input"});
+        let result = execute_tool("browser_type", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        let error = result.error.expect("should have error");
+        assert!(error.contains("missing 'text'"), "got: {}", error);
+    }
+
+    #[tokio::test]
+    async fn test_browser_content_with_pool() {
+        use punch_types::{BrowserConfig, BrowserPool};
+
+        let pool = Arc::new(BrowserPool::new(BrowserConfig::default(), 5));
+        let mut context = make_test_context(None);
+        context.browser_pool = Some(pool);
+
+        let caps = vec![Capability::BrowserControl];
+        let input = serde_json::json!({"selector": "h1"});
+
+        let result = execute_tool("browser_content", &input, &caps, &context)
+            .await
+            .expect("should not hard-error");
+
+        assert!(!result.success);
+        assert_eq!(result.output["selector"], "h1");
+    }
+
+    // -----------------------------------------------------------------------
+    // New tool tests — data manipulation, regex, code analysis
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_json_query_basic_path() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "data": {"users": [{"name": "Alice"}, {"name": "Bob"}]},
+            "path": "users.1.name"
+        });
+
+        let result = execute_tool("json_query", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output, serde_json::json!("Bob"));
+    }
+
+    #[tokio::test]
+    async fn test_regex_match_with_captures() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "pattern": r"(\d+)-(\d+)",
+            "text": "order 123-456 confirmed",
+            "global": false
+        });
+
+        let result = execute_tool("regex_match", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["matched"], true);
+        let groups = result.output["groups"].as_array().unwrap();
+        assert_eq!(groups[0], "123-456");
+        assert_eq!(groups[1], "123");
+        assert_eq!(groups[2], "456");
+    }
+
+    #[tokio::test]
+    async fn test_regex_replace_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "pattern": r"(\w+)@(\w+)",
+            "replacement": "$1 AT $2",
+            "text": "email user@example domain"
+        });
+
+        let result = execute_tool("regex_replace", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(
+            result.output,
+            serde_json::json!("email user AT example domain")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_yaml_parse_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "content": "name: Alice\nage: 30\ntags:\n  - rust\n  - python"
+        });
+
+        let result = execute_tool("yaml_parse", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["name"], "Alice");
+        assert_eq!(result.output["age"], 30);
+        let tags = result.output["tags"].as_array().unwrap();
+        assert_eq!(tags.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_json_transform_extract_and_rename() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "data": [
+                {"name": "Alice", "age": 30, "city": "NYC"},
+                {"name": "Bob", "age": 25, "city": "LA"}
+            ],
+            "extract": ["name", "city"],
+            "rename": {"name": "full_name"}
+        });
+
+        let result = execute_tool("json_transform", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let arr = result.output.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["full_name"], "Alice");
+        assert!(arr[0].get("age").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_code_symbols_rust_file() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::CodeAnalysis];
+
+        // Write a temp Rust file.
+        let temp_file = context.working_dir.join("punch_test_symbols.rs");
+        tokio::fs::write(
+            &temp_file,
+            "pub fn hello() {}\nstruct Foo {}\nasync fn bar() {}\nenum Color {}",
+        )
+        .await
+        .unwrap();
+
+        let input = serde_json::json!({
+            "path": temp_file.to_string_lossy()
+        });
+
+        let result = execute_tool("code_symbols", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let symbols = result.output["symbols"].as_array().unwrap();
+        let names: Vec<&str> = symbols.iter().filter_map(|s| s["name"].as_str()).collect();
+        assert!(names.contains(&"hello"), "missing hello: {:?}", names);
+        assert!(names.contains(&"Foo"), "missing Foo: {:?}", names);
+        assert!(names.contains(&"bar"), "missing bar: {:?}", names);
+        assert!(names.contains(&"Color"), "missing Color: {:?}", names);
+
+        // Clean up.
+        let _ = tokio::fs::remove_file(&temp_file).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // New tool tests — archive, template, hash, env, text, file
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_template_render_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Template];
+
+        let input = serde_json::json!({
+            "template": "Hello, {{name}}! You are {{age}} years old.",
+            "variables": {"name": "Alice", "age": 30}
+        });
+
+        let result = execute_tool("template_render", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output, "Hello, Alice! You are 30 years old.");
+    }
+
+    #[tokio::test]
+    async fn test_hash_compute_sha256() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Crypto];
+
+        let input = serde_json::json!({
+            "algorithm": "sha256",
+            "input": "hello world"
+        });
+
+        let result = execute_tool("hash_compute", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let hash = result.output["hash"].as_str().unwrap();
+        // Known SHA-256 of "hello world"
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hash_verify_match() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Crypto];
+
+        let input = serde_json::json!({
+            "algorithm": "sha256",
+            "input": "hello world",
+            "expected": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        });
+
+        let result = execute_tool("hash_verify", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["matches"], true);
+    }
+
+    #[tokio::test]
+    async fn test_text_count_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "text": "hello world\nfoo bar baz\n"
+        });
+
+        let result = execute_tool("text_count", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["lines"], 2);
+        assert_eq!(result.output["words"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_text_diff_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::DataManipulation];
+
+        let input = serde_json::json!({
+            "old_text": "line1\nline2\nline3",
+            "new_text": "line1\nchanged\nline3"
+        });
+
+        let result = execute_tool("text_diff", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["has_changes"], true);
+        let diff = result.output["diff"].as_str().unwrap();
+        assert!(diff.contains("-line2"));
+        assert!(diff.contains("+changed"));
+    }
+
+    #[tokio::test]
+    async fn test_env_get_existing_var() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        // PATH should exist on all systems.
+        let input = serde_json::json!({"name": "PATH"});
+
+        let result = execute_tool("env_get", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.output["value"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_file_info_basic() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::FileRead("**".to_string())];
+
+        // Write a temp file.
+        let temp_file = context.working_dir.join("punch_file_info_test.txt");
+        tokio::fs::write(&temp_file, "test content")
+            .await
+            .unwrap();
+
+        let input = serde_json::json!({
+            "path": temp_file.to_string_lossy()
+        });
+
+        let result = execute_tool("file_info", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.output["type"], "file");
+        assert_eq!(result.output["size_bytes"], 12); // "test content" = 12 bytes
+
+        let _ = tokio::fs::remove_file(&temp_file).await;
+    }
+
+    #[tokio::test]
+    async fn test_all_tools_count_at_least_55() {
+        let tools = crate::tools::all_tools();
+        assert!(
+            tools.len() >= 55,
+            "expected at least 55 tools, got {}",
+            tools.len()
+        );
     }
 }

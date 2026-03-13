@@ -28,7 +28,7 @@ async fn run_list() -> i32 {
                             if arr.is_empty() {
                                 println!("No workflows registered.");
                             } else {
-                                println!("{:<38} {:<30} {}", "ID", "NAME", "STEPS");
+                                println!("{:<38} {:<30} STEPS", "ID", "NAME");
                                 println!("{}", "-".repeat(75));
                                 for w in arr {
                                     println!(
@@ -126,51 +126,42 @@ async fn run_status(run_id: &str) -> i32 {
     for w in &workflows {
         if let Some(wf_id) = w["id"].as_str() {
             let run_url = format!("{}/api/workflows/{}/runs/{}", base, wf_id, run_id);
-            if let Ok(resp) = client.get(&run_url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(run) = resp.json::<serde_json::Value>().await {
-                        println!("Run ID:      {}", run["id"].as_str().unwrap_or("?"));
-                        println!("Workflow:    {}", wf_id);
-                        println!(
-                            "Status:      {}",
-                            run["status"].as_str().unwrap_or("?")
-                        );
-                        println!(
-                            "Started:     {}",
-                            run["started_at"].as_str().unwrap_or("?")
-                        );
-                        if let Some(completed) = run["completed_at"].as_str() {
-                            println!("Completed:   {}", completed);
-                        }
+            if let Ok(resp) = client.get(&run_url).send().await
+                && resp.status().is_success()
+                && let Ok(run) = resp.json::<serde_json::Value>().await
+            {
+                println!("Run ID:      {}", run["id"].as_str().unwrap_or("?"));
+                println!("Workflow:    {}", wf_id);
+                println!("Status:      {}", run["status"].as_str().unwrap_or("?"));
+                println!("Started:     {}", run["started_at"].as_str().unwrap_or("?"));
+                if let Some(completed) = run["completed_at"].as_str() {
+                    println!("Completed:   {}", completed);
+                }
 
-                        if let Some(steps) = run["step_results"].as_array() {
-                            println!();
-                            println!("Steps:");
-                            for (i, step) in steps.iter().enumerate() {
-                                let name =
-                                    step["step_name"].as_str().unwrap_or("?");
-                                let tokens = step["tokens_used"].as_u64().unwrap_or(0);
-                                let duration =
-                                    step["duration_ms"].as_u64().unwrap_or(0);
-                                let has_error = step["error"].is_string();
-                                let status_icon = if has_error { "X" } else { "+" };
-                                println!(
-                                    "  [{}] Step {} ({}): {}ms, {} tokens",
-                                    status_icon,
-                                    i + 1,
-                                    name,
-                                    duration,
-                                    tokens,
-                                );
-                                if let Some(err) = step["error"].as_str() {
-                                    println!("      Error: {}", err);
-                                }
-                            }
+                if let Some(steps) = run["step_results"].as_array() {
+                    println!();
+                    println!("Steps:");
+                    for (i, step) in steps.iter().enumerate() {
+                        let name = step["step_name"].as_str().unwrap_or("?");
+                        let tokens = step["tokens_used"].as_u64().unwrap_or(0);
+                        let duration = step["duration_ms"].as_u64().unwrap_or(0);
+                        let has_error = step["error"].is_string();
+                        let status_icon = if has_error { "X" } else { "+" };
+                        println!(
+                            "  [{}] Step {} ({}): {}ms, {} tokens",
+                            status_icon,
+                            i + 1,
+                            name,
+                            duration,
+                            tokens,
+                        );
+                        if let Some(err) = step["error"].as_str() {
+                            println!("      Error: {}", err);
                         }
-
-                        return 0;
                     }
                 }
+
+                return 0;
             }
         }
     }

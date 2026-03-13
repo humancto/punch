@@ -65,10 +65,7 @@ impl DiscordAdapter {
     ///   "guild_id": "guild456"  // optional
     /// }
     /// ```
-    pub fn parse_webhook_payload(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Option<IncomingMessage> {
+    pub fn parse_webhook_payload(&self, payload: &serde_json::Value) -> Option<IncomingMessage> {
         let author = payload.get("author")?;
         let author_id = author["id"].as_str()?;
 
@@ -109,11 +106,7 @@ impl DiscordAdapter {
     }
 
     /// Send a message via Discord REST API to a specific channel.
-    async fn api_send_message(
-        &self,
-        channel_id: &str,
-        text: &str,
-    ) -> PunchResult<()> {
+    async fn api_send_message(&self, channel_id: &str, text: &str) -> PunchResult<()> {
         let url = format!(
             "https://discord.com/api/v10/channels/{}/messages",
             channel_id
@@ -146,10 +139,13 @@ impl DiscordAdapter {
 
     /// Send a message via webhook URL.
     async fn webhook_send(&self, text: &str) -> PunchResult<()> {
-        let webhook_url = self.webhook_url.as_ref().ok_or_else(|| PunchError::Channel {
-            channel: "discord".to_string(),
-            message: "no webhook URL configured".to_string(),
-        })?;
+        let webhook_url = self
+            .webhook_url
+            .as_ref()
+            .ok_or_else(|| PunchError::Channel {
+                channel: "discord".to_string(),
+                message: "no webhook URL configured".to_string(),
+            })?;
 
         let chunks = split_message(text, DISCORD_MSG_LIMIT);
         for chunk in chunks {

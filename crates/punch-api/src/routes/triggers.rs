@@ -18,10 +18,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/triggers", post(register_trigger).get(list_triggers))
         .route("/api/triggers/{id}", axum::routing::delete(remove_trigger))
-        .route(
-            "/api/triggers/webhook/{id}",
-            post(receive_webhook),
-        )
+        .route("/api/triggers/webhook/{id}", post(receive_webhook))
 }
 
 // ---------------------------------------------------------------------------
