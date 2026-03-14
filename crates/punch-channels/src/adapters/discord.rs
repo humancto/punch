@@ -219,6 +219,26 @@ impl ChannelAdapter for DiscordAdapter {
             last_error: None,
         }
     }
+
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        let resp = self
+            .client
+            .get("https://discord.com/api/v10/users/@me")
+            .header("Authorization", format!("Bot {}", self.bot_token))
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "discord".to_string(),
+                message: format!("credential validation failed: {}", e),
+            })?;
+        if !resp.status().is_success() {
+            return Err(PunchError::Channel {
+                channel: "discord".to_string(),
+                message: "invalid bot token".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

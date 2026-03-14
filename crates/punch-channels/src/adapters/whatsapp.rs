@@ -216,6 +216,27 @@ impl ChannelAdapter for WhatsAppAdapter {
             last_error: None,
         }
     }
+
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        let url = format!("{}/{}", WHATSAPP_API_BASE, self.phone_number_id);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_token))
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "whatsapp".to_string(),
+                message: format!("credential validation failed: {}", e),
+            })?;
+        if !resp.status().is_success() {
+            return Err(PunchError::Channel {
+                channel: "whatsapp".to_string(),
+                message: "invalid credentials".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

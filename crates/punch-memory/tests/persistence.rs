@@ -265,12 +265,7 @@ async fn test_consolidation_reduces_memory_count() {
     }
     for i in 0..20 {
         substrate
-            .store_memory(
-                &fid,
-                &format!("high_{i}"),
-                &format!("high_val_{i}"),
-                0.8,
-            )
+            .store_memory(&fid, &format!("high_{i}"), &format!("high_val_{i}"), 0.8)
             .await
             .unwrap();
     }
@@ -350,8 +345,8 @@ async fn test_builtin_migrations_create_schema() {
     let builtins = MigrationEngine::builtin_migrations();
     let applied = engine.migrate_up(&builtins).unwrap();
 
-    assert_eq!(applied.len(), 11, "should apply all 11 built-in migrations");
-    assert_eq!(engine.current_version().unwrap(), 11);
+    assert_eq!(applied.len(), 12, "should apply all 12 built-in migrations");
+    assert_eq!(engine.current_version().unwrap(), 12);
 
     // Verify core tables exist.
     let c = arc.lock().unwrap();

@@ -8,6 +8,7 @@
 
 pub mod backup;
 pub mod bouts;
+pub mod channels;
 pub mod consolidation;
 pub mod creed;
 pub mod embeddings;
@@ -21,13 +22,14 @@ pub mod usage;
 
 pub use backup::{BackupInfo, BackupManager};
 pub use bouts::{BoutId, BoutSummary};
+pub use channels::ChannelRecord;
 pub use consolidation::{ConsolidationConfig, ConsolidationResult, MemoryConsolidator};
 pub use embeddings::{
-    cosine_similarity, top_k_similar, BuiltInEmbedder, Embedder, Embedding, EmbeddingConfig,
-    EmbeddingProvider, EmbeddingStore, OpenAiEmbedder,
+    BuiltInEmbedder, Embedder, Embedding, EmbeddingConfig, EmbeddingProvider, EmbeddingStore,
+    OpenAiEmbedder, cosine_similarity, top_k_similar,
 };
 pub use knowledge::{KnowledgeEntity, KnowledgeRelation};
 pub use memories::MemoryEntry;
-pub use substrate::MemorySubstrate;
 pub use migrations::{Migration, MigrationEngine, MigrationStatus};
+pub use substrate::MemorySubstrate;
 pub use usage::{UsageEvent, UsageSummary};

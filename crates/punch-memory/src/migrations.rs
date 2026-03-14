@@ -454,6 +454,26 @@ impl MigrationEngine {
                 DROP TABLE IF EXISTS creeds;"
                     .into(),
             },
+            Migration {
+                version: 12,
+                name: "create_channels_table".into(),
+                up_sql: "CREATE TABLE IF NOT EXISTS channels (
+                    id              TEXT PRIMARY KEY,
+                    name            TEXT NOT NULL UNIQUE,
+                    platform        TEXT NOT NULL,
+                    credentials     TEXT NOT NULL DEFAULT '{}',
+                    settings        TEXT NOT NULL DEFAULT '{}',
+                    status          TEXT NOT NULL DEFAULT 'disconnected',
+                    validated_at    TEXT,
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_channels_platform ON channels(platform);"
+                    .into(),
+                down_sql: "DROP INDEX IF EXISTS idx_channels_platform;
+                DROP TABLE IF EXISTS channels;"
+                    .into(),
+            },
         ]
     }
 
@@ -772,8 +792,8 @@ mod tests {
 
         // All built-in migrations should apply without error.
         let applied = engine.migrate_up(&builtins).unwrap();
-        assert_eq!(applied.len(), 11);
-        assert_eq!(engine.current_version().unwrap(), 11);
+        assert_eq!(applied.len(), 12);
+        assert_eq!(engine.current_version().unwrap(), 12);
     }
 
     #[test]
@@ -903,6 +923,6 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version.unwrap_or(0), 11);
+        assert_eq!(version.unwrap_or(0), 12);
     }
 }

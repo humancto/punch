@@ -151,10 +151,7 @@ impl GitHubAdapter {
             "event_type".to_string(),
             serde_json::Value::String("issue_comment".to_string()),
         );
-        metadata.insert(
-            "issue_number".to_string(),
-            serde_json::json!(issue_number),
-        );
+        metadata.insert("issue_number".to_string(), serde_json::json!(issue_number));
         if let Some(title) = issue.get("title").and_then(|v| v.as_str()) {
             metadata.insert(
                 "issue_title".to_string(),
@@ -203,10 +200,7 @@ impl GitHubAdapter {
             "event_type".to_string(),
             serde_json::Value::String("pull_request_review_comment".to_string()),
         );
-        metadata.insert(
-            "pr_number".to_string(),
-            serde_json::json!(pr_number),
-        );
+        metadata.insert("pr_number".to_string(), serde_json::json!(pr_number));
         if let Some(path) = comment.get("path").and_then(|v| v.as_str()) {
             metadata.insert(
                 "file_path".to_string(),
@@ -322,6 +316,27 @@ impl ChannelAdapter for GitHubAdapter {
             last_error: None,
         }
     }
+
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        let resp = self
+            .client
+            .get(format!("{}/user", GITHUB_API_BASE))
+            .header("Authorization", format!("token {}", self.token))
+            .header("User-Agent", "punch-agent-os")
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "github".to_string(),
+                message: format!("credential validation failed: {}", e),
+            })?;
+        if !resp.status().is_success() {
+            return Err(PunchError::Channel {
+                channel: "github".to_string(),
+                message: "invalid token".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +377,8 @@ mod tests {
     fn test_verify_webhook_signature_invalid() {
         let adapter = make_adapter();
         let body = b"test payload body";
-        let bad_signature = "sha256=0000000000000000000000000000000000000000000000000000000000000000";
+        let bad_signature =
+            "sha256=0000000000000000000000000000000000000000000000000000000000000000";
 
         assert!(!adapter.verify_webhook_signature(bad_signature, body));
     }
@@ -453,9 +469,11 @@ mod tests {
             }
         });
 
-        assert!(adapter
-            .parse_webhook_payload("issue_comment", &payload)
-            .is_none());
+        assert!(
+            adapter
+                .parse_webhook_payload("issue_comment", &payload)
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -506,7 +524,11 @@ mod tests {
             "issue": { "number": 1, "title": "T" },
             "comment": { "id": 1, "user": {"login": "a", "id": 1}, "body": "", "created_at": "2024-01-01T00:00:00Z" }
         });
-        assert!(adapter.parse_webhook_payload("issue_comment", &payload).is_none());
+        assert!(
+            adapter
+                .parse_webhook_payload("issue_comment", &payload)
+                .is_none()
+        );
     }
 
     #[test]
@@ -517,7 +539,11 @@ mod tests {
             "pull_request": { "number": 1 },
             "comment": { "id": 1, "user": {"login": "a", "id": 1}, "body": "", "created_at": "2024-01-01T00:00:00Z" }
         });
-        assert!(adapter.parse_webhook_payload("pull_request_review_comment", &payload).is_none());
+        assert!(
+            adapter
+                .parse_webhook_payload("pull_request_review_comment", &payload)
+                .is_none()
+        );
     }
 
     #[test]
@@ -528,9 +554,14 @@ mod tests {
             "issue": { "number": 7, "title": "My Issue" },
             "comment": { "id": 999, "user": {"login": "x", "id": 5}, "body": "hi", "created_at": "2024-01-01T00:00:00Z" }
         });
-        let msg = adapter.parse_webhook_payload("issue_comment", &payload).unwrap();
+        let msg = adapter
+            .parse_webhook_payload("issue_comment", &payload)
+            .unwrap();
         assert_eq!(msg.metadata.get("event_type").unwrap(), "issue_comment");
-        assert_eq!(msg.metadata.get("issue_number").unwrap(), &serde_json::json!(7));
+        assert_eq!(
+            msg.metadata.get("issue_number").unwrap(),
+            &serde_json::json!(7)
+        );
         assert_eq!(msg.metadata.get("issue_title").unwrap(), "My Issue");
     }
 

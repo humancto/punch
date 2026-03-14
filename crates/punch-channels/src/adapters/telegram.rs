@@ -180,6 +180,26 @@ impl ChannelAdapter for TelegramAdapter {
             last_error: None,
         }
     }
+
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        let url = format!("https://api.telegram.org/bot{}/getMe", self.bot_token);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "telegram".to_string(),
+                message: format!("credential validation failed: {}", e),
+            })?;
+        if !resp.status().is_success() {
+            return Err(PunchError::Channel {
+                channel: "telegram".to_string(),
+                message: "invalid bot token".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

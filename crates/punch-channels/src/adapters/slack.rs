@@ -239,6 +239,26 @@ impl ChannelAdapter for SlackAdapter {
             last_error: None,
         }
     }
+
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        let resp = self
+            .client
+            .get("https://slack.com/api/auth.test")
+            .header("Authorization", format!("Bearer {}", self.bot_token))
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "slack".to_string(),
+                message: format!("credential validation failed: {}", e),
+            })?;
+        if !resp.status().is_success() {
+            return Err(PunchError::Channel {
+                channel: "slack".to_string(),
+                message: "invalid bot token".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

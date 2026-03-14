@@ -9,6 +9,7 @@
 
 pub mod adapters;
 pub mod bridge;
+pub mod onboarding;
 pub mod router;
 
 use std::collections::HashMap;
@@ -159,6 +160,12 @@ pub trait ChannelAdapter: Send + Sync + 'static {
     /// Get the current status of this adapter.
     fn status(&self) -> ChannelStatus {
         ChannelStatus::default()
+    }
+
+    /// Validate that configured credentials are valid by calling the platform API.
+    /// Returns Ok(()) if valid. Default implementation assumes valid.
+    async fn validate_credentials(&self) -> PunchResult<()> {
+        Ok(())
     }
 }
 
@@ -404,7 +411,10 @@ mod tests {
         assert_eq!(msg.platform, ChannelPlatform::Discord);
         assert_eq!(msg.platform_message_id, "msg-555");
         assert!(msg.is_group);
-        assert_eq!(msg.metadata.get("key").unwrap(), &serde_json::json!("value"));
+        assert_eq!(
+            msg.metadata.get("key").unwrap(),
+            &serde_json::json!("value")
+        );
     }
 
     #[test]
