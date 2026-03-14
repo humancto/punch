@@ -618,4 +618,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 [Website](https://punch.sh) &bull; [GitHub](https://github.com/humancto/punch) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
 
+<sub>Fun fact: The name was inspired by [the internet's most iconic primate](https://www.rd.com/article/everyones-talking-about-punch-the-monkey/) — except our monkey punches back. With AI.</sub>
+
 </div>
