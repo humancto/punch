@@ -1,5 +1,5 @@
 [package]
-name = "punch-api"
+name = "punch-arena"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "The Arena — HTTP API server for the Punch Agent Combat System"
+
+[lib]
+name = "punch_api"
 
 [dependencies]
 punch-types = { version = "0.1.0", path = "../punch-types" }
