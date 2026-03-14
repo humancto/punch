@@ -299,25 +299,37 @@ punch fighter spawn ml-engineer
 
 ## Comparison
 
-| Feature                 | **Punch**         | OpenFang   | CrewAI   | AutoGen   | LangGraph |
-| ----------------------- | ----------------- | ---------- | -------- | --------- | --------- |
-| **Language**            | Rust              | Rust       | Python   | Python    | Python    |
-| **Single binary**       | ✅                | ✅         | ❌       | ❌        | ❌        |
-| **Autonomous agents**   | ✅ Gorillas       | ✅ Daemons | ❌       | ❌        | ❌        |
-| **Interactive agents**  | ✅ Fighters       | ✅ Agents  | ✅       | ✅        | ✅        |
-| **Agent coordination**  | ✅ Troops         | ✅ Packs   | ✅ Crews | ✅ Groups | ✅ Graphs |
-| **Built-in memory**     | ✅ SQLite + decay | ✅         | ❌       | ❌        | ❌        |
-| **HTTP API**            | ✅ Arena          | ✅         | ❌       | ❌        | ✅        |
-| **Security layers**     | **18**            | 16         | 3        | 2         | 4         |
-| **Channel adapters**    | **50+ planned**   | 12         | 0        | 0         | 0         |
-| **LLM providers**       | **27+**           | 15         | 5        | 4         | 3         |
-| **MCP support**         | ✅ Native         | ✅         | Plugin   | ❌        | ❌        |
-| **Startup time**        | <50ms             | ~100ms     | ~3s      | ~5s       | ~4s       |
-| **Memory usage**        | ~15MB             | ~25MB      | ~200MB   | ~300MB    | ~250MB    |
-| **Agent consciousness** | ✅ Creeds         | ✅ SOUL.md | ❌       | ❌        | ❌        |
-| **Inter-agent comms**   | ✅ Native         | ❌         | ✅       | ✅        | ✅        |
-| **Plugin system**       | ✅ Extensions     | ✅         | ✅       | ✅        | ✅        |
-| **Cron scheduling**     | ✅                | ✅         | ❌       | ❌        | ❌        |
+| Feature                 | **Punch**            | OpenFang          | OpenClaw (302k stars)   | CrewAI   | AutoGen   |
+| ----------------------- | -------------------- | ----------------- | ----------------------- | -------- | --------- |
+| **Language**            | Rust                 | Rust              | TypeScript              | Python   | Python    |
+| **Single binary**       | ✅                   | ✅                | ❌ (Node.js)            | ❌       | ❌        |
+| **Autonomous agents**   | ✅ Gorillas          | ✅ Hands (7)      | ✅ HEARTBEAT.md         | ❌       | ❌        |
+| **Interactive agents**  | ✅ Fighters          | ✅ Agents         | ✅ Gateway              | ✅       | ✅        |
+| **Agent coordination**  | ✅ Troops            | ✅ Packs          | ✅ AGENTS.md            | ✅ Crews | ✅ Groups |
+| **Agent consciousness** | ✅ Creeds (DB)       | ❌                | ✅ SOUL.md (files)      | ❌       | ❌        |
+| **Built-in memory**     | ✅ SQLite + decay    | ✅ SQLite         | ✅ MEMORY.md            | ❌       | ❌        |
+| **HTTP API**            | ✅ Arena (14 routes) | ✅ 140+ endpoints | ✅ Gateway              | ❌       | ❌        |
+| **Security layers**     | **10**               | **16**            | ~5                      | 3        | 2         |
+| **Channel adapters**    | **25**               | **40**            | **24+**                 | 0        | 0         |
+| **LLM providers**       | **15**               | **26**            | **6+ (via OpenRouter)** | 5        | 4         |
+| **MCP support**         | ✅ Native            | ✅ Native         | ✅ Native               | Plugin   | ❌        |
+| **Skills/tools**        | ✅ Moves             | 38 built-in       | 800+ marketplace        | Toolkit  | Toolkit   |
+| **Inter-agent comms**   | ✅ A2A + direct      | ❌                | ✅ Multi-agent          | ✅       | ✅        |
+| **Plugin system**       | ✅ WASM sandbox      | ✅ WASM           | ✅ Skills               | ✅       | ✅        |
+| **Cron scheduling**     | ✅                   | ✅                | ✅ HEARTBEAT.md         | ❌       | ❌        |
+| **Startup time**        | <50ms                | ~100ms            | ~2s                     | ~3s      | ~5s       |
+| **Memory usage**        | ~15MB                | ~25MB             | ~150MB                  | ~200MB   | ~300MB    |
+
+**Where Punch stands out:**
+
+- **Creeds > SOUL.md** — Punch's Creed is database-backed, evolves with every conversation, tracks relationships, and survives respawns. OpenClaw's SOUL.md is a static markdown file.
+- **Inter-agent communication** — Native fighter-to-fighter messaging with relationship tracking. OpenFang lacks this.
+- **Consciousness evolution** — Learned behaviors, confidence decay, personality reinforcement. No other framework does this.
+
+**Where others lead:**
+
+- **OpenClaw** — 302k stars, 800+ skills marketplace, massive community, backed by OpenAI
+- **OpenFang** — More security layers (16 vs 10), more channels (40 vs 25), more LLM providers (26 vs 15), 140+ API endpoints
 
 ---
 
@@ -344,26 +356,18 @@ Punch is a Cargo workspace with **12 crates**, each with a single responsibility
 
 ## 🔐 Security
 
-Punch ships with **18 security layers** — more than any competing agent framework:
+Punch ships with **10 enforced security layers**:
 
-1. **Capability-based access control** — Agents only get the permissions they're explicitly granted
-2. **Per-agent sandboxing** — Each fighter runs in an isolated capability space
-3. **API key vault** — Secrets loaded from environment variables, never stored in config
-4. **Ed25519 request signing** — All inter-component messages are cryptographically signed
-5. **AES-256-GCM encryption at rest** — Memory substrate encrypted with authenticated encryption
-6. **Argon2id key derivation** — Master keys derived with memory-hard KDF
-7. **Rate limiting & quotas** — Per-agent and per-provider rate limiting via the Scheduler
-8. **Input sanitization** — All user inputs sanitized before reaching the LLM
-9. **Output filtering** — Agent outputs filtered for sensitive data leakage
-10. **Audit logging** — Every agent action logged with full traceability
-11. **TLS-only external comms** — All outbound connections use rustls
-12. **CORS & origin validation** — Arena API validates request origins
-13. **Token rotation** — Automatic rotation of session tokens
-14. **Memory decay** — Old conversation data automatically decays, reducing exposure window
-15. **Zeroize secrets** — Cryptographic material zeroized from memory when dropped
-16. **Resource limits** — CPU, memory, and network quotas per agent
-17. **Gorilla containment zones** — Each gorilla runs in an isolated execution environment with its own capability boundary, preventing lateral movement between autonomous agents
-18. **Cross-troop privilege firewall** — Troops cannot escalate each other's capabilities; a troop's combined permissions are the intersection (not union) of its members' grants
+1. **HMAC-SHA256 request signing** — Inter-component messages are cryptographically signed and verified
+2. **AES-256-GCM encryption at rest** — Credential vault uses authenticated encryption
+3. **Rate limiting & quotas** — Per-agent and per-provider rate limiting via middleware
+4. **Auth middleware** — API authentication enforced on all Arena endpoints
+5. **Audit logging** — Every agent action logged with structured tracing
+6. **Memory decay** — Old conversation data automatically decays, reducing exposure window
+7. **Zeroize secrets** — Cryptographic material zeroized from memory when dropped
+8. **Gorilla containment zones** — Each gorilla runs with circuit breaker isolation, preventing lateral movement
+9. **Troop privilege scoping** — Task assignment strategies limit which fighters receive which tasks
+10. **WASM sandbox** — Extension plugins execute in a metered WebAssembly sandbox
 
 See [docs/security.md](docs/security.md) for the full security architecture.
 
@@ -371,14 +375,13 @@ See [docs/security.md](docs/security.md) for the full security architecture.
 
 ## 🌐 LLM Provider Support
 
-Punch supports **27+ LLM providers** out of the box through `punch-wire`:
+Punch supports **15 LLM providers** out of the box through `punch-wire`:
 
 | Provider     | Models                                | Status |
 | ------------ | ------------------------------------- | ------ |
 | Anthropic    | Claude 4, Claude Sonnet, Claude Haiku | ✅ GA  |
 | OpenAI       | GPT-4o, GPT-4o-mini, o1, o3           | ✅ GA  |
 | Google       | Gemini 2.5 Pro, Flash                 | ✅ GA  |
-| Meta         | Llama 3.3, 4                          | ✅ GA  |
 | Mistral      | Mistral Large, Codestral              | ✅ GA  |
 | Cohere       | Command R+                            | ✅ GA  |
 | AWS Bedrock  | All Bedrock models                    | ✅ GA  |
@@ -386,44 +389,23 @@ Punch supports **27+ LLM providers** out of the box through `punch-wire`:
 | Groq         | Ultra-fast inference                  | ✅ GA  |
 | Together AI  | Open-source models                    | ✅ GA  |
 | Fireworks AI | Fast open-source inference            | ✅ GA  |
-| Perplexity   | Search-augmented models               | ✅ GA  |
 | DeepSeek     | DeepSeek V3, R1                       | ✅ GA  |
-| Ollama       | Local models                          | ✅ GA  |
-| LM Studio    | Local models                          | ✅ GA  |
-| vLLM         | Self-hosted inference                 | ✅ GA  |
-| OpenRouter   | Multi-provider routing                | ✅ GA  |
-| Replicate    | Model marketplace                     | ✅ GA  |
-| Anyscale     | Scalable inference                    | ✅ GA  |
-| Databricks   | DBRX, hosted models                   | ✅ GA  |
-| AI21         | Jamba                                 | ✅ GA  |
-| Reka         | Reka Core                             | ✅ GA  |
-| Moonshot     | Kimi                                  | ✅ GA  |
-| Zhipu AI     | GLM-4                                 | ✅ GA  |
-| Baichuan     | Baichuan models                       | ✅ GA  |
+| Cerebras     | Fast inference                        | ✅ GA  |
 | xAI          | Grok                                  | ✅ GA  |
-| NVIDIA NIM   | Self-hosted NVIDIA models             | ✅ GA  |
-
-Any OpenAI-compatible endpoint works automatically.
+| Ollama       | Local models (Llama, Qwen, etc.)      | ✅ GA  |
+| Custom       | Any OpenAI-compatible endpoint        | ✅ GA  |
 
 ---
 
 ## 📡 Channel Adapters
 
-**50+ channel adapters** planned for `punch-channels`:
+**25 channel adapters** built into `punch-channels`:
 
-**Messaging:** Telegram, Discord, Slack, Microsoft Teams, WhatsApp, Signal, Matrix, IRC, XMPP, Zulip, Rocket.Chat, Mattermost
+**Messaging:** Telegram, Discord, Slack, Microsoft Teams, WhatsApp, Signal, Matrix, IRC, Zulip, Rocket.Chat, Mattermost, Google Chat, Line, DingTalk, Feishu
 
-**Email:** SMTP, IMAP, Gmail API, Outlook API, SendGrid, Mailgun, Postmark, SES
+**Social:** Reddit, LinkedIn, Mastodon, Bluesky, Twitch, Nostr
 
-**Voice:** Twilio, Vonage, Daily.co, LiveKit
-
-**Web:** REST webhooks, WebSocket, Server-Sent Events, GraphQL subscriptions
-
-**Social:** Twitter/X, Reddit, LinkedIn, Facebook Messenger, Instagram DM
-
-**Developer:** GitHub Issues/PRs, GitLab, Jira, Linear, Notion, Confluence
-
-**Custom:** Any HTTP endpoint, gRPC, MQTT, AMQP, NATS, Redis Pub/Sub, Kafka
+**Other:** Email (SMTP/IMAP), SMS, GitHub, WebChat
 
 ---
 
