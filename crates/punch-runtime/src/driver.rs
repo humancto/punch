@@ -1060,6 +1060,11 @@ impl OllamaDriver {
         }
         body["options"] = options;
 
+        // Disable thinking mode for reasoning models (Qwen, DeepSeek) to prevent
+        // the model from spending its entire token budget on internal reasoning.
+        // The think tags get stripped anyway, so we avoid wasting tokens.
+        body["think"] = serde_json::json!(false);
+
         if !request.tools.is_empty() {
             let tools: Vec<serde_json::Value> = request
                 .tools

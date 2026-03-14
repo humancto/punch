@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -827,6 +828,95 @@ impl Ring {
         &self.driver
     }
 
+    // -- Inter-agent communication -------------------------------------------
+
+    /// Send a message from one fighter to another.
+    ///
+    /// The source fighter's message becomes the target fighter's input,
+    /// enriched with source context so the target knows who is speaking.
+    /// The target processes it through its own fighter loop (with its own creed)
+    /// and the response is returned.
+    #[instrument(skip(self, message), fields(%source_id, %target_id))]
+    pub async fn fighter_to_fighter(
+        &self,
+        source_id: &FighterId,
+        target_id: &FighterId,
+        message: String,
+    ) -> PunchResult<FighterLoopResult> {
+        // Get source fighter name for context.
+        let source_name = self
+            .fighters
+            .get(source_id)
+            .map(|entry| entry.value().manifest.name.clone())
+            .ok_or_else(|| {
+                PunchError::Fighter(format!("source fighter {} not found", source_id))
+            })?;
+
+        // Verify target exists.
+        if self.fighters.get(target_id).is_none() {
+            return Err(PunchError::Fighter(format!(
+                "target fighter {} not found",
+                target_id
+            )));
+        }
+
+        // Wrap the message with source context so the target knows who is speaking.
+        let enriched_message = format!(
+            "[Message from fighter '{}' (id: {})]\n\n{}",
+            source_name, source_id, message
+        );
+
+        // Send to target through normal message flow (uses target's creed).
+        self.send_message(target_id, enriched_message).await
+    }
+
+    /// Find a fighter by name (case-insensitive).
+    ///
+    /// Returns the fighter ID and manifest if found.
+    pub fn find_fighter_by_name_sync(&self, name: &str) -> Option<(FighterId, FighterManifest)> {
+        self.fighters.iter().find_map(|entry| {
+            if entry.value().manifest.name.eq_ignore_ascii_case(name) {
+                Some((*entry.key(), entry.value().manifest.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Update relationship tracking in both fighters' creeds after inter-agent
+    /// communication.
+    ///
+    /// Loads both creeds, adds or updates the peer relationship entry
+    /// (incrementing interaction_count), and saves them back.
+    pub async fn update_fighter_relationships(
+        &self,
+        fighter_a_name: &str,
+        fighter_b_name: &str,
+    ) {
+        let memory = Arc::clone(&self.memory);
+        let a_name = fighter_a_name.to_string();
+        let b_name = fighter_b_name.to_string();
+
+        // Update in a spawned task to avoid blocking the caller.
+        tokio::spawn(async move {
+            // Update A's creed with relationship to B.
+            if let Ok(Some(mut creed_a)) = memory.load_creed_by_name(&a_name).await {
+                update_relationship(&mut creed_a, &b_name);
+                if let Err(e) = memory.save_creed(&creed_a).await {
+                    warn!(error = %e, fighter = %a_name, "failed to save creed relationship update");
+                }
+            }
+
+            // Update B's creed with relationship to A.
+            if let Ok(Some(mut creed_b)) = memory.load_creed_by_name(&b_name).await {
+                update_relationship(&mut creed_b, &a_name);
+                if let Err(e) = memory.save_creed(&creed_b).await {
+                    warn!(error = %e, fighter = %b_name, "failed to save creed relationship update");
+                }
+            }
+        });
+    }
+
     // -- Troop / Swarm / Messaging accessors ---------------------------------
 
     /// Get a reference to the troop manager.
@@ -1003,6 +1093,39 @@ impl Ring {
 
         info!("Ring shutdown complete");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Relationship tracking helper
+// ---------------------------------------------------------------------------
+
+/// Update or insert a peer relationship in a creed.
+fn update_relationship(creed: &mut punch_types::Creed, peer_name: &str) {
+    if let Some(rel) = creed
+        .relationships
+        .iter_mut()
+        .find(|r| r.entity == peer_name && r.entity_type == "fighter")
+    {
+        rel.interaction_count += 1;
+        rel.notes = format!(
+            "Last interaction: {}",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+        );
+    } else {
+        creed.relationships.push(punch_types::Relationship {
+            entity: peer_name.to_string(),
+            entity_type: "fighter".to_string(),
+            nature: "peer".to_string(),
+            trust: 0.5,
+            interaction_count: 1,
+            notes: format!(
+                "First interaction: {}",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+            ),
+        });
+    }
+    creed.updated_at = chrono::Utc::now();
+    creed.version += 1;
 }
 
 // ---------------------------------------------------------------------------
