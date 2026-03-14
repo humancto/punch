@@ -216,10 +216,7 @@ async fn test_fighter_custom_model_config_preserved() {
         temperature: Some(0.3),
     };
     manifest.weight_class = WeightClass::Heavyweight;
-    manifest.capabilities = vec![
-        Capability::Memory,
-        Capability::FileRead("**".to_string()),
-    ];
+    manifest.capabilities = vec![Capability::Memory, Capability::FileRead("**".to_string())];
 
     let id = ring.spawn_fighter(manifest).await;
     let entry = ring.get_fighter(&id).unwrap();

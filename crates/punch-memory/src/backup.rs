@@ -93,9 +93,7 @@ impl BackupManager {
 
             let dest_str = dest.to_string_lossy().to_string();
             conn.execute_batch(&format!("VACUUM INTO '{}'", dest_str.replace('\'', "''")))
-                .map_err(|e| {
-                    PunchError::Memory(format!("VACUUM INTO failed: {e}"))
-                })?;
+                .map_err(|e| PunchError::Memory(format!("VACUUM INTO failed: {e}")))?;
 
             // Verify the backup.
             verify_backup(&dest)?;
@@ -112,9 +110,8 @@ impl BackupManager {
         .await
         .map_err(|e| PunchError::Memory(format!("backup task panicked: {e}")))??;
 
-        let metadata = std::fs::metadata(&final_path).map_err(|e| {
-            PunchError::Memory(format!("failed to stat backup file: {e}"))
-        })?;
+        let metadata = std::fs::metadata(&final_path)
+            .map_err(|e| PunchError::Memory(format!("failed to stat backup file: {e}")))?;
 
         let id = final_path
             .file_stem()
@@ -172,9 +169,9 @@ impl BackupManager {
                     continue;
                 }
 
-                let metadata = entry.metadata().map_err(|e| {
-                    PunchError::Memory(format!("failed to stat backup file: {e}"))
-                })?;
+                let metadata = entry
+                    .metadata()
+                    .map_err(|e| PunchError::Memory(format!("failed to stat backup file: {e}")))?;
 
                 let created_at = metadata
                     .created()
@@ -188,7 +185,8 @@ impl BackupManager {
                     .unwrap_or(name)
                     .to_string();
 
-                let db_version = read_db_version(&db_path).unwrap_or_else(|_| "unknown".to_string());
+                let db_version =
+                    read_db_version(&db_path).unwrap_or_else(|_| "unknown".to_string());
 
                 backups.push(BackupInfo {
                     id,
@@ -233,9 +231,8 @@ impl BackupManager {
             verify_backup(&source)?;
 
             // Copy the backup over the live database.
-            std::fs::copy(&source, &db_path).map_err(|e| {
-                PunchError::Memory(format!("failed to restore backup: {e}"))
-            })?;
+            std::fs::copy(&source, &db_path)
+                .map_err(|e| PunchError::Memory(format!("failed to restore backup: {e}")))?;
 
             // Clean up decompressed temp file if we made one.
             if source != backup_path {
@@ -306,17 +303,12 @@ fn read_db_version(path: &Path) -> PunchResult<String> {
 
 /// Verify a backup file by opening it and running `PRAGMA integrity_check`.
 fn verify_backup(path: &Path) -> PunchResult<()> {
-    let conn = Connection::open(path).map_err(|e| {
-        PunchError::Memory(format!(
-            "failed to open backup for verification: {e}"
-        ))
-    })?;
+    let conn = Connection::open(path)
+        .map_err(|e| PunchError::Memory(format!("failed to open backup for verification: {e}")))?;
 
     let result: String = conn
         .pragma_query_value(None, "integrity_check", |row| row.get(0))
-        .map_err(|e| {
-            PunchError::Memory(format!("integrity check failed: {e}"))
-        })?;
+        .map_err(|e| PunchError::Memory(format!("integrity check failed: {e}")))?;
 
     if result != "ok" {
         return Err(PunchError::Memory(format!(
@@ -329,37 +321,35 @@ fn verify_backup(path: &Path) -> PunchResult<()> {
 
 /// Compress a backup file with gzip, returning the path to the `.gz` file.
 fn compress_backup(path: &Path) -> PunchResult<PathBuf> {
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use std::io::{Read, Write};
 
     let gz_path = path.with_extension("db.gz");
-    let mut input = std::fs::File::open(path).map_err(|e| {
-        PunchError::Memory(format!("failed to open backup for compression: {e}"))
-    })?;
+    let mut input = std::fs::File::open(path)
+        .map_err(|e| PunchError::Memory(format!("failed to open backup for compression: {e}")))?;
 
-    let output = std::fs::File::create(&gz_path).map_err(|e| {
-        PunchError::Memory(format!("failed to create compressed backup: {e}"))
-    })?;
+    let output = std::fs::File::create(&gz_path)
+        .map_err(|e| PunchError::Memory(format!("failed to create compressed backup: {e}")))?;
 
     let mut encoder = GzEncoder::new(output, Compression::default());
     let mut buf = [0u8; 64 * 1024];
 
     loop {
-        let n = input.read(&mut buf).map_err(|e| {
-            PunchError::Memory(format!("read error during compression: {e}"))
-        })?;
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| PunchError::Memory(format!("read error during compression: {e}")))?;
         if n == 0 {
             break;
         }
-        encoder.write_all(&buf[..n]).map_err(|e| {
-            PunchError::Memory(format!("write error during compression: {e}"))
-        })?;
+        encoder
+            .write_all(&buf[..n])
+            .map_err(|e| PunchError::Memory(format!("write error during compression: {e}")))?;
     }
 
-    encoder.finish().map_err(|e| {
-        PunchError::Memory(format!("failed to finalize compressed backup: {e}"))
-    })?;
+    encoder
+        .finish()
+        .map_err(|e| PunchError::Memory(format!("failed to finalize compressed backup: {e}")))?;
 
     Ok(gz_path)
 }
@@ -375,26 +365,24 @@ fn decompress_backup(gz_path: &Path) -> PunchResult<PathBuf> {
         .unwrap_or("backup");
     let out_path = gz_path.with_file_name(format!("{}_restored.db", stem));
 
-    let input = std::fs::File::open(gz_path).map_err(|e| {
-        PunchError::Memory(format!("failed to open compressed backup: {e}"))
-    })?;
+    let input = std::fs::File::open(gz_path)
+        .map_err(|e| PunchError::Memory(format!("failed to open compressed backup: {e}")))?;
 
     let mut decoder = GzDecoder::new(input);
-    let mut output = std::fs::File::create(&out_path).map_err(|e| {
-        PunchError::Memory(format!("failed to create decompressed file: {e}"))
-    })?;
+    let mut output = std::fs::File::create(&out_path)
+        .map_err(|e| PunchError::Memory(format!("failed to create decompressed file: {e}")))?;
 
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = decoder.read(&mut buf).map_err(|e| {
-            PunchError::Memory(format!("read error during decompression: {e}"))
-        })?;
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|e| PunchError::Memory(format!("read error during decompression: {e}")))?;
         if n == 0 {
             break;
         }
-        output.write_all(&buf[..n]).map_err(|e| {
-            PunchError::Memory(format!("write error during decompression: {e}"))
-        })?;
+        output
+            .write_all(&buf[..n])
+            .map_err(|e| PunchError::Memory(format!("write error during decompression: {e}")))?;
     }
 
     Ok(out_path)

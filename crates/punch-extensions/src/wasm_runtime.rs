@@ -113,9 +113,8 @@ impl WasmPluginRuntime {
     /// Useful for validation. Returns the compiled module or an error if the
     /// bytes are not valid WebAssembly.
     pub fn compile(&self, wasm_bytes: &[u8]) -> PunchResult<Module> {
-        Module::new(&self.engine, wasm_bytes).map_err(|e| {
-            PunchError::Internal(format!("WASM compilation failed: {e}"))
-        })
+        Module::new(&self.engine, wasm_bytes)
+            .map_err(|e| PunchError::Internal(format!("WASM compilation failed: {e}")))
     }
 
     /// Return the number of loaded plugins.
@@ -161,10 +160,7 @@ impl WasmPluginRuntime {
     }
 
     /// Build a linker with host functions and a shared memory export.
-    fn build_linker(
-        &self,
-        store: &mut Store<HostState>,
-    ) -> PunchResult<Linker<HostState>> {
+    fn build_linker(&self, store: &mut Store<HostState>) -> PunchResult<Linker<HostState>> {
         let mut linker = <Linker<HostState>>::new(&self.engine);
 
         // Provide a default memory if the guest module imports one.
@@ -174,7 +170,8 @@ impl WasmPluginRuntime {
             .map_err(|e| PunchError::Internal(format!("failed to create memory type: {e}")))?;
         let memory = Memory::new(&mut *store, memory_type)
             .map_err(|e| PunchError::Internal(format!("failed to create memory: {e}")))?;
-        linker.define("env", "memory", memory)
+        linker
+            .define("env", "memory", memory)
             .map_err(|e| PunchError::Internal(format!("failed to define memory: {e}")))?;
 
         // host_log(ptr: i32, len: i32)
@@ -194,7 +191,8 @@ impl WasmPluginRuntime {
                 }
             },
         );
-        linker.define("env", "host_log", host_log)
+        linker
+            .define("env", "host_log", host_log)
             .map_err(|e| PunchError::Internal(format!("failed to define host_log: {e}")))?;
 
         // host_read_input(ptr: i32) -> i32 (returns length written)
@@ -207,8 +205,7 @@ impl WasmPluginRuntime {
                     let start = ptr as usize;
                     let len = input_copy.len();
                     if mem.data(&caller).len() >= start + len {
-                        mem.data_mut(&mut caller)[start..start + len]
-                            .copy_from_slice(&input_copy);
+                        mem.data_mut(&mut caller)[start..start + len].copy_from_slice(&input_copy);
                         len as i32
                     } else {
                         -1 // not enough memory
@@ -218,7 +215,8 @@ impl WasmPluginRuntime {
                 }
             },
         );
-        linker.define("env", "host_read_input", host_read_input)
+        linker
+            .define("env", "host_read_input", host_read_input)
             .map_err(|e| PunchError::Internal(format!("failed to define host_read_input: {e}")))?;
 
         // host_write_output(ptr: i32, len: i32)
@@ -237,8 +235,11 @@ impl WasmPluginRuntime {
                 }
             },
         );
-        linker.define("env", "host_write_output", host_write_output)
-            .map_err(|e| PunchError::Internal(format!("failed to define host_write_output: {e}")))?;
+        linker
+            .define("env", "host_write_output", host_write_output)
+            .map_err(|e| {
+                PunchError::Internal(format!("failed to define host_write_output: {e}"))
+            })?;
 
         Ok(linker)
     }
@@ -283,9 +284,10 @@ impl PluginRuntime for WasmPluginRuntime {
     }
 
     async fn invoke(&self, plugin_id: &Uuid, input: PluginInput) -> PunchResult<PluginOutput> {
-        let module_ref = self.modules.get(plugin_id).ok_or_else(|| {
-            PunchError::Internal(format!("WASM plugin {plugin_id} not found"))
-        })?;
+        let module_ref = self
+            .modules
+            .get(plugin_id)
+            .ok_or_else(|| PunchError::Internal(format!("WASM plugin {plugin_id} not found")))?;
         let module = module_ref.value().clone();
         drop(module_ref); // release DashMap guard before doing work
 
@@ -305,14 +307,12 @@ impl PluginRuntime for WasmPluginRuntime {
             .map_err(|e| PunchError::Internal(format!("WASM start failed: {e}")))?;
 
         // Look up the requested export.
-        let func = instance
-            .get_func(&store, &input.function)
-            .ok_or_else(|| {
-                PunchError::Internal(format!(
-                    "export '{}' not found in plugin {}",
-                    input.function, plugin_id
-                ))
-            })?;
+        let func = instance.get_func(&store, &input.function).ok_or_else(|| {
+            PunchError::Internal(format!(
+                "export '{}' not found in plugin {}",
+                input.function, plugin_id
+            ))
+        })?;
 
         // Determine the number of return values from the function type.
         let func_type = func.ty(&store);
@@ -504,7 +504,10 @@ mod tests {
         };
 
         let result = runtime.invoke(&id, input).await;
-        assert!(result.is_err(), "infinite loop should fail with fuel exhaustion");
+        assert!(
+            result.is_err(),
+            "infinite loop should fail with fuel exhaustion"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("fuel"),
@@ -578,14 +581,8 @@ mod tests {
         let runtime = WasmPluginRuntime::new().unwrap();
         let wasm = wat_to_wasm(r#"(module (func (export "noop")))"#);
 
-        runtime
-            .load(&test_manifest("alpha"), &wasm)
-            .await
-            .unwrap();
-        runtime
-            .load(&test_manifest("beta"), &wasm)
-            .await
-            .unwrap();
+        runtime.load(&test_manifest("alpha"), &wasm).await.unwrap();
+        runtime.load(&test_manifest("beta"), &wasm).await.unwrap();
 
         let names = runtime.plugin_names();
         assert_eq!(names.len(), 2);
@@ -751,9 +748,7 @@ mod tests {
     #[tokio::test]
     async fn test_invocation_count_tracking() {
         let runtime = WasmPluginRuntime::new().unwrap();
-        let wasm = wat_to_wasm(
-            r#"(module (func (export "tick") (result i32) i32.const 1))"#,
-        );
+        let wasm = wat_to_wasm(r#"(module (func (export "tick") (result i32) i32.const 1))"#);
 
         let manifest = test_manifest("counter-plugin");
         let id = runtime.load(&manifest, &wasm).await.unwrap();

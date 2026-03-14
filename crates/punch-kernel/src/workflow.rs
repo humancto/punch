@@ -544,7 +544,6 @@ impl CircuitBreakerState {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // DAG Executor (testable without LLM)
 // ---------------------------------------------------------------------------
@@ -626,8 +625,7 @@ pub async fn execute_dag(
                 step.depends_on.iter().all(|dep| {
                     // A dependency is satisfied if it completed (not in failed_steps)
                     // or was explicitly skipped/handled
-                    let is_done =
-                        completed.contains_key(dep) || skipped_steps.contains(dep);
+                    let is_done = completed.contains_key(dep) || skipped_steps.contains(dep);
                     let is_blocking_failure = failed_steps.contains(dep);
                     is_done && !is_blocking_failure
                 })
@@ -663,8 +661,11 @@ pub async fn execute_dag(
         // for true multi-threaded parallelism.
         let mut wave_results: Vec<(String, Result<StepResult, String>, Option<String>)> =
             Vec::new();
-        let mut join_set: tokio::task::JoinSet<(String, Result<StepResult, String>, Option<String>)> =
-            tokio::task::JoinSet::new();
+        let mut join_set: tokio::task::JoinSet<(
+            String,
+            Result<StepResult, String>,
+            Option<String>,
+        )> = tokio::task::JoinSet::new();
 
         for step_name in &wave_step_names {
             let step = match step_map.get(step_name.as_str()) {
@@ -731,9 +732,13 @@ pub async fn execute_dag(
             let executor_clone = Arc::clone(&executor);
 
             join_set.spawn(async move {
-                let result =
-                    execute_step_with_loops(&step, &input_clone, &completed_snapshot, executor_clone.as_ref())
-                        .await;
+                let result = execute_step_with_loops(
+                    &step,
+                    &input_clone,
+                    &completed_snapshot,
+                    executor_clone.as_ref(),
+                )
+                .await;
                 (sn, result, None::<String>)
             });
         }
@@ -770,9 +775,8 @@ pub async fn execute_dag(
                                 OnError::Fallback { step: fb_step } => {
                                     // Try to execute fallback
                                     if let Some(fb) = step_map.get(fb_step.as_str()) {
-                                        let fb_result = executor
-                                            .execute(fb, input, &completed, None)
-                                            .await;
+                                        let fb_result =
+                                            executor.execute(fb, input, &completed, None).await;
                                         match fb_result {
                                             Ok(fb_res) => {
                                                 step_result = fb_res;
@@ -807,10 +811,7 @@ pub async fn execute_dag(
                                 OnError::FailWorkflow => {
                                     dead_letters.push(DeadLetterEntry {
                                         step_name: step_name.clone(),
-                                        error: step_result
-                                            .error
-                                            .clone()
-                                            .unwrap_or_default(),
+                                        error: step_result.error.clone().unwrap_or_default(),
                                         input: input.to_string(),
                                         failed_at: Utc::now(),
                                     });
@@ -863,12 +864,9 @@ pub async fn execute_dag(
                                 }
                             }
                             OnError::CatchAndContinue { error_handler } => {
-                                if let Some(handler) =
-                                    step_map.get(error_handler.as_str())
-                                {
-                                    let _ = executor
-                                        .execute(handler, input, &completed, None)
-                                        .await;
+                                if let Some(handler) = step_map.get(error_handler.as_str()) {
+                                    let _ =
+                                        executor.execute(handler, input, &completed, None).await;
                                 }
                                 failed_steps.remove(&step_name);
                             }
@@ -916,9 +914,7 @@ pub async fn execute_dag(
     }
 
     // Determine final status
-    let has_failures = completed
-        .values()
-        .any(|r| r.status == StepStatus::Failed);
+    let has_failures = completed.values().any(|r| r.status == StepStatus::Failed);
     let has_successes = completed
         .values()
         .any(|r| r.status == StepStatus::Completed);
@@ -1017,7 +1013,11 @@ async fn execute_step_with_loops(
                         step.name.clone(),
                         StepResult {
                             step_name: step.name.clone(),
-                            response: loop_state.accumulated_results.last().cloned().unwrap_or_default(),
+                            response: loop_state
+                                .accumulated_results
+                                .last()
+                                .cloned()
+                                .unwrap_or_default(),
                             tokens_used: 0,
                             duration_ms: 0,
                             error: None,
@@ -1555,11 +1555,7 @@ mod tests {
                 loop_state,
             );
 
-            let response = self
-                .responses
-                .get(&step.name)
-                .cloned()
-                .unwrap_or(prompt);
+            let response = self.responses.get(&step.name).cloned().unwrap_or(prompt);
 
             Ok(StepResult {
                 step_name: step.name.clone(),
@@ -1894,12 +1890,7 @@ mod tests {
 
     #[test]
     fn variable_substitution_multiple_same_var() {
-        let result = expand_variables(
-            "{{input}} and {{input}} again",
-            "hello",
-            "step",
-            &[],
-        );
+        let result = expand_variables("{{input}} and {{input}} again", "hello", "step", &[]);
         assert_eq!(result, "hello and hello again");
     }
 
@@ -2181,8 +2172,8 @@ mod tests {
         });
         steps[1].prompt_template = "process item: {{loop.item}}".to_string();
 
-        let executor = MockExecutor::new()
-            .with_response("source", r#"["apple", "banana", "cherry"]"#);
+        let executor =
+            MockExecutor::new().with_response("source", r#"["apple", "banana", "cherry"]"#);
 
         let result = execute_dag("test", &steps, "input", Arc::new(executor)).await;
         assert_eq!(result.status, WorkflowRunStatus::Completed);
@@ -2228,9 +2219,11 @@ mod tests {
         let result = execute_dag("test", &steps, "input", Arc::new(executor)).await;
         assert_eq!(result.status, WorkflowRunStatus::Completed);
         assert!(result.step_results["flaky"].error.is_none());
-        assert!(result.step_results["flaky"]
-            .response
-            .contains("success on attempt 3"));
+        assert!(
+            result.step_results["flaky"]
+                .response
+                .contains("success on attempt 3")
+        );
     }
 
     #[tokio::test]
@@ -2322,10 +2315,7 @@ mod tests {
 
     #[tokio::test]
     async fn dag_partial_completion() {
-        let steps = vec![
-            dag_step("good", &[]),
-            dag_step("bad", &[]),
-        ];
+        let steps = vec![dag_step("good", &[]), dag_step("bad", &[])];
 
         let executor = MockExecutor::new()
             .with_response("good", "ok")
@@ -2794,10 +2784,7 @@ mod tests {
         let wf = DagWorkflow {
             id: WorkflowId::new(),
             name: "test-dag".to_string(),
-            steps: vec![
-                dag_step("a", &[]),
-                dag_step("b", &["a"]),
-            ],
+            steps: vec![dag_step("a", &[]), dag_step("b", &["a"])],
         };
         let json = serde_json::to_string(&wf).expect("serialize");
         let deser: DagWorkflow = serde_json::from_str(&json).expect("deserialize");
@@ -2889,10 +2876,7 @@ mod tests {
 
     #[tokio::test]
     async fn dag_fallback_on_error() {
-        let mut steps = vec![
-            dag_step("main", &[]),
-            dag_step("backup", &[]),
-        ];
+        let mut steps = vec![dag_step("main", &[]), dag_step("backup", &[])];
         steps[0].on_error = OnError::Fallback {
             step: "backup".to_string(),
         };
@@ -2981,11 +2965,7 @@ mod tests {
     /// Prove 3 independent steps with 50ms sleep each complete in ~50-70ms (not 150ms).
     #[tokio::test]
     async fn dag_three_independent_steps_parallel_timing() {
-        let steps = vec![
-            dag_step("x", &[]),
-            dag_step("y", &[]),
-            dag_step("z", &[]),
-        ];
+        let steps = vec![dag_step("x", &[]), dag_step("y", &[]), dag_step("z", &[])];
         let executor = ConcurrencyProofExecutor::new(50);
         let timings = Arc::clone(&executor.timings);
 
@@ -3128,8 +3108,14 @@ mod tests {
             .with_response("false_branch", "should_not_run");
 
         let result = execute_dag("test", &steps, "input", Arc::new(executor)).await;
-        assert_eq!(result.step_results["true_branch"].status, StepStatus::Completed);
-        assert_eq!(result.step_results["false_branch"].status, StepStatus::Skipped);
+        assert_eq!(
+            result.step_results["true_branch"].status,
+            StepStatus::Completed
+        );
+        assert_eq!(
+            result.step_results["false_branch"].status,
+            StepStatus::Skipped
+        );
     }
 
     /// Loop execution within a DAG step (ForEach).
@@ -3177,8 +3163,14 @@ mod tests {
 
         let result = execute_dag("test", &steps, "input", Arc::new(executor)).await;
         assert_eq!(result.status, WorkflowRunStatus::PartiallyCompleted);
-        assert_eq!(result.step_results["ok_branch"].status, StepStatus::Completed);
-        assert_eq!(result.step_results["ok_branch2"].status, StepStatus::Completed);
+        assert_eq!(
+            result.step_results["ok_branch"].status,
+            StepStatus::Completed
+        );
+        assert_eq!(
+            result.step_results["ok_branch2"].status,
+            StepStatus::Completed
+        );
         assert!(result.step_results["fail_branch"].error.is_some());
     }
 
@@ -3241,8 +3233,7 @@ mod tests {
             dag_step("source_b", &[]),
             dag_step("consumer", &["source_a", "source_b"]),
         ];
-        steps[2].prompt_template =
-            "A={{source_a.output}}, B={{source_b.output}}".to_string();
+        steps[2].prompt_template = "A={{source_a.output}}, B={{source_b.output}}".to_string();
 
         let executor = MockExecutor::new()
             .with_response("source_a", "value_from_a")
@@ -3266,9 +3257,8 @@ mod tests {
     #[tokio::test]
     async fn dag_wide_parallel_fan_out_timing() {
         // 10 independent steps each taking 30ms
-        let steps: Vec<DagWorkflowStep> = (0..10)
-            .map(|i| dag_step(&format!("s{i}"), &[]))
-            .collect();
+        let steps: Vec<DagWorkflowStep> =
+            (0..10).map(|i| dag_step(&format!("s{i}"), &[])).collect();
         let executor = TimedMockExecutor { delay_ms: 30 };
 
         let start = Instant::now();
@@ -3321,8 +3311,10 @@ mod tests {
         let result = execute_dag("test", &steps, "input", Arc::new(executor)).await;
         assert_eq!(result.status, WorkflowRunStatus::Completed);
         assert!(result.step_results["retry_step"].error.is_none());
-        assert!(result.step_results["retry_step"]
-            .response
-            .contains("success on attempt 2"));
+        assert!(
+            result.step_results["retry_step"]
+                .response
+                .contains("success on attempt 2")
+        );
     }
 }

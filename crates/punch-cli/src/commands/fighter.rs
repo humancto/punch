@@ -823,23 +823,14 @@ async fn run_fighter_status(id: String, config_path: Option<String>) -> i32 {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(data) = resp.json::<serde_json::Value>().await {
                     println!();
-                    println!(
-                        "  Fighter: {}",
-                        data["name"].as_str().unwrap_or("-")
-                    );
+                    println!("  Fighter: {}", data["name"].as_str().unwrap_or("-"));
                     println!("  ID:      {}", data["id"].as_str().unwrap_or(&id));
-                    println!(
-                        "  Status:  {}",
-                        data["status"].as_str().unwrap_or("-")
-                    );
+                    println!("  Status:  {}", data["status"].as_str().unwrap_or("-"));
                     println!(
                         "  Class:   {}",
                         data["weight_class"].as_str().unwrap_or("-")
                     );
-                    println!(
-                        "  Model:   {}",
-                        data["model"].as_str().unwrap_or("-")
-                    );
+                    println!("  Model:   {}", data["model"].as_str().unwrap_or("-"));
                     if let Some(bout) = data["bout_id"].as_str() {
                         println!("  Bout:    {}", bout);
                     }

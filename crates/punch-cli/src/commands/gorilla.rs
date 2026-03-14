@@ -444,10 +444,7 @@ mod tests {
     /// Format a gorilla status display.
     fn format_gorilla_status(g: &serde_json::Value) -> String {
         let mut lines = Vec::new();
-        lines.push(format!(
-            "  Gorilla: {}",
-            g["name"].as_str().unwrap_or("-")
-        ));
+        lines.push(format!("  Gorilla: {}", g["name"].as_str().unwrap_or("-")));
         lines.push(format!(
             "  Status:  {}",
             g["status"].as_str().unwrap_or("-")

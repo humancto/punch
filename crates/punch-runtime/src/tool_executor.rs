@@ -2937,12 +2937,10 @@ async fn tool_archive_create(
             tool: "archive_create".into(),
             message: "missing 'output_path' parameter".into(),
         })?;
-    let paths = input["paths"]
-        .as_array()
-        .ok_or_else(|| PunchError::Tool {
-            tool: "archive_create".into(),
-            message: "missing 'paths' parameter".into(),
-        })?;
+    let paths = input["paths"].as_array().ok_or_else(|| PunchError::Tool {
+        tool: "archive_create".into(),
+        message: "missing 'paths' parameter".into(),
+    })?;
 
     let output_path = resolve_path(&context.working_dir, output_path_str)?;
 
@@ -4381,9 +4379,7 @@ mod tests {
 
         // Write a temp file.
         let temp_file = context.working_dir.join("punch_file_info_test.txt");
-        tokio::fs::write(&temp_file, "test content")
-            .await
-            .unwrap();
+        tokio::fs::write(&temp_file, "test content").await.unwrap();
 
         let input = serde_json::json!({
             "path": temp_file.to_string_lossy()
@@ -4539,13 +4535,19 @@ mod tests {
     #[test]
     fn test_json_path_query_deeply_nested() {
         let data = serde_json::json!({"l1": {"l2": {"l3": {"l4": "deep"}}}});
-        assert_eq!(json_path_query(&data, "l1.l2.l3.l4"), serde_json::json!("deep"));
+        assert_eq!(
+            json_path_query(&data, "l1.l2.l3.l4"),
+            serde_json::json!("deep")
+        );
     }
 
     #[test]
     fn test_json_path_query_array_of_objects() {
         let data = serde_json::json!({"users": [{"name": "Alice"}, {"name": "Bob"}]});
-        assert_eq!(json_path_query(&data, "users.0.name"), serde_json::json!("Alice"));
+        assert_eq!(
+            json_path_query(&data, "users.0.name"),
+            serde_json::json!("Alice")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -5105,7 +5107,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.success, "clean command should pass: {:?}", result.error);
+        assert!(
+            result.success,
+            "clean command should pass: {:?}",
+            result.error
+        );
         let stdout = result.output["stdout"].as_str().unwrap_or("");
         assert!(stdout.contains("hello"));
     }
@@ -5182,7 +5188,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.success, "normal path should pass: {:?}", result.error);
+        assert!(
+            result.success,
+            "normal path should pass: {:?}",
+            result.error
+        );
         let _ = tokio::fs::remove_file(&temp_file).await;
     }
 
@@ -5197,10 +5207,14 @@ mod tests {
         // Tainted command produces warnings.
         let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
         let tainted = detector.scan_command(&format!("export AWS_KEY={}", key));
-        assert!(!tainted.is_empty(), "tainted command should produce warnings");
+        assert!(
+            !tainted.is_empty(),
+            "tainted command should produce warnings"
+        );
 
         // Bearer token produces warnings.
-        let bearer = detector.scan_command("curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test'");
+        let bearer =
+            detector.scan_command("curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test'");
         assert!(!bearer.is_empty(), "bearer token should produce warnings");
     }
 

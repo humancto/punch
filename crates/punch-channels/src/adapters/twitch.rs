@@ -171,9 +171,10 @@ impl TwitchAdapter {
         }
 
         // Extract username from source (nick!user@host)
-        let username = irc_msg.source.as_ref().and_then(|s| {
-            s.split('!').next().map(|n| n.to_string())
-        })?;
+        let username = irc_msg
+            .source
+            .as_ref()
+            .and_then(|s| s.split('!').next().map(|n| n.to_string()))?;
 
         let display_name = irc_msg
             .tags
@@ -250,7 +251,15 @@ impl TwitchAdapter {
         let resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("OAuth {}", self.oauth_token.strip_prefix("oauth:").unwrap_or(&self.oauth_token)))
+            .header(
+                "Authorization",
+                format!(
+                    "OAuth {}",
+                    self.oauth_token
+                        .strip_prefix("oauth:")
+                        .unwrap_or(&self.oauth_token)
+                ),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()

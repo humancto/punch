@@ -633,8 +633,12 @@ mod tests {
         let trigger = Trigger {
             id: TriggerId::new(),
             name: "webhook-count".to_string(),
-            condition: TriggerCondition::Webhook { secret: Some("secret".to_string()) },
-            action: TriggerAction::Log { message: "fired".to_string() },
+            condition: TriggerCondition::Webhook {
+                secret: Some("secret".to_string()),
+            },
+            action: TriggerAction::Log {
+                message: "fired".to_string(),
+            },
             enabled: true,
             created_at: Utc::now(),
             fire_count: 0,
@@ -656,7 +660,9 @@ mod tests {
             id: TriggerId::new(),
             name: "disabled-webhook".to_string(),
             condition: TriggerCondition::Webhook { secret: None },
-            action: TriggerAction::Log { message: "nope".to_string() },
+            action: TriggerAction::Log {
+                message: "nope".to_string(),
+            },
             enabled: false,
             created_at: Utc::now(),
             fire_count: 0,
@@ -675,7 +681,9 @@ mod tests {
             id: TriggerId::new(),
             name: "limited-webhook".to_string(),
             condition: TriggerCondition::Webhook { secret: None },
-            action: TriggerAction::Log { message: "limited".to_string() },
+            action: TriggerAction::Log {
+                message: "limited".to_string(),
+            },
             enabled: true,
             created_at: Utc::now(),
             fire_count: 0,
@@ -718,7 +726,9 @@ mod tests {
             id: TriggerId::new(),
             name: "webhook".to_string(),
             condition: TriggerCondition::Webhook { secret: None },
-            action: TriggerAction::Log { message: "wh".to_string() },
+            action: TriggerAction::Log {
+                message: "wh".to_string(),
+            },
             enabled: true,
             created_at: Utc::now(),
             fire_count: 0,
@@ -734,7 +744,10 @@ mod tests {
         assert_eq!(summaries.len(), 4);
 
         // Check condition_type descriptions.
-        let types: Vec<String> = summaries.iter().map(|(_, s)| s.condition_type.clone()).collect();
+        let types: Vec<String> = summaries
+            .iter()
+            .map(|(_, s)| s.condition_type.clone())
+            .collect();
         assert!(types.iter().any(|t| t.contains("keyword")));
         assert!(types.iter().any(|t| t.contains("event")));
         assert!(types.iter().any(|t| t.contains("schedule")));

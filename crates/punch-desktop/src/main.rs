@@ -11,7 +11,10 @@ use punch_desktop::state::Theme;
 
 /// Punch Desktop — The Agent Combat System desktop wrapper.
 #[derive(Parser, Debug)]
-#[command(name = "punch-desktop", about = "Punch Desktop — native desktop application")]
+#[command(
+    name = "punch-desktop",
+    about = "Punch Desktop — native desktop application"
+)]
 struct Cli {
     /// Port for the Arena API server.
     #[arg(long, default_value = "6660")]
@@ -67,10 +70,7 @@ async fn main() -> anyhow::Result<()> {
             port = app.config().port,
             "arena not detected — start the arena separately with: cargo run -- serve"
         );
-        println!(
-            "  Arena not detected on port {}.",
-            app.config().port
-        );
+        println!("  Arena not detected on port {}.", app.config().port);
         println!("  Start the Arena first:  cargo run -- serve");
         println!("  Then restart punch-desktop.");
         println!();

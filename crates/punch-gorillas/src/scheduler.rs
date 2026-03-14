@@ -4,8 +4,8 @@
 //! and standard 5-field cron syntax (`0 */6 * * *`). Manages a priority queue of
 //! next-run times and handles missed runs with configurable catch-up policy.
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,8 +68,7 @@ impl CronExpression {
     /// Calculate the next run time after `after`.
     pub fn next_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
         // Start from the next minute after `after`.
-        let mut dt = after
-            .with_nanosecond(0)?;
+        let mut dt = after.with_nanosecond(0)?;
         // Advance by one minute to avoid matching the current time exactly.
         dt += chrono::Duration::minutes(1);
 
@@ -131,7 +130,9 @@ fn advance_month(dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
 /// Advance to the start of the next day.
 fn advance_day(dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let next = dt.date_naive().succ_opt()?;
-    NaiveDateTime::new(next, chrono::NaiveTime::from_hms_opt(0, 0, 0)?).and_utc().into()
+    NaiveDateTime::new(next, chrono::NaiveTime::from_hms_opt(0, 0, 0)?)
+        .and_utc()
+        .into()
 }
 
 /// Advance to the start of the next hour.
@@ -422,10 +423,9 @@ impl GorillaScheduler {
 
     /// Pause a gorilla's schedule.
     pub fn pause(&self, gorilla_id: &GorillaId) -> PunchResult<()> {
-        let mut entry = self
-            .entries
-            .get_mut(gorilla_id)
-            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id)))?;
+        let mut entry = self.entries.get_mut(gorilla_id).ok_or_else(|| {
+            PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id))
+        })?;
         entry.paused = true;
         info!(gorilla_id = %gorilla_id, "gorilla schedule paused");
         Ok(())
@@ -433,10 +433,9 @@ impl GorillaScheduler {
 
     /// Resume a gorilla's schedule.
     pub async fn resume(&self, gorilla_id: &GorillaId) -> PunchResult<()> {
-        let mut entry = self
-            .entries
-            .get_mut(gorilla_id)
-            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id)))?;
+        let mut entry = self.entries.get_mut(gorilla_id).ok_or_else(|| {
+            PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id))
+        })?;
         entry.paused = false;
 
         // Recalculate next run.
@@ -461,10 +460,9 @@ impl GorillaScheduler {
 
     /// Record that a gorilla has completed a run and schedule the next one.
     pub async fn record_run(&self, gorilla_id: &GorillaId) -> PunchResult<()> {
-        let mut entry = self
-            .entries
-            .get_mut(gorilla_id)
-            .ok_or_else(|| PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id)))?;
+        let mut entry = self.entries.get_mut(gorilla_id).ok_or_else(|| {
+            PunchError::Gorilla(format!("gorilla {} not in scheduler", gorilla_id))
+        })?;
 
         let now = Utc::now();
         entry.last_run = Some(now);
@@ -828,7 +826,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(60)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(60)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 
@@ -842,7 +844,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(60)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(60)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 
@@ -855,7 +861,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(60)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(60)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 
@@ -887,7 +897,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(60)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(60)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 
@@ -920,7 +934,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(60)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(60)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 
@@ -933,7 +951,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(1)), MissedRunPolicy::RunOnce)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(1)),
+                MissedRunPolicy::RunOnce,
+            )
             .await
             .unwrap();
 
@@ -951,7 +973,11 @@ mod tests {
         let scheduler = GorillaScheduler::new();
         let id = GorillaId::new();
         scheduler
-            .register(id, Schedule::Interval(Duration::from_secs(3600)), MissedRunPolicy::Skip)
+            .register(
+                id,
+                Schedule::Interval(Duration::from_secs(3600)),
+                MissedRunPolicy::Skip,
+            )
             .await
             .unwrap();
 

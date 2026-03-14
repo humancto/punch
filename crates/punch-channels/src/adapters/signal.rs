@@ -89,9 +89,7 @@ impl SignalAdapter {
             .unwrap_or(0);
         let timestamp = DateTime::from_timestamp(timestamp_ms / 1000, 0).unwrap_or_else(Utc::now);
 
-        let is_group = data_message
-            .get("groupInfo")
-            .is_some_and(|v| !v.is_null());
+        let is_group = data_message.get("groupInfo").is_some_and(|v| !v.is_null());
 
         let channel_id = if is_group {
             data_message
@@ -195,7 +193,10 @@ mod tests {
     use super::*;
 
     fn make_adapter() -> SignalAdapter {
-        SignalAdapter::new("+15551234567".to_string(), "http://localhost:8080".to_string())
+        SignalAdapter::new(
+            "+15551234567".to_string(),
+            "http://localhost:8080".to_string(),
+        )
     }
 
     #[test]

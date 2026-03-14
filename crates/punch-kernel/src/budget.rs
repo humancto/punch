@@ -193,7 +193,10 @@ impl BudgetEnforcer {
     pub async fn get_fighter_status(&self, fighter_id: &FighterId) -> PunchResult<BudgetStatus> {
         let limit = self.limits.get(fighter_id).map(|e| e.clone());
 
-        let daily_spend = self.metering.get_spend(fighter_id, SpendPeriod::Day).await?;
+        let daily_spend = self
+            .metering
+            .get_spend(fighter_id, SpendPeriod::Day)
+            .await?;
 
         let verdict = self.check_budget(fighter_id).await?;
 
@@ -244,7 +247,10 @@ impl BudgetEnforcer {
 
         // Check daily cost limit.
         if let Some(max_cents) = limit.max_cost_per_day_cents {
-            let daily_cost = self.metering.get_spend(fighter_id, SpendPeriod::Day).await?;
+            let daily_cost = self
+                .metering
+                .get_spend(fighter_id, SpendPeriod::Day)
+                .await?;
             let daily_cents = (daily_cost * 100.0) as u64;
 
             if daily_cents >= max_cents {
@@ -274,7 +280,10 @@ impl BudgetEnforcer {
 
         // Check hourly cost (using hourly spend as a proxy).
         if let Some(max_tokens_hour) = limit.max_tokens_per_hour {
-            let hourly_cost = self.metering.get_spend(fighter_id, SpendPeriod::Hour).await?;
+            let hourly_cost = self
+                .metering
+                .get_spend(fighter_id, SpendPeriod::Hour)
+                .await?;
             // We use cost as a proxy; for token-based limits we'd need token counts.
             // For now, use the metering engine's cost data.
             let _hourly_cost_cents = (hourly_cost * 100.0) as u64;
@@ -337,8 +346,19 @@ fn most_restrictive(a: BudgetVerdict, b: BudgetVerdict) -> BudgetVerdict {
     match (&a, &b) {
         (BudgetVerdict::Blocked { .. }, _) => a,
         (_, BudgetVerdict::Blocked { .. }) => b,
-        (BudgetVerdict::Warning { usage_percent: pa, .. }, BudgetVerdict::Warning { usage_percent: pb, .. }) => {
-            if pa >= pb { a } else { b }
+        (
+            BudgetVerdict::Warning {
+                usage_percent: pa, ..
+            },
+            BudgetVerdict::Warning {
+                usage_percent: pb, ..
+            },
+        ) => {
+            if pa >= pb {
+                a
+            } else {
+                b
+            }
         }
         (BudgetVerdict::Warning { .. }, _) => a,
         (_, BudgetVerdict::Warning { .. }) => b,
@@ -486,7 +506,10 @@ mod tests {
             verdict
         );
 
-        if let BudgetVerdict::Blocked { retry_after_secs, .. } = verdict {
+        if let BudgetVerdict::Blocked {
+            retry_after_secs, ..
+        } = verdict
+        {
             assert!(retry_after_secs > 0);
         }
     }

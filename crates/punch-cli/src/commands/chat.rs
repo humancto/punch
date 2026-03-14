@@ -116,11 +116,7 @@ async fn run_oneshot(
 }
 
 /// Streaming chat: read response body in chunks and print tokens as they arrive.
-async fn run_streaming_chat(
-    client: &reqwest::Client,
-    url: &str,
-    body: &serde_json::Value,
-) -> i32 {
+async fn run_streaming_chat(client: &reqwest::Client, url: &str, body: &serde_json::Value) -> i32 {
     let resp = match client.post(url).json(body).send().await {
         Ok(r) => r,
         Err(e) => {

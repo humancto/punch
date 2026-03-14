@@ -8,8 +8,8 @@
 //! The driver implements the `BrowserDriver` trait so it can be plugged into
 //! the `BrowserPool` seamlessly — a real heavyweight stepping into the ring.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -19,7 +19,6 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
-
 
 use crate::browser::{
     BrowserAction, BrowserConfig, BrowserDriver, BrowserResult, BrowserSession, BrowserState,
@@ -291,11 +290,7 @@ pub fn chrome_candidate_paths() -> Vec<String> {
 
 /// Build a `Page.navigate` CDP command.
 pub fn build_navigate_command(id: u64, url: &str) -> CdpCommand {
-    CdpCommand::new(
-        id,
-        "Page.navigate",
-        serde_json::json!({ "url": url }),
-    )
+    CdpCommand::new(id, "Page.navigate", serde_json::json!({ "url": url }))
 }
 
 /// Build a `Page.captureScreenshot` CDP command.
@@ -487,9 +482,10 @@ impl CdpBrowserDriver {
 
     /// Build Chrome launch arguments.
     fn build_chrome_args(&self) -> Vec<String> {
-        let mut args = vec![
-            format!("--remote-debugging-port={}", self.config.debug_port),
-        ];
+        let mut args = vec![format!(
+            "--remote-debugging-port={}",
+            self.config.debug_port
+        )];
 
         if self.config.headless {
             args.push("--headless".to_string());
@@ -586,12 +582,12 @@ impl CdpBrowserDriver {
             });
         }
 
-        let target: CdpTargetInfo = resp
-            .json()
-            .await
-            .map_err(|e| CdpError::UnexpectedResponse {
-                detail: format!("failed to parse target info: {}", e),
-            })?;
+        let target: CdpTargetInfo =
+            resp.json()
+                .await
+                .map_err(|e| CdpError::UnexpectedResponse {
+                    detail: format!("failed to parse target info: {}", e),
+                })?;
 
         debug!(target_id = %target.id, ws_url = %target.web_socket_debugger_url, "created new tab");
         Ok(target)
@@ -966,8 +962,7 @@ impl BrowserDriver for CdpBrowserDriver {
                 self.execute_screenshot(session, full_page).await
             }
             BrowserAction::GetContent { selector } => {
-                self.execute_get_content(session, selector.as_deref())
-                    .await
+                self.execute_get_content(session, selector.as_deref()).await
             }
             BrowserAction::GetHtml { selector } => {
                 self.execute_get_html(session, selector.as_deref()).await
@@ -1072,8 +1067,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&config).expect("should serialize");
-        let deserialized: CdpConfig =
-            serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: CdpConfig = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(
             deserialized.chrome_path.as_deref(),
@@ -1136,8 +1130,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&session).expect("should serialize");
-        let deserialized: CdpSession =
-            serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: CdpSession = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(deserialized.id, "s1");
         assert_eq!(deserialized.target_id, "t1");
@@ -1263,8 +1256,7 @@ mod tests {
 
     #[test]
     fn test_cdp_response_parse_error() {
-        let json =
-            r#"{"id": 2, "error": {"code": -32601, "message": "method not found"}}"#;
+        let json = r#"{"id": 2, "error": {"code": -32601, "message": "method not found"}}"#;
         let resp: CdpResponse = serde_json::from_str(json).expect("should parse");
         assert_eq!(resp.id, Some(2));
         assert!(resp.result.is_none());
@@ -1412,9 +1404,10 @@ mod tests {
         assert!(!args.contains(&"--disable-gpu".to_string()));
         assert!(!args.contains(&"--no-sandbox".to_string()));
         // Should still have the port and about:blank.
-        assert!(args
-            .iter()
-            .any(|a| a.starts_with("--remote-debugging-port=")));
+        assert!(
+            args.iter()
+                .any(|a| a.starts_with("--remote-debugging-port="))
+        );
         assert!(args.contains(&"about:blank".to_string()));
     }
 

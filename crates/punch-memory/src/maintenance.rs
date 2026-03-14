@@ -68,9 +68,7 @@ impl MemorySubstrate {
                          )",
                         rusqlite::params![fighter_id, excess],
                     )
-                    .map_err(|e| {
-                        PunchError::Memory(format!("failed to compact memories: {e}"))
-                    })?;
+                    .map_err(|e| PunchError::Memory(format!("failed to compact memories: {e}")))?;
                 total_removed += deleted;
                 debug!(
                     fighter_id = %fighter_id,
@@ -264,7 +262,10 @@ mod tests {
         substrate.create_bout(&fighter_id).await.unwrap();
         let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
-        let count = substrate.count_bouts_in_period(before, after).await.unwrap();
+        let count = substrate
+            .count_bouts_in_period(before, after)
+            .await
+            .unwrap();
         assert_eq!(count, 2);
     }
 

@@ -43,7 +43,9 @@ impl std::fmt::Display for TaskId {
 }
 
 /// Priority levels for gorilla tasks.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord,
+)]
 pub enum TaskPriority {
     /// Lowest priority.
     Low = 0,
@@ -368,13 +370,19 @@ impl TaskQueue {
     /// Count pending tasks.
     pub async fn pending_count(&self) -> usize {
         let tasks = self.tasks.lock().await;
-        tasks.values().filter(|t| t.state == TaskState::Pending).count()
+        tasks
+            .values()
+            .filter(|t| t.state == TaskState::Pending)
+            .count()
     }
 
     /// Count running tasks.
     pub async fn running_count(&self) -> usize {
         let tasks = self.tasks.lock().await;
-        tasks.values().filter(|t| t.state == TaskState::Running).count()
+        tasks
+            .values()
+            .filter(|t| t.state == TaskState::Running)
+            .count()
     }
 
     /// Get the notification handle for new tasks.
@@ -448,7 +456,11 @@ mod tests {
         new_task(gorilla_id, desc)
     }
 
-    fn make_task_with_priority(gorilla_id: GorillaId, desc: &str, priority: TaskPriority) -> GorillaTask {
+    fn make_task_with_priority(
+        gorilla_id: GorillaId,
+        desc: &str,
+        priority: TaskPriority,
+    ) -> GorillaTask {
         let mut task = new_task(gorilla_id, desc);
         task.priority = priority;
         task

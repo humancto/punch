@@ -5,12 +5,12 @@
 
 use std::time::Duration;
 
-use punch_gorillas::executor::{ExecutorConfig, ExecutionRecord};
+use punch_gorillas::GorillaLifecycle;
+use punch_gorillas::executor::{ExecutionRecord, ExecutorConfig};
 use punch_gorillas::scheduler::CronExpression;
 use punch_gorillas::tasks::{
     GorillaTask, TaskId, TaskPriority, TaskQueue, TaskResult, TaskState, new_task,
 };
-use punch_gorillas::GorillaLifecycle;
 use punch_types::{GorillaId, GorillaManifest, GorillaStatus};
 
 // ---------------------------------------------------------------------------
@@ -104,10 +104,16 @@ async fn test_cage_running_gorilla() {
     let id = lifecycle.register(test_manifest("Pauser")).await;
 
     lifecycle.unleash(id).await.unwrap();
-    assert_eq!(lifecycle.get_status(id).await.unwrap(), GorillaStatus::Unleashed);
+    assert_eq!(
+        lifecycle.get_status(id).await.unwrap(),
+        GorillaStatus::Unleashed
+    );
 
     lifecycle.cage(id).await.unwrap();
-    assert_eq!(lifecycle.get_status(id).await.unwrap(), GorillaStatus::Caged);
+    assert_eq!(
+        lifecycle.get_status(id).await.unwrap(),
+        GorillaStatus::Caged
+    );
 }
 
 /// Attempt to unleash a non-existent gorilla and verify error.

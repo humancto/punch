@@ -1,9 +1,9 @@
 //! Prometheus-compatible metrics export endpoint.
 
+use axum::Router;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use tracing::instrument;
 
 use crate::AppState;

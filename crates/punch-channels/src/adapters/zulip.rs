@@ -97,11 +97,7 @@ impl ZulipAdapter {
         let url = format!("{}/api/v1/messages", self.server_url);
         let to_json = serde_json::json!(user_emails).to_string();
 
-        let params = [
-            ("type", "private"),
-            ("to", &to_json),
-            ("content", content),
-        ];
+        let params = [("type", "private"), ("to", &to_json), ("content", content)];
 
         let resp = self
             .client

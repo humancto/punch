@@ -6,16 +6,15 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{Mutex, watch};
 use tracing::{info, warn};
 
 /// A callback that runs during shutdown. The boxed future must be `Send`.
-pub type ShutdownHook =
-    Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+pub type ShutdownHook = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Coordinates graceful shutdown across the system.
 ///

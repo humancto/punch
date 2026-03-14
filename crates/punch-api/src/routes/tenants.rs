@@ -18,14 +18,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/tenants", post(register_tenant).get(list_tenants))
         .route("/api/tenants/{id}", get(get_tenant).delete(delete_tenant))
         .route("/api/tenants/{id}/quota", axum::routing::put(update_quota))
-        .route(
-            "/api/tenants/{id}/suspend",
-            post(suspend_tenant),
-        )
-        .route(
-            "/api/tenants/{id}/activate",
-            post(activate_tenant),
-        )
+        .route("/api/tenants/{id}/suspend", post(suspend_tenant))
+        .route("/api/tenants/{id}/activate", post(activate_tenant))
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +84,10 @@ async fn register_tenant(
     Json(body): Json<RegisterTenantRequest>,
 ) -> (StatusCode, Json<TenantResponse>) {
     let quota = body.quota.unwrap_or_default();
-    let tenant = state.ring.tenant_registry().register_tenant(body.name, quota);
+    let tenant = state
+        .ring
+        .tenant_registry()
+        .register_tenant(body.name, quota);
 
     (StatusCode::CREATED, Json(TenantResponse::from(tenant)))
 }

@@ -213,8 +213,14 @@ mod tests {
         let mut m2 = test_manifest();
         m2.name = "Beta Fighter".into();
 
-        substrate.save_fighter(&id1, &m1, FighterStatus::Idle).await.unwrap();
-        substrate.save_fighter(&id2, &m2, FighterStatus::Fighting).await.unwrap();
+        substrate
+            .save_fighter(&id1, &m1, FighterStatus::Idle)
+            .await
+            .unwrap();
+        substrate
+            .save_fighter(&id2, &m2, FighterStatus::Fighting)
+            .await
+            .unwrap();
 
         let fighters = substrate.list_fighters().await.unwrap();
         assert_eq!(fighters.len(), 2);
@@ -224,7 +230,9 @@ mod tests {
     async fn test_update_nonexistent_fighter_status() {
         let substrate = MemorySubstrate::in_memory().unwrap();
         let id = punch_types::FighterId::new();
-        let result = substrate.update_fighter_status(&id, FighterStatus::Fighting).await;
+        let result = substrate
+            .update_fighter_status(&id, FighterStatus::Fighting)
+            .await;
         assert!(result.is_err());
     }
 
@@ -232,7 +240,10 @@ mod tests {
     async fn test_delete_and_verify_gone() {
         let substrate = MemorySubstrate::in_memory().unwrap();
         let id = punch_types::FighterId::new();
-        substrate.save_fighter(&id, &test_manifest(), FighterStatus::Idle).await.unwrap();
+        substrate
+            .save_fighter(&id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
 
         substrate.delete_fighter(&id).await.unwrap();
         let loaded = substrate.load_fighter(&id).await.unwrap();
@@ -249,11 +260,17 @@ mod tests {
 
         let mut m1 = test_manifest();
         m1.name = "Original".into();
-        substrate.save_fighter(&id, &m1, FighterStatus::Idle).await.unwrap();
+        substrate
+            .save_fighter(&id, &m1, FighterStatus::Idle)
+            .await
+            .unwrap();
 
         let mut m2 = test_manifest();
         m2.name = "Updated".into();
-        substrate.save_fighter(&id, &m2, FighterStatus::Fighting).await.unwrap();
+        substrate
+            .save_fighter(&id, &m2, FighterStatus::Fighting)
+            .await
+            .unwrap();
 
         let loaded = substrate.load_fighter(&id).await.unwrap().unwrap();
         assert_eq!(loaded.name, "Updated");

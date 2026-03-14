@@ -5,9 +5,7 @@
 
 use std::sync::Arc;
 
-use punch_kernel::{
-    BudgetEnforcer, BudgetLimit, BudgetVerdict, MeteringEngine, TenantRegistry,
-};
+use punch_kernel::{BudgetEnforcer, BudgetLimit, BudgetVerdict, MeteringEngine, TenantRegistry};
 use punch_memory::MemorySubstrate;
 use punch_types::{
     FighterId, FighterManifest, FighterStatus, ModelConfig, Provider, TenantQuota, TenantStatus,
@@ -303,7 +301,11 @@ fn test_tenant_delete() {
 #[test]
 fn test_tenant_delete_nonexistent() {
     let registry = TenantRegistry::new();
-    assert!(registry.delete_tenant(&punch_types::TenantId::new()).is_none());
+    assert!(
+        registry
+            .delete_tenant(&punch_types::TenantId::new())
+            .is_none()
+    );
 }
 
 /// List tenants returns all registered tenants.

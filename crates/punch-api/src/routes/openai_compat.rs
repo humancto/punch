@@ -454,10 +454,7 @@ async fn chat_completions(
         .join("\n");
 
     // Collect stop sequences.
-    let stop_sequences: Vec<String> = body
-        .stop
-        .map(|s| s.into_vec())
-        .unwrap_or_default();
+    let stop_sequences: Vec<String> = body.stop.map(|s| s.into_vec()).unwrap_or_default();
 
     let request_id = generate_completion_id();
     let created = chrono::Utc::now().timestamp();
@@ -501,9 +498,27 @@ async fn chat_completions(
 
     // Handle streaming response.
     if is_stream {
-        handle_streaming(state, body.model, fighter_id, user_message, request_id, created, stop_sequences).await
+        handle_streaming(
+            state,
+            body.model,
+            fighter_id,
+            user_message,
+            request_id,
+            created,
+            stop_sequences,
+        )
+        .await
     } else {
-        handle_non_streaming(state, body.model, fighter_id, user_message, request_id, created, stop_sequences).await
+        handle_non_streaming(
+            state,
+            body.model,
+            fighter_id,
+            user_message,
+            request_id,
+            created,
+            stop_sequences,
+        )
+        .await
     }
 }
 
@@ -552,8 +567,9 @@ async fn handle_streaming(
                     }],
                 };
                 let _ = tx
-                    .send(Ok(SseEvent::default()
-                        .data(serde_json::to_string(&first).unwrap_or_default())))
+                    .send(Ok(
+                        SseEvent::default().data(serde_json::to_string(&first).unwrap_or_default())
+                    ))
                     .await;
 
                 // Apply stop sequences to the response.
@@ -581,8 +597,9 @@ async fn handle_streaming(
                     }],
                 };
                 let _ = tx
-                    .send(Ok(SseEvent::default()
-                        .data(serde_json::to_string(&content_chunk).unwrap_or_default())))
+                    .send(Ok(SseEvent::default().data(
+                        serde_json::to_string(&content_chunk).unwrap_or_default(),
+                    )))
                     .await;
 
                 // Final chunk: finish reason.
@@ -601,10 +618,10 @@ async fn handle_streaming(
                         finish_reason: Some(finish),
                     }],
                 };
-                let _ = tx
-                    .send(Ok(SseEvent::default()
+                let _ =
+                    tx.send(Ok(SseEvent::default()
                         .data(serde_json::to_string(&final_chunk).unwrap_or_default())))
-                    .await;
+                        .await;
 
                 // [DONE] sentinel.
                 let _ = tx.send(Ok(SseEvent::default().data("[DONE]"))).await;
@@ -846,7 +863,10 @@ mod tests {
         assert_eq!(json["object"], "chat.completion");
         assert_eq!(json["choices"][0]["finish_reason"], "stop");
         assert_eq!(json["choices"][0]["message"]["role"], "assistant");
-        assert_eq!(json["choices"][0]["message"]["content"], "Hello! How can I help?");
+        assert_eq!(
+            json["choices"][0]["message"]["content"],
+            "Hello! How can I help?"
+        );
         assert_eq!(json["usage"]["prompt_tokens"], 10);
         assert_eq!(json["usage"]["completion_tokens"], 8);
         assert_eq!(json["usage"]["total_tokens"], 18);
@@ -1104,8 +1124,7 @@ mod tests {
     #[test]
     fn test_stop_sequence_first_match_wins() {
         let text = "Hello END world STOP done";
-        let (result, _) =
-            apply_stop_sequences(text, &["END".to_string(), "STOP".to_string()]);
+        let (result, _) = apply_stop_sequences(text, &["END".to_string(), "STOP".to_string()]);
         assert_eq!(result, "Hello ");
     }
 

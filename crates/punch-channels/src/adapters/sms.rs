@@ -129,10 +129,7 @@ impl SmsAdapter {
         let to = params.get("To").cloned().unwrap_or_default();
 
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "to".to_string(),
-            serde_json::Value::String(to),
-        );
+        metadata.insert("to".to_string(), serde_json::Value::String(to));
 
         // Collect media URLs if present
         let num_media: usize = params
@@ -332,7 +329,10 @@ mod tests {
         params.insert("From".to_string(), "+1555".to_string());
         params.insert("Body".to_string(), "Photo".to_string());
         params.insert("NumMedia".to_string(), "1".to_string());
-        params.insert("MediaUrl0".to_string(), "https://example.com/img.jpg".to_string());
+        params.insert(
+            "MediaUrl0".to_string(),
+            "https://example.com/img.jpg".to_string(),
+        );
         let msg = adapter.parse_webhook_payload(&params).unwrap();
         let media = msg.metadata.get("media_urls").unwrap().as_array().unwrap();
         assert_eq!(media.len(), 1);

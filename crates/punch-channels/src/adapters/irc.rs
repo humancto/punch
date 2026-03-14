@@ -428,7 +428,10 @@ mod tests {
         let parsed = parse_irc_message(line).unwrap();
         assert_eq!(parsed.command, "NOTICE");
         assert_eq!(parsed.params, vec!["*"]);
-        assert_eq!(parsed.trailing.as_deref(), Some("*** Looking up your hostname"));
+        assert_eq!(
+            parsed.trailing.as_deref(),
+            Some("*** Looking up your hostname")
+        );
     }
 
     #[test]

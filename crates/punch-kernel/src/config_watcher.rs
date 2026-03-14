@@ -7,8 +7,8 @@
 //! and fields that require a restart (API listen address, database path, API key).
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tokio::sync::RwLock;
@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use punch_types::config::PunchConfig;
-use punch_types::hot_reload::{ConfigChange, diff_configs, validate_config, ValidationSeverity};
+use punch_types::hot_reload::{ConfigChange, ValidationSeverity, diff_configs, validate_config};
 
 // ---------------------------------------------------------------------------
 // ConfigDiff (kernel-level summary)
@@ -257,10 +257,7 @@ impl KernelConfigWatcher {
                     cb(&new_config, &diff);
                 }
 
-                info!(
-                    num_changes = changes.len(),
-                    "config hot reload complete"
-                );
+                info!(num_changes = changes.len(), "config hot reload complete");
             }
         })
     }
@@ -362,8 +359,7 @@ mod tests {
         let config_path = dir.join("punch.toml");
 
         let initial = make_test_config();
-        let toml_str =
-            toml::to_string_pretty(&initial).expect("serialize initial config");
+        let toml_str = toml::to_string_pretty(&initial).expect("serialize initial config");
         std::fs::write(&config_path, &toml_str).expect("write initial config");
 
         let watcher = KernelConfigWatcher::new(config_path.clone(), initial.clone());
@@ -412,8 +408,7 @@ mod tests {
         let config_path = dir.join("punch.toml");
 
         let initial = make_test_config();
-        let toml_str =
-            toml::to_string_pretty(&initial).expect("serialize initial config");
+        let toml_str = toml::to_string_pretty(&initial).expect("serialize initial config");
         std::fs::write(&config_path, &toml_str).expect("write initial config");
 
         let watcher = KernelConfigWatcher::new(config_path.clone(), initial.clone());

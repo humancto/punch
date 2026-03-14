@@ -31,44 +31,39 @@ async fn run_list() -> i32 {
     };
 
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(moves) => {
-                    if let Some(arr) = moves.as_array() {
-                        if arr.is_empty() {
-                            println!();
-                            println!("  No moves available.");
-                            println!("  Search for moves: punch move search <query>");
-                            println!();
-                            return 0;
-                        }
-
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(moves) => {
+                if let Some(arr) = moves.as_array() {
+                    if arr.is_empty() {
                         println!();
-                        println!(
-                            "  {:<24}  {:<12}  DESCRIPTION",
-                            "NAME", "TYPE"
-                        );
-                        println!("  {}", "-".repeat(70));
-
-                        for m in arr {
-                            let name = m["name"].as_str().unwrap_or("-");
-                            let move_type = m["type"].as_str().unwrap_or("built-in");
-                            let desc = m["description"].as_str().unwrap_or("-");
-                            println!("  {:<24}  {:<12}  {}", name, move_type, desc);
-                        }
-
+                        println!("  No moves available.");
+                        println!("  Search for moves: punch move search <query>");
                         println!();
-                        println!("  Total: {} move(s)", arr.len());
-                        println!();
+                        return 0;
                     }
-                    0
+
+                    println!();
+                    println!("  {:<24}  {:<12}  DESCRIPTION", "NAME", "TYPE");
+                    println!("  {}", "-".repeat(70));
+
+                    for m in arr {
+                        let name = m["name"].as_str().unwrap_or("-");
+                        let move_type = m["type"].as_str().unwrap_or("built-in");
+                        let desc = m["description"].as_str().unwrap_or("-");
+                        println!("  {:<24}  {:<12}  {}", name, move_type, desc);
+                    }
+
+                    println!();
+                    println!("  Total: {} move(s)", arr.len());
+                    println!();
                 }
-                Err(e) => {
-                    eprintln!("  [X] Failed to parse response: {}", e);
-                    1
-                }
+                0
             }
-        }
+            Err(e) => {
+                eprintln!("  [X] Failed to parse response: {}", e);
+                1
+            }
+        },
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -159,40 +154,35 @@ async fn run_search(query: String) -> i32 {
     println!();
 
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(moves) => {
-                    if let Some(arr) = moves.as_array() {
-                        if arr.is_empty() {
-                            println!("  No moves found matching \"{}\".", query);
-                            println!();
-                            return 0;
-                        }
-
-                        println!(
-                            "  {:<24}  {:<12}  DESCRIPTION",
-                            "NAME", "TYPE"
-                        );
-                        println!("  {}", "-".repeat(70));
-
-                        for m in arr {
-                            let name = m["name"].as_str().unwrap_or("-");
-                            let move_type = m["type"].as_str().unwrap_or("built-in");
-                            let desc = m["description"].as_str().unwrap_or("-");
-                            println!("  {:<24}  {:<12}  {}", name, move_type, desc);
-                        }
-
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(moves) => {
+                if let Some(arr) = moves.as_array() {
+                    if arr.is_empty() {
+                        println!("  No moves found matching \"{}\".", query);
                         println!();
-                        println!("  Found {} move(s)", arr.len());
+                        return 0;
                     }
-                    0
+
+                    println!("  {:<24}  {:<12}  DESCRIPTION", "NAME", "TYPE");
+                    println!("  {}", "-".repeat(70));
+
+                    for m in arr {
+                        let name = m["name"].as_str().unwrap_or("-");
+                        let move_type = m["type"].as_str().unwrap_or("built-in");
+                        let desc = m["description"].as_str().unwrap_or("-");
+                        println!("  {:<24}  {:<12}  {}", name, move_type, desc);
+                    }
+
+                    println!();
+                    println!("  Found {} move(s)", arr.len());
                 }
-                Err(e) => {
-                    eprintln!("  [X] Failed to parse response: {}", e);
-                    1
-                }
+                0
             }
-        }
+            Err(e) => {
+                eprintln!("  [X] Failed to parse response: {}", e);
+                1
+            }
+        },
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -226,48 +216,40 @@ async fn run_info(name: String) -> i32 {
     };
 
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(data) => {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(data) => {
+                println!();
+                println!("  Move: {}", data["name"].as_str().unwrap_or(&name));
+                println!("  Type: {}", data["type"].as_str().unwrap_or("built-in"));
+                println!(
+                    "  Description: {}",
+                    data["description"].as_str().unwrap_or("-")
+                );
+
+                if let Some(params) = data["parameters"].as_array() {
                     println!();
-                    println!(
-                        "  Move: {}",
-                        data["name"].as_str().unwrap_or(&name)
-                    );
-                    println!(
-                        "  Type: {}",
-                        data["type"].as_str().unwrap_or("built-in")
-                    );
-                    println!(
-                        "  Description: {}",
-                        data["description"].as_str().unwrap_or("-")
-                    );
-
-                    if let Some(params) = data["parameters"].as_array() {
-                        println!();
-                        println!("  Parameters:");
-                        for p in params {
-                            let pname = p["name"].as_str().unwrap_or("-");
-                            let ptype = p["type"].as_str().unwrap_or("-");
-                            let required = p["required"].as_bool().unwrap_or(false);
-                            let req_marker = if required { " (required)" } else { "" };
-                            println!("    - {} : {}{}", pname, ptype, req_marker);
-                        }
+                    println!("  Parameters:");
+                    for p in params {
+                        let pname = p["name"].as_str().unwrap_or("-");
+                        let ptype = p["type"].as_str().unwrap_or("-");
+                        let required = p["required"].as_bool().unwrap_or(false);
+                        let req_marker = if required { " (required)" } else { "" };
+                        println!("    - {} : {}{}", pname, ptype, req_marker);
                     }
-
-                    if let Some(version) = data["version"].as_str() {
-                        println!("  Version: {}", version);
-                    }
-
-                    println!();
-                    0
                 }
-                Err(e) => {
-                    eprintln!("  [X] Failed to parse response: {}", e);
-                    1
+
+                if let Some(version) = data["version"].as_str() {
+                    println!("  Version: {}", version);
                 }
+
+                println!();
+                0
             }
-        }
+            Err(e) => {
+                eprintln!("  [X] Failed to parse response: {}", e);
+                1
+            }
+        },
         Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
             eprintln!("  [X] Move '{}' not found.", name);
             1
@@ -307,31 +289,26 @@ async fn run_install(name: String) -> i32 {
     println!("  Installing move \"{}\"...", name);
 
     match client.post(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(data) => {
-                    println!();
-                    let installed_name = data["name"].as_str().unwrap_or(&name);
-                    println!("  Move '{}' installed successfully.", installed_name);
-                    if let Some(msg) = data["message"].as_str() {
-                        println!("  {}", msg);
-                    }
-                    println!();
-                    0
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(data) => {
+                println!();
+                let installed_name = data["name"].as_str().unwrap_or(&name);
+                println!("  Move '{}' installed successfully.", installed_name);
+                if let Some(msg) = data["message"].as_str() {
+                    println!("  {}", msg);
                 }
-                Err(_) => {
-                    println!("  Move '{}' installed.", name);
-                    0
-                }
+                println!();
+                0
             }
-        }
+            Err(_) => {
+                println!("  Move '{}' installed.", name);
+                0
+            }
+        },
         Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
             eprintln!("  [X] Move '{}' not found in registry.", name);
             eprintln!("  To install manually, place a .toml definition in:");
-            eprintln!(
-                "    {}",
-                super::punch_home().join("moves").display()
-            );
+            eprintln!("    {}", super::punch_home().join("moves").display());
             1
         }
         Ok(resp) => {
@@ -388,10 +365,7 @@ mod tests {
     /// Format the moves table output.
     fn format_moves_table(moves: &[serde_json::Value]) -> String {
         let mut lines = Vec::new();
-        lines.push(format!(
-            "  {:<24}  {:<12}  DESCRIPTION",
-            "NAME", "TYPE"
-        ));
+        lines.push(format!("  {:<24}  {:<12}  DESCRIPTION", "NAME", "TYPE"));
         lines.push(format!("  {}", "-".repeat(70)));
 
         for m in moves {
@@ -407,10 +381,7 @@ mod tests {
     /// Format a move info display.
     fn format_move_info(data: &serde_json::Value) -> String {
         let mut lines = Vec::new();
-        lines.push(format!(
-            "  Move: {}",
-            data["name"].as_str().unwrap_or("-")
-        ));
+        lines.push(format!("  Move: {}", data["name"].as_str().unwrap_or("-")));
         lines.push(format!(
             "  Type: {}",
             data["type"].as_str().unwrap_or("built-in")

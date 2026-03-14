@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn test_check_trim_moderate() {
         let budget = ContextBudget::new(1_000); // 1K token window
-                                                // 750 tokens * 4 chars = 3000 chars -> 75% of window
+        // 750 tokens * 4 chars = 3000 chars -> 75% of window
         let msgs = vec![make_message(Role::User, &"x".repeat(3000))];
         let action = budget.check_trim_needed(&msgs, &[]);
         assert_eq!(action, Some(TrimAction::Moderate));
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn test_check_trim_aggressive() {
         let budget = ContextBudget::new(1_000); // 1K token window
-                                                // 950 tokens * 4 chars = 3800 chars -> 95% of window
+        // 950 tokens * 4 chars = 3800 chars -> 95% of window
         let msgs = vec![make_message(Role::User, &"x".repeat(3800))];
         let action = budget.check_trim_needed(&msgs, &[]);
         assert_eq!(action, Some(TrimAction::Aggressive));
@@ -458,7 +458,7 @@ mod tests {
     fn test_apply_context_guard_truncates_oversized() {
         // Use a small window so the cap is small
         let budget = ContextBudget::new(100); // 100 tokens
-                                              // per_result_cap = 0.30 * 100 * 4 = 120 chars
+        // per_result_cap = 0.30 * 100 * 4 = 120 chars
         let big_result = "x".repeat(500);
         let mut msgs = vec![make_tool_message(vec![ToolCallResult {
             id: "call_1".into(),

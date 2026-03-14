@@ -8,7 +8,7 @@ use tracing::info;
 
 use punch_types::PunchResult;
 
-use crate::embeddings::{EmbeddingStore, BuiltInEmbedder, Embedder};
+use crate::embeddings::{BuiltInEmbedder, Embedder, EmbeddingStore};
 use crate::migrations;
 
 /// The core persistence handle for Punch.
@@ -86,9 +86,7 @@ impl MemorySubstrate {
     /// SQLite connection. Useful for testing and offline operation.
     pub fn with_builtin_embeddings(mut self) -> PunchResult<Self> {
         let conn = Connection::open_in_memory().map_err(|e| {
-            punch_types::PunchError::Memory(format!(
-                "failed to open embedding db: {e}"
-            ))
+            punch_types::PunchError::Memory(format!("failed to open embedding db: {e}"))
         })?;
         let arc = Arc::new(StdMutex::new(conn));
         let embedder = BuiltInEmbedder::new();
@@ -183,7 +181,9 @@ mod tests {
             .unwrap()
             .with_builtin_embeddings()
             .unwrap();
-        let result = substrate.embed_and_store("test text", HashMap::new()).unwrap();
+        let result = substrate
+            .embed_and_store("test text", HashMap::new())
+            .unwrap();
         assert!(result.is_some());
     }
 
@@ -193,7 +193,9 @@ mod tests {
             .unwrap()
             .with_builtin_embeddings()
             .unwrap();
-        substrate.embed_and_store("hello world", HashMap::new()).unwrap();
+        substrate
+            .embed_and_store("hello world", HashMap::new())
+            .unwrap();
         let results = substrate.semantic_search("hello", 5).unwrap();
         assert!(results.is_some());
     }

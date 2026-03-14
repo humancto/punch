@@ -329,10 +329,7 @@ mod tests {
 
     #[test]
     fn ipc_message_empty_string() {
-        assert_eq!(
-            IpcMessage::parse(""),
-            IpcMessage::Unknown("".to_string())
-        );
+        assert_eq!(IpcMessage::parse(""), IpcMessage::Unknown("".to_string()));
     }
 
     #[test]

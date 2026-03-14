@@ -44,8 +44,7 @@ pub async fn start_arena(ring: Arc<Ring>, config: &PunchConfig) -> PunchResult<(
     let a2a_state = A2AState::new(local_card);
 
     // Start the A2A task executor so pending tasks get picked up by fighters.
-    let mut a2a_executor =
-        A2ATaskExecutor::new(Arc::clone(&ring), Arc::clone(&a2a_state.tasks));
+    let mut a2a_executor = A2ATaskExecutor::new(Arc::clone(&ring), Arc::clone(&a2a_state.tasks));
     a2a_executor.start();
 
     let state = AppState {

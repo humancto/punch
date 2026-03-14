@@ -763,7 +763,10 @@ mod tests {
         let config = ConsolidationConfig::default();
         let json = serde_json::to_string(&config).unwrap();
         let restored: ConsolidationConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.max_memories_per_fighter, config.max_memories_per_fighter);
+        assert_eq!(
+            restored.max_memories_per_fighter,
+            config.max_memories_per_fighter
+        );
         assert_eq!(restored.max_age_days, config.max_age_days);
     }
 

@@ -99,10 +99,7 @@ impl LineAdapter {
     ///   }]
     /// }
     /// ```
-    pub fn parse_webhook_payload(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Vec<IncomingMessage> {
+    pub fn parse_webhook_payload(&self, payload: &serde_json::Value) -> Vec<IncomingMessage> {
         let events = match payload.get("events").and_then(|v| v.as_array()) {
             Some(events) => events,
             None => return Vec::new(),
@@ -164,8 +161,7 @@ impl LineAdapter {
         };
 
         let timestamp_ms = event.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
-        let timestamp =
-            DateTime::from_timestamp(timestamp_ms / 1000, 0).unwrap_or_else(Utc::now);
+        let timestamp = DateTime::from_timestamp(timestamp_ms / 1000, 0).unwrap_or_else(Utc::now);
 
         let mut metadata = HashMap::new();
         if let Some(reply_token) = event.get("replyToken").and_then(|v| v.as_str()) {
@@ -207,7 +203,10 @@ impl LineAdapter {
         let resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.channel_access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.channel_access_token),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -242,7 +241,10 @@ impl LineAdapter {
         let resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.channel_access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.channel_access_token),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()

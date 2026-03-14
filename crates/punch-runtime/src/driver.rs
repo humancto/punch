@@ -138,10 +138,7 @@ pub trait LlmDriver: Send + Sync + 'static {
     async fn complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse>;
 
     /// Streaming variant. Default implementation falls back to `complete`.
-    async fn stream_complete(
-        &self,
-        request: CompletionRequest,
-    ) -> PunchResult<CompletionResponse> {
+    async fn stream_complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
         self.complete(request).await
     }
 }
@@ -543,12 +540,10 @@ impl OpenAiCompatibleDriver {
 
     /// Parse the OpenAI chat completions response.
     pub fn parse_response(&self, body: &serde_json::Value) -> PunchResult<CompletionResponse> {
-        let choice = body["choices"]
-            .get(0)
-            .ok_or_else(|| PunchError::Provider {
-                provider: self.provider_name.clone(),
-                message: "no choices in response".to_string(),
-            })?;
+        let choice = body["choices"].get(0).ok_or_else(|| PunchError::Provider {
+            provider: self.provider_name.clone(),
+            message: "no choices in response".to_string(),
+        })?;
 
         let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop");
         let stop_reason = match finish_reason {
@@ -1164,9 +1159,7 @@ impl LlmDriver for OllamaDriver {
             })?;
 
         if !status.is_success() {
-            let error_msg = response_body["error"]
-                .as_str()
-                .unwrap_or("unknown error");
+            let error_msg = response_body["error"].as_str().unwrap_or("unknown error");
             return Err(PunchError::Provider {
                 provider: "ollama".to_string(),
                 message: format!("API error ({}): {}", status, error_msg),
@@ -1541,9 +1534,7 @@ impl LlmDriver for BedrockDriver {
             })?;
 
         if !status.is_success() {
-            let error_msg = response_body["message"]
-                .as_str()
-                .unwrap_or("unknown error");
+            let error_msg = response_body["message"].as_str().unwrap_or("unknown error");
             return Err(PunchError::Provider {
                 provider: "bedrock".to_string(),
                 message: format!("API error ({}): {}", status, error_msg),
@@ -1856,10 +1847,7 @@ pub fn create_driver_with_client(
                 )))
             } else {
                 Ok(Arc::new(AzureOpenAiDriver::new(
-                    api_key,
-                    resource,
-                    deployment,
-                    None,
+                    api_key, resource, deployment, None,
                 )))
             }
         }
@@ -2349,8 +2337,14 @@ mod tests {
 
     #[test]
     fn token_usage_accumulate() {
-        let mut u = TokenUsage { input_tokens: 10, output_tokens: 20 };
-        let other = TokenUsage { input_tokens: 5, output_tokens: 15 };
+        let mut u = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 20,
+        };
+        let other = TokenUsage {
+            input_tokens: 5,
+            output_tokens: 15,
+        };
         u.accumulate(&other);
         assert_eq!(u.input_tokens, 15);
         assert_eq!(u.output_tokens, 35);
@@ -2359,7 +2353,10 @@ mod tests {
 
     #[test]
     fn token_usage_total() {
-        let u = TokenUsage { input_tokens: 100, output_tokens: 200 };
+        let u = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 200,
+        };
         assert_eq!(u.total(), 300);
     }
 
@@ -2794,7 +2791,8 @@ mod tests {
 
     #[test]
     fn gemini_custom_base_url() {
-        let driver = GeminiDriver::new("key".to_string(), Some("https://custom.example.com".into()));
+        let driver =
+            GeminiDriver::new("key".to_string(), Some("https://custom.example.com".into()));
         let url = driver.build_url("gemini-pro");
         assert!(url.starts_with("https://custom.example.com/"));
     }
@@ -2932,9 +2930,7 @@ mod tests {
 
     #[test]
     fn azure_openai_delegates_parse_to_openai() {
-        let driver = AzureOpenAiDriver::new(
-            "key".into(), "res".into(), "dep".into(), None,
-        );
+        let driver = AzureOpenAiDriver::new("key".into(), "res".into(), "dep".into(), None);
         let response_body = serde_json::json!({
             "choices": [{
                 "message": {"role": "assistant", "content": "Azure response"},
@@ -2953,32 +2949,50 @@ mod tests {
 
     #[test]
     fn default_base_url_anthropic() {
-        assert_eq!(default_base_url(&Provider::Anthropic), "https://api.anthropic.com");
+        assert_eq!(
+            default_base_url(&Provider::Anthropic),
+            "https://api.anthropic.com"
+        );
     }
 
     #[test]
     fn default_base_url_openai() {
-        assert_eq!(default_base_url(&Provider::OpenAI), "https://api.openai.com");
+        assert_eq!(
+            default_base_url(&Provider::OpenAI),
+            "https://api.openai.com"
+        );
     }
 
     #[test]
     fn default_base_url_google() {
-        assert_eq!(default_base_url(&Provider::Google), "https://generativelanguage.googleapis.com");
+        assert_eq!(
+            default_base_url(&Provider::Google),
+            "https://generativelanguage.googleapis.com"
+        );
     }
 
     #[test]
     fn default_base_url_ollama() {
-        assert_eq!(default_base_url(&Provider::Ollama), "http://localhost:11434");
+        assert_eq!(
+            default_base_url(&Provider::Ollama),
+            "http://localhost:11434"
+        );
     }
 
     #[test]
     fn default_base_url_groq() {
-        assert_eq!(default_base_url(&Provider::Groq), "https://api.groq.com/openai");
+        assert_eq!(
+            default_base_url(&Provider::Groq),
+            "https://api.groq.com/openai"
+        );
     }
 
     #[test]
     fn default_base_url_deepseek() {
-        assert_eq!(default_base_url(&Provider::DeepSeek), "https://api.deepseek.com");
+        assert_eq!(
+            default_base_url(&Provider::DeepSeek),
+            "https://api.deepseek.com"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2988,7 +3002,10 @@ mod tests {
     #[test]
     fn test_hex_sha256() {
         let hash = hex_sha256(b"");
-        assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 
     #[test]

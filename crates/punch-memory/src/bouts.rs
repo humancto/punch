@@ -294,9 +294,18 @@ mod tests {
             .unwrap();
         let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
 
-        substrate.save_message(&bout_id, &Message::new(Role::User, "Hello")).await.unwrap();
-        substrate.save_message(&bout_id, &Message::new(Role::Assistant, "Hi there")).await.unwrap();
-        substrate.save_message(&bout_id, &Message::new(Role::User, "How are you?")).await.unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::User, "Hello"))
+            .await
+            .unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::Assistant, "Hi there"))
+            .await
+            .unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::User, "How are you?"))
+            .await
+            .unwrap();
 
         let messages = substrate.load_messages(&bout_id).await.unwrap();
         assert_eq!(messages.len(), 3);
@@ -346,8 +355,14 @@ mod tests {
             .unwrap();
         let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
 
-        substrate.save_message(&bout_id, &Message::new(Role::User, "a")).await.unwrap();
-        substrate.save_message(&bout_id, &Message::new(Role::Assistant, "b")).await.unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::User, "a"))
+            .await
+            .unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::Assistant, "b"))
+            .await
+            .unwrap();
 
         let bouts = substrate.list_bouts(&fighter_id).await.unwrap();
         assert_eq!(bouts[0].message_count, 2);
@@ -371,7 +386,10 @@ mod tests {
             .await
             .unwrap();
         let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
-        substrate.save_message(&bout_id, &Message::new(Role::User, "msg")).await.unwrap();
+        substrate
+            .save_message(&bout_id, &Message::new(Role::User, "msg"))
+            .await
+            .unwrap();
 
         substrate.delete_bout(&bout_id).await.unwrap();
         let bouts = substrate.list_bouts(&fighter_id).await.unwrap();

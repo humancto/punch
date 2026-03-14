@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
+use punch_kernel::workflow_conditions::{Condition, evaluate_condition};
+use punch_kernel::workflow_loops::{LoopConfig, LoopState, calculate_backoff, parse_foreach_items};
 use punch_kernel::{
     CircuitBreakerState, DagWorkflowStep, OnError, Ring, StepExecutor, StepResult, StepStatus,
     Workflow, WorkflowEngine, WorkflowId, WorkflowRunStatus, WorkflowStep, execute_dag,
     expand_dag_variables,
 };
-use punch_kernel::workflow_conditions::{Condition, evaluate_condition};
-use punch_kernel::workflow_loops::{LoopConfig, LoopState, calculate_backoff, parse_foreach_items};
 use punch_memory::MemorySubstrate;
 use punch_runtime::{CompletionRequest, CompletionResponse, LlmDriver, StopReason, TokenUsage};
 use punch_types::{ModelConfig, Provider, PunchConfig, PunchResult};
@@ -88,8 +88,13 @@ impl StepExecutor for EchoStepExecutor {
         step_results: &HashMap<String, StepResult>,
         loop_state: Option<&LoopState>,
     ) -> Result<StepResult, String> {
-        let expanded =
-            expand_dag_variables(&step.prompt_template, input, &step.name, step_results, loop_state);
+        let expanded = expand_dag_variables(
+            &step.prompt_template,
+            input,
+            &step.name,
+            step_results,
+            loop_state,
+        );
         Ok(StepResult {
             step_name: step.name.clone(),
             response: expanded,

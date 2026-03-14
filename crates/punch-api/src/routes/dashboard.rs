@@ -1055,12 +1055,7 @@ mod tests {
         let state = test_app_state();
         let app = dashboard_router().with_state(state);
 
-        let resp = send_post_json(
-            app,
-            "/api/dashboard/config",
-            serde_json::json!({}),
-        )
-        .await;
+        let resp = send_post_json(app, "/api/dashboard/config", serde_json::json!({})).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
@@ -1068,7 +1063,12 @@ mod tests {
             .expect("body");
         let json: serde_json::Value = serde_json::from_slice(&body).expect("valid JSON");
 
-        assert!(json["message"].as_str().unwrap().contains("No configuration changes"));
+        assert!(
+            json["message"]
+                .as_str()
+                .unwrap()
+                .contains("No configuration changes")
+        );
         assert_eq!(json["applied"], true);
     }
 

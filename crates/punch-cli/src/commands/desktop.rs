@@ -173,8 +173,8 @@ pub fn open_browser(url: &str) -> Result<(), String> {
     let platform = detect_platform();
     info!(%platform, %url, "opening browser");
 
-    let (cmd, args) = browser_command(platform)
-        .ok_or_else(|| format!("unsupported platform: {platform}"))?;
+    let (cmd, args) =
+        browser_command(platform).ok_or_else(|| format!("unsupported platform: {platform}"))?;
 
     let mut command = Command::new(cmd);
     for arg in &args {

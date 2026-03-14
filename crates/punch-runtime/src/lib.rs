@@ -24,16 +24,16 @@ pub mod session_repair;
 pub mod tool_executor;
 pub mod tools;
 
-pub use circuit_breaker::{CircuitStatus, CircuitState, ProviderCircuitBreaker};
+pub use circuit_breaker::{CircuitState, CircuitStatus, ProviderCircuitBreaker};
 pub use context_budget::{ContextBudget, TrimAction};
 pub use driver::{
     AnthropicDriver, AzureOpenAiDriver, BedrockDriver, CompletionRequest, CompletionResponse,
     GeminiDriver, LlmDriver, OllamaDriver, OpenAiCompatibleDriver, StopReason, TokenUsage,
     create_driver, create_driver_with_client, strip_thinking_tags,
 };
-pub use http_pool::{HttpPool, HttpPoolConfig};
 pub use fighter_loop::{FighterLoopParams, FighterLoopResult, run_fighter_loop};
 pub use guard::{GuardConfig, GuardVerdict, LoopGuard, LoopGuardVerdict};
+pub use http_pool::{HttpPool, HttpPoolConfig};
 pub use mcp::McpClient;
 pub use session_repair::{RepairStats, repair_session};
 pub use tool_executor::{ToolExecutionContext, execute_tool};

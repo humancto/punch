@@ -192,51 +192,43 @@ async fn run_status(name: &str) -> i32 {
     };
 
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(data) => {
-                    println!();
-                    println!(
-                        "  Channel: {}",
-                        data["name"].as_str().unwrap_or(name)
-                    );
-                    println!(
-                        "  Type:    {}",
-                        data["channel_type"].as_str().unwrap_or("-")
-                    );
-                    println!(
-                        "  Status:  {}",
-                        data["status"].as_str().unwrap_or("unknown")
-                    );
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(data) => {
+                println!();
+                println!("  Channel: {}", data["name"].as_str().unwrap_or(name));
+                println!(
+                    "  Type:    {}",
+                    data["channel_type"].as_str().unwrap_or("-")
+                );
+                println!(
+                    "  Status:  {}",
+                    data["status"].as_str().unwrap_or("unknown")
+                );
 
-                    if let Some(connected) = data["connected"].as_bool() {
-                        println!(
-                            "  Connected: {}",
-                            if connected { "yes" } else { "no" }
-                        );
-                    }
-
-                    if let Some(last_msg) = data["last_message_at"].as_str() {
-                        println!("  Last message: {}", last_msg);
-                    }
-
-                    if let Some(msg_count) = data["message_count"].as_u64() {
-                        println!("  Messages: {}", msg_count);
-                    }
-
-                    if let Some(fighter) = data["default_fighter"].as_str() {
-                        println!("  Default Fighter: {}", fighter);
-                    }
-
-                    println!();
-                    0
+                if let Some(connected) = data["connected"].as_bool() {
+                    println!("  Connected: {}", if connected { "yes" } else { "no" });
                 }
-                Err(e) => {
-                    eprintln!("  [X] Failed to parse response: {}", e);
-                    1
+
+                if let Some(last_msg) = data["last_message_at"].as_str() {
+                    println!("  Last message: {}", last_msg);
                 }
+
+                if let Some(msg_count) = data["message_count"].as_u64() {
+                    println!("  Messages: {}", msg_count);
+                }
+
+                if let Some(fighter) = data["default_fighter"].as_str() {
+                    println!("  Default Fighter: {}", fighter);
+                }
+
+                println!();
+                0
             }
-        }
+            Err(e) => {
+                eprintln!("  [X] Failed to parse response: {}", e);
+                1
+            }
+        },
         Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
             eprintln!("  [X] Channel '{}' not found.", name);
             eprintln!("  Run `punch channel list` to see configured channels.");

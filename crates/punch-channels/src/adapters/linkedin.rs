@@ -204,10 +204,7 @@ mod tests {
     use super::*;
 
     fn make_adapter() -> LinkedInAdapter {
-        LinkedInAdapter::new(
-            "test-oauth-token".to_string(),
-            "org-12345".to_string(),
-        )
+        LinkedInAdapter::new("test-oauth-token".to_string(), "org-12345".to_string())
     }
 
     #[test]

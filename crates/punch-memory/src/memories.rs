@@ -233,8 +233,14 @@ mod tests {
             .await
             .unwrap();
 
-        substrate.store_memory(&fid, "key", "old_value", 0.5).await.unwrap();
-        substrate.store_memory(&fid, "key", "new_value", 0.9).await.unwrap();
+        substrate
+            .store_memory(&fid, "key", "old_value", 0.5)
+            .await
+            .unwrap();
+        substrate
+            .store_memory(&fid, "key", "new_value", 0.9)
+            .await
+            .unwrap();
 
         let results = substrate.recall_memories(&fid, "key", 10).await.unwrap();
         assert_eq!(results.len(), 1);
@@ -251,7 +257,10 @@ mod tests {
             .await
             .unwrap();
 
-        let results = substrate.recall_memories(&fid, "nothing", 10).await.unwrap();
+        let results = substrate
+            .recall_memories(&fid, "nothing", 10)
+            .await
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -284,9 +293,18 @@ mod tests {
             .await
             .unwrap();
 
-        substrate.store_memory(&fid, "low_prio", "data", 0.2).await.unwrap();
-        substrate.store_memory(&fid, "high_prio", "data", 0.9).await.unwrap();
-        substrate.store_memory(&fid, "mid_prio", "data", 0.5).await.unwrap();
+        substrate
+            .store_memory(&fid, "low_prio", "data", 0.2)
+            .await
+            .unwrap();
+        substrate
+            .store_memory(&fid, "high_prio", "data", 0.9)
+            .await
+            .unwrap();
+        substrate
+            .store_memory(&fid, "mid_prio", "data", 0.5)
+            .await
+            .unwrap();
 
         let results = substrate.recall_memories(&fid, "prio", 10).await.unwrap();
         assert_eq!(results.len(), 3);
@@ -303,7 +321,10 @@ mod tests {
             .await
             .unwrap();
 
-        substrate.store_memory(&fid, "strong", "data", 1.0).await.unwrap();
+        substrate
+            .store_memory(&fid, "strong", "data", 1.0)
+            .await
+            .unwrap();
 
         // Light decay should not prune a 1.0 confidence memory
         substrate.decay_memories(&fid, 0.1).await.unwrap();

@@ -206,7 +206,10 @@ impl GorillaRunner for DataSweeper {
         memory: &MemorySubstrate,
         _driver: Arc<dyn LlmDriver>,
     ) -> PunchResult<GorillaOutput> {
-        info!(dry_run = self.dry_run, "Data Sweeper gorilla starting execution");
+        info!(
+            dry_run = self.dry_run,
+            "Data Sweeper gorilla starting execution"
+        );
 
         let cutoff = self.retention_cutoff();
         let mut report = SweepReport {
@@ -232,7 +235,10 @@ impl GorillaRunner for DataSweeper {
             match self.count_cleanable_messages(memory, cutoff).await {
                 Ok(count) => {
                     report.messages_deleted = count as u64;
-                    info!(messages_would_delete = count, "dry run: counted cleanable messages");
+                    info!(
+                        messages_would_delete = count,
+                        "dry run: counted cleanable messages"
+                    );
                 }
                 Err(e) => {
                     warn!(error = %e, "failed to count cleanable messages");
@@ -258,8 +264,10 @@ impl GorillaRunner for DataSweeper {
             debug!("compacting memory entries");
             if self.dry_run {
                 // In dry-run mode, we can't easily count without modifying, so report 0.
-                info!("dry run: memory compaction would be performed (max {} per fighter)",
-                    self.max_memories_per_fighter);
+                info!(
+                    "dry run: memory compaction would be performed (max {} per fighter)",
+                    self.max_memories_per_fighter
+                );
             } else {
                 match memory.compact_memories(self.max_memories_per_fighter).await {
                     Ok(count) => {
@@ -347,11 +355,7 @@ mod tests {
 
     #[test]
     fn data_sweeper_with_config() {
-        let sweeper = DataSweeper::with_config(
-            Duration::from_secs(7 * 86400),
-            false,
-            500,
-        );
+        let sweeper = DataSweeper::with_config(Duration::from_secs(7 * 86400), false, 500);
         assert_eq!(sweeper.retention_period, Duration::from_secs(7 * 86400));
         assert!(!sweeper.compact_memory);
         assert_eq!(sweeper.max_memories_per_fighter, 500);

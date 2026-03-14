@@ -5,8 +5,8 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
 
-use crate::openapi;
 use crate::AppState;
+use crate::openapi;
 
 /// Build the documentation routes.
 pub fn router() -> Router<AppState> {

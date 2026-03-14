@@ -50,10 +50,7 @@ impl FeishuAdapter {
 
     /// Acquire a tenant access token from the Feishu API.
     pub async fn acquire_tenant_token(&self) -> PunchResult<String> {
-        let url = format!(
-            "{}/auth/v3/tenant_access_token/internal",
-            FEISHU_API_BASE
-        );
+        let url = format!("{}/auth/v3/tenant_access_token/internal", FEISHU_API_BASE);
 
         let body = serde_json::json!({
             "app_id": self.app_id,

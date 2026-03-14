@@ -296,10 +296,7 @@ impl ReportGenerator {
             "- **Total Messages:** {} {}\n",
             metrics.total_messages, trends.messages_trend
         ));
-        summary_content.push_str(&format!(
-            "- **Tool Calls:** {}\n",
-            metrics.total_tool_calls
-        ));
+        summary_content.push_str(&format!("- **Tool Calls:** {}\n", metrics.total_tool_calls));
         summary_content.push_str(&format!(
             "- **Active Fighters:** {}\n",
             metrics.active_fighters
@@ -400,8 +397,7 @@ impl ReportGenerator {
         metrics.messages_per_day = metrics.total_messages as f64 / period_days;
 
         if metrics.total_bouts > 0 {
-            metrics.avg_bout_length =
-                metrics.total_messages as f64 / metrics.total_bouts as f64;
+            metrics.avg_bout_length = metrics.total_messages as f64 / metrics.total_bouts as f64;
         }
 
         metrics
@@ -445,16 +441,11 @@ impl GorillaRunner for ReportGenerator {
         let metrics = self.collect_metrics(memory, period_start, period_end).await;
 
         // Collect previous period metrics for trends.
-        let prev_metrics = self
-            .collect_previous_metrics(memory, period_start)
-            .await;
+        let prev_metrics = self.collect_previous_metrics(memory, period_start).await;
 
         let trends = ReportTrends {
             bouts_trend: compute_trend(metrics.total_bouts, prev_metrics.total_bouts),
-            messages_trend: compute_trend(
-                metrics.total_messages,
-                prev_metrics.total_messages,
-            ),
+            messages_trend: compute_trend(metrics.total_messages, prev_metrics.total_messages),
         };
 
         // Generate the report text.
@@ -649,10 +640,7 @@ mod tests {
                     message_count: 8,
                 },
             ],
-            tool_usage: vec![
-                ("web_fetch".to_string(), 5),
-                ("read_file".to_string(), 3),
-            ],
+            tool_usage: vec![("web_fetch".to_string(), 5), ("read_file".to_string(), 3)],
             messages_per_day: 20.0,
             avg_bout_length: 4.0,
         };

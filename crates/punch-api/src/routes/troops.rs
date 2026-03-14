@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
 
-use punch_types::{
-    CoordinationStrategy, FighterId, Troop, TroopId, TroopStatus,
-};
+use punch_types::{CoordinationStrategy, FighterId, Troop, TroopId, TroopStatus};
 
 use crate::AppState;
 
@@ -20,10 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/troops", post(form_troop).get(list_troops))
         .route("/api/troops/{id}", get(get_troop).delete(disband_troop))
         .route("/api/troops/{id}/tasks", post(assign_task))
-        .route(
-            "/api/troops/{id}/members",
-            post(recruit_member),
-        )
+        .route("/api/troops/{id}/members", post(recruit_member))
         .route(
             "/api/troops/{troop_id}/members/{fighter_id}",
             axum::routing::delete(dismiss_member),

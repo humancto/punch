@@ -250,7 +250,9 @@ mod tests {
     async fn test_register_multiple_gorillas() {
         let lifecycle = GorillaLifecycle::new();
         for i in 0..5 {
-            lifecycle.register(test_manifest(&format!("gorilla-{i}"))).await;
+            lifecycle
+                .register(test_manifest(&format!("gorilla-{i}")))
+                .await;
         }
         let gorillas = lifecycle.list().await;
         assert_eq!(gorillas.len(), 5);

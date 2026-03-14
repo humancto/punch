@@ -100,11 +100,10 @@ impl RedditAdapter {
             });
         }
 
-        let body: serde_json::Value =
-            resp.json().await.map_err(|e| PunchError::Channel {
-                channel: "reddit".to_string(),
-                message: format!("failed to parse token response: {e}"),
-            })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| PunchError::Channel {
+            channel: "reddit".to_string(),
+            message: format!("failed to parse token response: {e}"),
+        })?;
 
         let token = body
             .get("access_token")
@@ -153,8 +152,7 @@ impl RedditAdapter {
             .get("created_utc")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
-        let timestamp =
-            DateTime::from_timestamp(created_utc as i64, 0).unwrap_or_else(Utc::now);
+        let timestamp = DateTime::from_timestamp(created_utc as i64, 0).unwrap_or_else(Utc::now);
 
         let (channel_id, is_group) = match kind {
             // t1 = comment, t4 = private message

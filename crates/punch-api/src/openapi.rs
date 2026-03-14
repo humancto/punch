@@ -3,7 +3,7 @@
 //! Builds the complete OpenAPI specification as a `serde_json::Value` without
 //! any external OpenAPI crate — the JSON is assembled manually.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Generate the complete OpenAPI 3.0.3 specification for the Punch API.
 pub fn openapi_schema() -> Value {

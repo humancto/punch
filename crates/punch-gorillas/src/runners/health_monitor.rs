@@ -194,10 +194,7 @@ impl HealthMonitor {
     }
 
     /// Create a health monitor with full configuration.
-    pub fn with_full_config(
-        endpoints: Vec<HealthEndpoint>,
-        config: HealthConfig,
-    ) -> Self {
+    pub fn with_full_config(endpoints: Vec<HealthEndpoint>, config: HealthConfig) -> Self {
         Self {
             manifest: Self::default_manifest(),
             config,
@@ -223,7 +220,9 @@ impl HealthMonitor {
     fn default_manifest() -> GorillaManifest {
         GorillaManifest {
             name: "Health Monitor".to_string(),
-            description: "Monitors system health, checks endpoints, and alerts on threshold violations.".to_string(),
+            description:
+                "Monitors system health, checks endpoints, and alerts on threshold violations."
+                    .to_string(),
             schedule: "every 5m".to_string(),
             moves_required: vec!["web_fetch".to_string()],
             settings_schema: None,
@@ -480,10 +479,7 @@ fn get_disk_space(path: &str) -> (u64, u64) {
 async fn check_http_endpoint(endpoint: &HealthEndpoint, timeout: Duration) -> EndpointResult {
     let start = std::time::Instant::now();
 
-    let client = match reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-    {
+    let client = match reqwest::Client::builder().timeout(timeout).build() {
         Ok(c) => c,
         Err(e) => {
             return EndpointResult {
@@ -647,12 +643,7 @@ impl GorillaRunner for HealthMonitor {
         // Store health report as a memory entry.
         let mem_key = format!("health_report_{}", Utc::now().format("%Y%m%d_%H%M%S"));
         if let Err(e) = memory
-            .store_memory(
-                &punch_types::FighterId::new(),
-                &mem_key,
-                &summary,
-                0.9,
-            )
+            .store_memory(&punch_types::FighterId::new(), &mem_key, &summary, 0.9)
             .await
         {
             warn!(error = %e, "failed to store health report in memory");
@@ -688,13 +679,11 @@ impl GorillaRunner for HealthMonitor {
     }
 
     fn check_requirements(&self) -> Vec<RequirementStatus> {
-        vec![
-            RequirementStatus {
-                name: "system_access".to_string(),
-                met: true,
-                message: "System metrics accessible".to_string(),
-            },
-        ]
+        vec![RequirementStatus {
+            name: "system_access".to_string(),
+            met: true,
+            message: "System metrics accessible".to_string(),
+        }]
     }
 }
 

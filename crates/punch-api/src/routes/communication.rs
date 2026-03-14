@@ -194,31 +194,29 @@ async fn conversation(
     }
 
     // Look up fighters by name.
-    let (id_a, _) =
-        state
-            .ring
-            .find_fighter_by_name_sync(&body.fighter_a)
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ErrorResponse {
-                        error: format!("fighter '{}' not found", body.fighter_a),
-                    }),
-                )
-            })?;
+    let (id_a, _) = state
+        .ring
+        .find_fighter_by_name_sync(&body.fighter_a)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: format!("fighter '{}' not found", body.fighter_a),
+                }),
+            )
+        })?;
 
-    let (id_b, _) =
-        state
-            .ring
-            .find_fighter_by_name_sync(&body.fighter_b)
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ErrorResponse {
-                        error: format!("fighter '{}' not found", body.fighter_b),
-                    }),
-                )
-            })?;
+    let (id_b, _) = state
+        .ring
+        .find_fighter_by_name_sync(&body.fighter_b)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: format!("fighter '{}' not found", body.fighter_b),
+                }),
+            )
+        })?;
 
     let name_a = body.fighter_a.clone();
     let name_b = body.fighter_b.clone();

@@ -104,8 +104,7 @@ pub async fn execute_map_reduce_distributed(
     }
 
     let chunks = map_split(&config.input, config.workers.len());
-    let results: Arc<Mutex<HashMap<FighterId, String>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let results: Arc<Mutex<HashMap<FighterId, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     // Send each chunk to a worker.
     for (i, worker) in config.workers.iter().enumerate() {
@@ -911,8 +910,7 @@ mod tests {
         let coordinator = FighterId::new();
         let _rx = router.register(coordinator);
 
-        let result =
-            execute_chain_of_responsibility(&[], "any task", &router, coordinator).await;
+        let result = execute_chain_of_responsibility(&[], "any task", &router, coordinator).await;
         assert!(result.is_err());
     }
 
@@ -1192,8 +1190,7 @@ mod tests {
             ],
         };
 
-        let restarted =
-            supervisor_monitor_health(&mut config, &router, supervisor).await;
+        let restarted = supervisor_monitor_health(&mut config, &router, supervisor).await;
 
         // w2 should have been detected as failed and restarted.
         assert!(restarted.contains(&w2));
@@ -1334,16 +1331,9 @@ mod tests {
             },
         ];
 
-        let result = execute_auction(
-            &[f1, f2],
-            "complex task",
-            &router,
-            coordinator,
-            &bids,
-            0.5,
-        )
-        .await
-        .expect("should execute");
+        let result = execute_auction(&[f1, f2], "complex task", &router, coordinator, &bids, 0.5)
+            .await
+            .expect("should execute");
 
         assert!(result.is_some());
         let winner = result.expect("should have winner");
@@ -1377,16 +1367,9 @@ mod tests {
             },
         ];
 
-        let result = execute_auction(
-            &[f1, f2],
-            "tied task",
-            &router,
-            coordinator,
-            &bids,
-            0.5,
-        )
-        .await
-        .expect("should execute");
+        let result = execute_auction(&[f1, f2], "tied task", &router, coordinator, &bids, 0.5)
+            .await
+            .expect("should execute");
 
         // Should still select a winner (deterministic - one of them).
         assert!(result.is_some());

@@ -2,8 +2,8 @@ pub mod a2a;
 pub mod approval;
 pub mod audit;
 pub mod browser;
-pub mod cdp;
 pub mod capability;
+pub mod cdp;
 pub mod config;
 pub mod coordinator;
 pub mod creed;
@@ -45,13 +45,13 @@ pub use browser::{
     BrowserAction, BrowserConfig, BrowserDriver, BrowserPool, BrowserResult, BrowserSession,
     BrowserState,
 };
+pub use capability::{Capability, CapabilityGrant};
 pub use cdp::{
     CdpBrowserDriver, CdpCommand, CdpConfig, CdpError, CdpResponse, CdpSession, CdpTargetInfo,
-    build_click_command, build_evaluate_command, build_get_content_command,
-    build_get_html_command, build_navigate_command, build_screenshot_command,
-    build_type_text_command, build_wait_for_selector_command, chrome_candidate_paths, find_chrome,
+    build_click_command, build_evaluate_command, build_get_content_command, build_get_html_command,
+    build_navigate_command, build_screenshot_command, build_type_text_command,
+    build_wait_for_selector_command, chrome_candidate_paths, find_chrome,
 };
-pub use capability::{Capability, CapabilityGrant};
 pub use config::{ModelConfig, Provider, PunchConfig};
 pub use coordinator::{AgentCoordinator, AgentInfo, AgentMessageResult};
 pub use creed::{
@@ -99,10 +99,10 @@ pub use signing::{
     verify_manifest, verify_signed_manifest, verifying_key_from_hex,
 };
 pub use ssrf::{SsrfProtector, SsrfViolation};
-pub use tenant::{Tenant, TenantId, TenantQuota, TenantStatus};
 pub use taint::{
     Sensitivity, ShellBleedDetector, ShellBleedWarning, TaintLabel, TaintSource, TaintTracker,
 };
+pub use tenant::{Tenant, TenantId, TenantQuota, TenantStatus};
 pub use tool::{ToolCategory, ToolDefinition, ToolResult};
 pub use tool_policy::{
     PolicyCondition, PolicyDecision, PolicyEffect, PolicyRule, PolicyScope, ToolPolicyEngine,

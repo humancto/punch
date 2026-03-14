@@ -237,14 +237,8 @@ async fn run_create(file_path: &str) -> i32 {
                             "  Workflow created: {}",
                             result["name"].as_str().unwrap_or("?")
                         );
-                        println!(
-                            "  ID: {}",
-                            result["id"].as_str().unwrap_or("?")
-                        );
-                        println!(
-                            "  Steps: {}",
-                            result["step_count"].as_u64().unwrap_or(0)
-                        );
+                        println!("  ID: {}", result["id"].as_str().unwrap_or("?"));
+                        println!("  Steps: {}", result["step_count"].as_u64().unwrap_or(0));
                         println!();
                         0
                     }
@@ -311,7 +305,10 @@ mod tests {
     /// Format a workflow run status display.
     fn format_run_status(run: &serde_json::Value) -> String {
         let mut lines = Vec::new();
-        lines.push(format!("Run ID:      {}", run["id"].as_str().unwrap_or("?")));
+        lines.push(format!(
+            "Run ID:      {}",
+            run["id"].as_str().unwrap_or("?")
+        ));
         lines.push(format!(
             "Status:      {}",
             run["status"].as_str().unwrap_or("?")

@@ -90,12 +90,7 @@ struct ErrorResponse {
 // ---------------------------------------------------------------------------
 
 fn error_response(status: StatusCode, msg: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
-    (
-        status,
-        Json(ErrorResponse {
-            error: msg.into(),
-        }),
-    )
+    (status, Json(ErrorResponse { error: msg.into() }))
 }
 
 fn apply_interaction_style(style: &mut InteractionStyle, req: &InteractionStyleRequest) {
@@ -355,7 +350,10 @@ async fn render_creed(
 
     Ok((
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; charset=utf-8",
+        )],
         rendered,
     )
         .into_response())

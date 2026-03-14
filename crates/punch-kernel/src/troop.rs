@@ -5,9 +5,8 @@
 //! fighter management and provides structured multi-agent orchestration.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::Utc;
 use dashmap::DashMap;
@@ -248,9 +247,7 @@ impl TroopManager {
             CoordinationStrategy::Broadcast => self.assign_broadcast(&troop, task_description),
             CoordinationStrategy::Pipeline => self.assign_pipeline(&troop, task_description),
             CoordinationStrategy::Consensus => self.assign_consensus(&troop, task_description),
-            CoordinationStrategy::Specialist => {
-                self.assign_specialist(&troop, task_description)
-            }
+            CoordinationStrategy::Specialist => self.assign_specialist(&troop, task_description),
         };
 
         Ok(assigned)
@@ -282,8 +279,7 @@ impl TroopManager {
 
         match &troop.strategy {
             CoordinationStrategy::LeaderWorker => {
-                self.dispatch_leader_worker(&troop, task_description)
-                    .await
+                self.dispatch_leader_worker(&troop, task_description).await
             }
             CoordinationStrategy::RoundRobin => {
                 self.dispatch_round_robin(&troop, task_description).await
@@ -531,10 +527,7 @@ impl TroopManager {
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
-            routing_decision: format!(
-                "broadcast: sent to all {} members",
-                troop.members.len()
-            ),
+            routing_decision: format!("broadcast: sent to all {} members", troop.members.len()),
             results: vec![],
         })
     }
@@ -561,8 +554,7 @@ impl TroopManager {
         }
 
         // For tracking, note the full pipeline order.
-        let pipeline_desc: Vec<String> =
-            troop.members.iter().map(|m| m.to_string()).collect();
+        let pipeline_desc: Vec<String> = troop.members.iter().map(|m| m.to_string()).collect();
 
         info!(
             pipeline = ?pipeline_desc,
@@ -625,10 +617,7 @@ impl TroopManager {
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
-            routing_decision: format!(
-                "pipeline: completed {} stages",
-                troop.members.len()
-            ),
+            routing_decision: format!("pipeline: completed {} stages", troop.members.len()),
             results,
         })
     }
@@ -661,10 +650,7 @@ impl TroopManager {
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
-            routing_decision: format!(
-                "consensus: {} members voting on task",
-                troop.members.len()
-            ),
+            routing_decision: format!("consensus: {} members voting on task", troop.members.len()),
             results: vec![],
         })
     }
@@ -713,16 +699,12 @@ impl TroopManager {
             .get(&target)
             .map(|caps| {
                 let task_lower = task.to_lowercase();
-                caps.iter()
-                    .any(|c| task_lower.contains(&c.to_lowercase()))
+                caps.iter().any(|c| task_lower.contains(&c.to_lowercase()))
             })
             .unwrap_or(false);
 
         let decision = if has_capability_match {
-            format!(
-                "specialist: routed to {} based on capability match",
-                target
-            )
+            format!("specialist: routed to {} based on capability match", target)
         } else {
             format!(
                 "specialist: no capability match, defaulted to leader {}",
@@ -1409,9 +1391,7 @@ mod tests {
                 .await
                 .expect("should assign");
             assert_eq!(result.assigned_to.len(), 1);
-            *assignment_counts
-                .entry(result.assigned_to[0])
-                .or_insert(0) += 1;
+            *assignment_counts.entry(result.assigned_to[0]).or_insert(0) += 1;
         }
 
         // Each member should get exactly 3 tasks.
@@ -1651,7 +1631,10 @@ mod tests {
         mgr.register_capabilities(fighter, vec!["code".to_string(), "test".to_string()]);
 
         assert!(mgr.fighter_capabilities.contains_key(&fighter));
-        let caps = mgr.fighter_capabilities.get(&fighter).expect("should exist");
+        let caps = mgr
+            .fighter_capabilities
+            .get(&fighter)
+            .expect("should exist");
         assert_eq!(caps.len(), 2);
     }
 }

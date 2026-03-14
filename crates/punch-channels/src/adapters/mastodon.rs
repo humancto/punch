@@ -115,7 +115,10 @@ impl MastodonAdapter {
 
         let account = payload.get("account")?;
         let user_id = account.get("id")?.as_str()?;
-        let acct = account.get("acct").and_then(|v| v.as_str()).unwrap_or(user_id);
+        let acct = account
+            .get("acct")
+            .and_then(|v| v.as_str())
+            .unwrap_or(user_id);
         let display_name = account
             .get("display_name")
             .and_then(|v| v.as_str())
@@ -382,7 +385,10 @@ mod tests {
 
     #[test]
     fn test_strip_html_tags() {
-        assert_eq!(strip_html_tags("<p>Hello <b>world</b>!</p>"), "Hello world!");
+        assert_eq!(
+            strip_html_tags("<p>Hello <b>world</b>!</p>"),
+            "Hello world!"
+        );
         assert_eq!(strip_html_tags("plain text"), "plain text");
         assert_eq!(strip_html_tags("<p></p>"), "");
     }

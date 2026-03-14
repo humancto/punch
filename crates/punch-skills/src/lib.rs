@@ -15,7 +15,7 @@ use tracing::info;
 use punch_types::ToolDefinition;
 
 pub use marketplace::{
-    builtin_skills, InstalledSkill, SkillListing, SkillMarketplace, SkillSource,
+    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
 };
 
 // ---------------------------------------------------------------------------

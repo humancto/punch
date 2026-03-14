@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use punch_kernel::{KernelConfigDiff, KernelConfigWatcher};
@@ -67,7 +67,11 @@ fn test_diff_rate_limit_change_is_reloadable() {
     assert!(!changes.is_empty());
 
     // Find RateLimitChanged.
-    assert!(changes.iter().any(|c| matches!(c, ConfigChange::RateLimitChanged { .. })));
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConfigChange::RateLimitChanged { .. }))
+    );
 }
 
 /// Model change is detected.
@@ -78,7 +82,11 @@ fn test_diff_model_change_detected() {
     new.default_model.model = "gpt-4o".to_string();
 
     let changes = diff_configs(&old, &new);
-    assert!(changes.iter().any(|c| matches!(c, ConfigChange::ModelChanged { .. })));
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConfigChange::ModelChanged { .. }))
+    );
 }
 
 /// API listen address change requires restart.
@@ -89,9 +97,11 @@ fn test_diff_listen_address_requires_restart() {
     new.api_listen = "0.0.0.0:8080".to_string();
 
     let changes = diff_configs(&old, &new);
-    assert!(changes
-        .iter()
-        .any(|c| matches!(c, ConfigChange::ListenAddressChanged { .. })));
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConfigChange::ListenAddressChanged { .. }))
+    );
 }
 
 /// API key change requires restart.
@@ -102,9 +112,11 @@ fn test_diff_api_key_requires_restart() {
     new.api_key = "new-key".to_string();
 
     let changes = diff_configs(&old, &new);
-    assert!(changes
-        .iter()
-        .any(|c| matches!(c, ConfigChange::ApiKeyChanged)));
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConfigChange::ApiKeyChanged))
+    );
 }
 
 /// Identical configs produce no changes.
@@ -126,7 +138,12 @@ fn test_validate_valid_config() {
     let errors = validate_config(&config);
     let hard_errors: Vec<_> = errors
         .iter()
-        .filter(|v| matches!(v.severity, punch_types::hot_reload::ValidationSeverity::Error))
+        .filter(|v| {
+            matches!(
+                v.severity,
+                punch_types::hot_reload::ValidationSeverity::Error
+            )
+        })
         .collect();
     assert!(
         hard_errors.is_empty(),
@@ -156,10 +173,7 @@ async fn test_watcher_current_config_returns_initial() {
 /// Registering a callback increases the callback count.
 #[tokio::test]
 async fn test_watcher_register_callback() {
-    let watcher = KernelConfigWatcher::new(
-        PathBuf::from("/tmp/test-watcher.toml"),
-        make_config(),
-    );
+    let watcher = KernelConfigWatcher::new(PathBuf::from("/tmp/test-watcher.toml"), make_config());
 
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
@@ -176,10 +190,7 @@ async fn test_watcher_register_callback() {
 /// Multiple callbacks can be registered.
 #[tokio::test]
 async fn test_watcher_multiple_callbacks() {
-    let watcher = KernelConfigWatcher::new(
-        PathBuf::from("/tmp/multi-cb-test.toml"),
-        make_config(),
-    );
+    let watcher = KernelConfigWatcher::new(PathBuf::from("/tmp/multi-cb-test.toml"), make_config());
 
     let c1 = Arc::new(AtomicU64::new(0));
     let c2 = Arc::new(AtomicU64::new(0));
@@ -302,7 +313,10 @@ async fn test_watcher_invalid_toml_keeps_old() {
     tokio::time::sleep(Duration::from_secs(7)).await;
 
     let current = watcher.current_config().await;
-    assert_eq!(current.rate_limit_rpm, 60, "should keep old config on parse error");
+    assert_eq!(
+        current.rate_limit_rpm, 60,
+        "should keep old config on parse error"
+    );
 
     handle.abort();
     let _ = std::fs::remove_dir_all(&dir);

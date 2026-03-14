@@ -53,12 +53,14 @@ fn test_ssrf_blocks_localhost() {
 fn test_ssrf_blocks_cloud_metadata() {
     let mut p = SsrfProtector::new();
     p.set_dns_check(false);
-    assert!(p
-        .validate_url("http://169.254.169.254/latest/meta-data/")
-        .is_err());
-    assert!(p
-        .validate_url("http://metadata.google.internal/computeMetadata/v1/")
-        .is_err());
+    assert!(
+        p.validate_url("http://169.254.169.254/latest/meta-data/")
+            .is_err()
+    );
+    assert!(
+        p.validate_url("http://metadata.google.internal/computeMetadata/v1/")
+            .is_err()
+    );
 }
 
 /// Dangerous schemes (file://, ftp://, gopher://) are blocked.
@@ -155,9 +157,11 @@ fn test_sandbox_blocks_dangerous_commands() {
     assert!(enforcer.validate_command("rm -rf /").is_err());
     assert!(enforcer.validate_command("rm -rf /*").is_err());
     assert!(enforcer.validate_command(":(){ :|:& };:").is_err());
-    assert!(enforcer
-        .validate_command("dd if=/dev/zero of=disk")
-        .is_err());
+    assert!(
+        enforcer
+            .validate_command("dd if=/dev/zero of=disk")
+            .is_err()
+    );
     assert!(enforcer.validate_command("mkfs.ext4 /dev/sda1").is_err());
 }
 
@@ -200,9 +204,11 @@ fn test_sandbox_allows_valid_paths() {
     let enforcer = SandboxEnforcer::new(config);
 
     assert!(enforcer.validate_path(Path::new("/tmp/test.txt")).is_ok());
-    assert!(enforcer
-        .validate_path(Path::new("/tmp/subdir/file.rs"))
-        .is_ok());
+    assert!(
+        enforcer
+            .validate_path(Path::new("/tmp/subdir/file.rs"))
+            .is_ok()
+    );
 }
 
 /// Files in denied paths are blocked even if inside allowed paths.

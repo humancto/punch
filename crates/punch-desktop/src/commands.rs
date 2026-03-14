@@ -24,10 +24,7 @@ pub enum CommandError {
 
     /// Arena returned an error response.
     #[error("arena error ({status}): {message}")]
-    Arena {
-        status: u16,
-        message: String,
-    },
+    Arena { status: u16, message: String },
 
     /// Deserialization error.
     #[error("deserialization error: {0}")]
@@ -236,10 +233,7 @@ impl ArenaClient {
 
     /// Get system metrics combining Arena data with desktop state.
     #[instrument(skip(self, desktop_state))]
-    pub async fn get_metrics(
-        &self,
-        desktop_state: &DesktopState,
-    ) -> CommandResult<SystemMetrics> {
+    pub async fn get_metrics(&self, desktop_state: &DesktopState) -> CommandResult<SystemMetrics> {
         debug!("gathering system metrics");
 
         let arena_status = self.get_system_status().await.ok();
@@ -376,7 +370,9 @@ mod tests {
         state.mark_connected();
         assert!(state.connected);
 
-        let connected = check_and_update_connection(&client, &mut state).await.unwrap();
+        let connected = check_and_update_connection(&client, &mut state)
+            .await
+            .unwrap();
         assert!(!connected);
         assert!(!state.connected);
     }

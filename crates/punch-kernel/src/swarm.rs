@@ -12,9 +12,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use punch_types::{
-    FighterId, PunchError, PunchResult, SubtaskStatus, SwarmSubtask, SwarmTask,
-};
+use punch_types::{FighterId, PunchError, PunchResult, SubtaskStatus, SwarmSubtask, SwarmTask};
 
 /// How long (in seconds) a running subtask can go without update before
 /// being considered stale.
@@ -230,10 +228,7 @@ impl SwarmCoordinator {
     /// and capability matching.
     ///
     /// Returns a list of (subtask_id, fighter_id) assignments.
-    pub async fn assign_subtasks(
-        &self,
-        task_id: &Uuid,
-    ) -> PunchResult<Vec<(Uuid, FighterId)>> {
+    pub async fn assign_subtasks(&self, task_id: &Uuid) -> PunchResult<Vec<(Uuid, FighterId)>> {
         let task_ref = self
             .tasks
             .get(task_id)
@@ -345,7 +340,10 @@ impl SwarmCoordinator {
             .iter_mut()
             .find(|s| s.id == *subtask_id)
             .ok_or_else(|| {
-                PunchError::Troop(format!("subtask {} not found in task {}", subtask_id, task_id))
+                PunchError::Troop(format!(
+                    "subtask {} not found in task {}",
+                    subtask_id, task_id
+                ))
             })?;
 
         // Decrement load for the assigned fighter.
@@ -428,7 +426,10 @@ impl SwarmCoordinator {
             .iter_mut()
             .find(|s| s.id == *subtask_id)
             .ok_or_else(|| {
-                PunchError::Troop(format!("subtask {} not found in task {}", subtask_id, task_id))
+                PunchError::Troop(format!(
+                    "subtask {} not found in task {}",
+                    subtask_id, task_id
+                ))
             })?;
 
         // Decrement load for the assigned fighter.
@@ -462,7 +463,10 @@ impl SwarmCoordinator {
             .iter_mut()
             .find(|s| s.id == *subtask_id)
             .ok_or_else(|| {
-                PunchError::Troop(format!("subtask {} not found in task {}", subtask_id, task_id))
+                PunchError::Troop(format!(
+                    "subtask {} not found in task {}",
+                    subtask_id, task_id
+                ))
             })?;
 
         // Only reassign if the subtask has failed.
@@ -750,10 +754,7 @@ mod tests {
     fn test_register_fighter_with_capabilities() {
         let coord = SwarmCoordinator::new();
         let f = FighterId::new();
-        coord.register_fighter_with_capabilities(
-            f,
-            vec!["code".to_string(), "review".to_string()],
-        );
+        coord.register_fighter_with_capabilities(f, vec!["code".to_string(), "review".to_string()]);
 
         let load = coord.fighter_loads.get(&f).expect("should exist");
         assert_eq!(load.capabilities.len(), 2);
@@ -813,7 +814,10 @@ mod tests {
         coord.register_fighter(f2);
 
         let task_id = coord.create_task("step 1\nstep 2".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         assert_eq!(assignments.len(), 2);
     }
 
@@ -844,7 +848,10 @@ mod tests {
         ];
         let task_id = coord.create_task_with_subtasks("pipeline".to_string(), subtasks);
 
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         // Only the first subtask (no dependencies) should be assigned.
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[0].0, dep_id);
@@ -857,7 +864,10 @@ mod tests {
         coord.register_fighter(f);
 
         let task_id = coord.create_task("single task".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         assert_eq!(assignments.len(), 1);
 
         let (subtask_id, _) = assignments[0];
@@ -878,7 +888,10 @@ mod tests {
         coord.register_fighter(f);
 
         let task_id = coord.create_task("fail task".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         let (subtask_id, _) = assignments[0];
 
         coord
@@ -897,7 +910,10 @@ mod tests {
         coord.register_fighter(f);
 
         let task_id = coord.create_task("a\nb".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
 
         // Complete first subtask.
         coord
@@ -916,7 +932,10 @@ mod tests {
         coord.register_fighter(f);
 
         let task_id = coord.create_task("a\nb\nc".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
 
         // Complete one subtask.
         coord
@@ -947,7 +966,10 @@ mod tests {
         coord.register_fighter(f3);
 
         let task_id = coord.create_task("a\nb\nc\nd\ne\nf".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
 
         assert_eq!(assignments.len(), 6);
 
@@ -973,7 +995,10 @@ mod tests {
         coord.register_fighter(f2);
 
         let task_id = coord.create_task("single task".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         let (subtask_id, original_fighter) = assignments[0];
 
         // Fail the subtask.
@@ -1060,7 +1085,10 @@ mod tests {
         coord.register_fighter(f);
 
         let task_id = coord.create_task("work".to_string());
-        coord.assign_subtasks(&task_id).await.expect("should assign");
+        coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
 
         // Verify load incremented.
         let load = coord.fighter_loads.get(&f).expect("should exist");
@@ -1084,7 +1112,10 @@ mod tests {
     async fn test_no_fighters_available() {
         let coord = SwarmCoordinator::new();
         let task_id = coord.create_task("lonely task".to_string());
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
         assert!(assignments.is_empty());
     }
 
@@ -1159,7 +1190,10 @@ mod tests {
             depends_on: vec![],
         }];
         let task_id = coord.create_task_with_subtasks("code task".to_string(), subtasks);
-        let assignments = coord.assign_subtasks(&task_id).await.expect("should assign");
+        let assignments = coord
+            .assign_subtasks(&task_id)
+            .await
+            .expect("should assign");
 
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[0].1, coder);

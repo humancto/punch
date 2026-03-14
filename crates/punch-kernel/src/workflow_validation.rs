@@ -430,18 +430,22 @@ mod tests {
     fn detect_cycle_simple() {
         let steps = vec![step("a", &["b"]), step("b", &["a"])];
         let errors = validate_workflow(&steps);
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::CycleDetected { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::CycleDetected { .. }))
+        );
     }
 
     #[test]
     fn detect_cycle_three_way() {
         let steps = vec![step("a", &["c"]), step("b", &["a"]), step("c", &["b"])];
         let errors = validate_workflow(&steps);
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::CycleDetected { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::CycleDetected { .. }))
+        );
     }
 
     #[test]
@@ -461,9 +465,11 @@ mod tests {
     fn detect_duplicate_step_name() {
         let steps = vec![step("dup", &[]), step("dup", &[])];
         let errors = validate_workflow(&steps);
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::DuplicateStepName { name } if name == "dup")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::DuplicateStepName { name } if name == "dup"))
+        );
     }
 
     #[test]
@@ -471,9 +477,11 @@ mod tests {
         let mut steps = vec![step("a", &[])];
         steps[0].prompt_template = "Use {{nonexistent.output}}".to_string();
         let errors = validate_workflow(&steps);
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::InvalidVariableRef { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidVariableRef { .. }))
+        );
     }
 
     #[test]
@@ -561,9 +569,11 @@ mod tests {
         let mut steps = vec![step("a", &[])];
         steps[0].else_step = Some("nonexistent".to_string());
         let errors = validate_workflow(&steps);
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::InvalidElseStep { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidElseStep { .. }))
+        );
     }
 
     #[test]

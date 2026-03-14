@@ -275,7 +275,10 @@ mod tests {
     fn test_store_unicode_value() {
         let mut vault = CredentialVault::new();
         vault.store("unicode", "日本語テスト 🔑").unwrap();
-        assert_eq!(vault.retrieve("unicode").unwrap(), Some("日本語テスト 🔑".to_string()));
+        assert_eq!(
+            vault.retrieve("unicode").unwrap(),
+            Some("日本語テスト 🔑".to_string())
+        );
     }
 
     #[test]

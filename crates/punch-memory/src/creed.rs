@@ -51,9 +51,7 @@ impl MemorySubstrate {
             .prepare("SELECT creed_data FROM creeds WHERE fighter_name = ?1")
             .map_err(|e| PunchError::Memory(format!("failed to prepare creed query: {e}")))?;
 
-        let result: Option<String> = stmt
-            .query_row([fighter_name], |row| row.get(0))
-            .ok();
+        let result: Option<String> = stmt.query_row([fighter_name], |row| row.get(0)).ok();
 
         match result {
             Some(data) => {
@@ -66,16 +64,17 @@ impl MemorySubstrate {
     }
 
     /// Load a creed by fighter ID. Returns None if no creed exists.
-    pub async fn load_creed_by_fighter(&self, fighter_id: &FighterId) -> PunchResult<Option<Creed>> {
+    pub async fn load_creed_by_fighter(
+        &self,
+        fighter_id: &FighterId,
+    ) -> PunchResult<Option<Creed>> {
         let fighter_str = fighter_id.to_string();
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare("SELECT creed_data FROM creeds WHERE fighter_id = ?1")
             .map_err(|e| PunchError::Memory(format!("failed to prepare creed query: {e}")))?;
 
-        let result: Option<String> = stmt
-            .query_row([&fighter_str], |row| row.get(0))
-            .ok();
+        let result: Option<String> = stmt.query_row([&fighter_str], |row| row.get(0)).ok();
 
         match result {
             Some(data) => {
@@ -114,17 +113,18 @@ impl MemorySubstrate {
     /// Delete a creed by fighter name.
     pub async fn delete_creed(&self, fighter_name: &str) -> PunchResult<()> {
         let conn = self.conn.lock().await;
-        conn.execute(
-            "DELETE FROM creeds WHERE fighter_name = ?1",
-            [fighter_name],
-        )
-        .map_err(|e| PunchError::Memory(format!("failed to delete creed: {e}")))?;
+        conn.execute("DELETE FROM creeds WHERE fighter_name = ?1", [fighter_name])
+            .map_err(|e| PunchError::Memory(format!("failed to delete creed: {e}")))?;
         debug!(fighter_name = fighter_name, "creed deleted");
         Ok(())
     }
 
     /// Bind a creed to a specific fighter instance (after spawn/respawn).
-    pub async fn bind_creed_to_fighter(&self, fighter_name: &str, fighter_id: &FighterId) -> PunchResult<()> {
+    pub async fn bind_creed_to_fighter(
+        &self,
+        fighter_name: &str,
+        fighter_id: &FighterId,
+    ) -> PunchResult<()> {
         let fighter_str = fighter_id.to_string();
         let conn = self.conn.lock().await;
         conn.execute(
@@ -191,7 +191,11 @@ mod tests {
         creed.bout_count = 5;
         substrate.save_creed(&creed).await.unwrap();
 
-        let loaded = substrate.load_creed_by_name("charlie").await.unwrap().unwrap();
+        let loaded = substrate
+            .load_creed_by_name("charlie")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.identity, "evolved");
         assert_eq!(loaded.version, 2);
         assert_eq!(loaded.bout_count, 5);
@@ -219,11 +223,23 @@ mod tests {
         substrate.save_creed(&make_creed("golf")).await.unwrap();
 
         // Verify it exists.
-        assert!(substrate.load_creed_by_name("golf").await.unwrap().is_some());
+        assert!(
+            substrate
+                .load_creed_by_name("golf")
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // Delete it.
         substrate.delete_creed("golf").await.unwrap();
-        assert!(substrate.load_creed_by_name("golf").await.unwrap().is_none());
+        assert!(
+            substrate
+                .load_creed_by_name("golf")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -233,12 +249,19 @@ mod tests {
         substrate.save_creed(&creed).await.unwrap();
 
         // Initially no fighter_id.
-        let loaded = substrate.load_creed_by_name("hotel").await.unwrap().unwrap();
+        let loaded = substrate
+            .load_creed_by_name("hotel")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(loaded.fighter_id.is_none());
 
         // Bind to a fighter.
         let fighter_id = FighterId::new();
-        substrate.bind_creed_to_fighter("hotel", &fighter_id).await.unwrap();
+        substrate
+            .bind_creed_to_fighter("hotel", &fighter_id)
+            .await
+            .unwrap();
 
         // The creed_data JSON is not updated by bind, only the fighter_id column.
         // So load_creed_by_fighter should find it via the index column.
@@ -253,7 +276,10 @@ mod tests {
         let by_name = substrate.load_creed_by_name("nonexistent").await.unwrap();
         assert!(by_name.is_none());
 
-        let by_id = substrate.load_creed_by_fighter(&FighterId::new()).await.unwrap();
+        let by_id = substrate
+            .load_creed_by_fighter(&FighterId::new())
+            .await
+            .unwrap();
         assert!(by_id.is_none());
     }
 }

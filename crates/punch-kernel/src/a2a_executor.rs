@@ -152,9 +152,7 @@ impl A2ATaskExecutor {
 
     /// Returns `true` if the executor is currently running.
     pub fn is_running(&self) -> bool {
-        self.handle
-            .as_ref()
-            .is_some_and(|h| !h.is_finished())
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 }
 
@@ -439,7 +437,9 @@ mod tests {
         }
 
         let entry = tasks.get("task-003").unwrap();
-        assert!(matches!(entry.status, A2ATaskStatus::Failed(ref msg) if msg.contains("LLM provider")));
+        assert!(
+            matches!(entry.status, A2ATaskStatus::Failed(ref msg) if msg.contains("LLM provider"))
+        );
     }
 
     #[test]
@@ -838,7 +838,10 @@ mod tests {
     #[test]
     fn test_task_removal() {
         let tasks: Arc<DashMap<String, A2ATask>> = Arc::new(DashMap::new());
-        tasks.insert("rm-task".to_string(), make_task("rm-task", A2ATaskStatus::Completed));
+        tasks.insert(
+            "rm-task".to_string(),
+            make_task("rm-task", A2ATaskStatus::Completed),
+        );
 
         assert!(tasks.contains_key("rm-task"));
         tasks.remove("rm-task");

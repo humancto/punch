@@ -141,10 +141,11 @@ async fn test_lookup_by_api_key() {
     assert_eq!(found.unwrap().id, tenant.id);
 
     // Invalid key returns None.
-    assert!(ring
-        .tenant_registry()
-        .get_tenant_by_api_key("invalid-key")
-        .is_none());
+    assert!(
+        ring.tenant_registry()
+            .get_tenant_by_api_key("invalid-key")
+            .is_none()
+    );
 }
 
 #[tokio::test]

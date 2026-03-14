@@ -37,18 +37,14 @@ pub async fn metrics_middleware(
     let method = request.method().to_string();
 
     // Track active requests.
-    state
-        .registry
-        .gauge_inc("punch_active_requests");
+    state.registry.gauge_inc("punch_active_requests");
 
     let start = Instant::now();
     let response = next.run(request).await;
     let duration = start.elapsed().as_secs_f64();
 
     // Decrement active requests.
-    state
-        .registry
-        .gauge_dec("punch_active_requests");
+    state.registry.gauge_dec("punch_active_requests");
 
     let status = response.status().as_u16().to_string();
 

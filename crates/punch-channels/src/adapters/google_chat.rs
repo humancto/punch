@@ -108,7 +108,11 @@ impl GoogleChatAdapter {
             .unwrap_or(false);
 
         let mut metadata = HashMap::new();
-        if let Some(thread) = message.get("thread").and_then(|t| t.get("name")).and_then(|v| v.as_str()) {
+        if let Some(thread) = message
+            .get("thread")
+            .and_then(|t| t.get("name"))
+            .and_then(|v| v.as_str())
+        {
             metadata.insert(
                 "thread_name".to_string(),
                 serde_json::Value::String(thread.to_string()),
@@ -210,10 +214,7 @@ mod tests {
     use super::*;
 
     fn make_adapter() -> GoogleChatAdapter {
-        GoogleChatAdapter::new(
-            "ya29.test-token".to_string(),
-            "spaces/AAAA".to_string(),
-        )
+        GoogleChatAdapter::new("ya29.test-token".to_string(), "spaces/AAAA".to_string())
     }
 
     #[test]

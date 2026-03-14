@@ -202,11 +202,7 @@ impl MessageRouter {
     }
 
     /// Respond to a request message.
-    pub fn respond(
-        &self,
-        original_msg_id: &Uuid,
-        response: AgentMessage,
-    ) -> PunchResult<()> {
+    pub fn respond(&self, original_msg_id: &Uuid, response: AgentMessage) -> PunchResult<()> {
         let (_, tx) = self
             .pending_requests
             .remove(original_msg_id)
