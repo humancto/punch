@@ -64,6 +64,7 @@ pub fn fighter_manifest_from_gorilla(
         system_prompt,
         capabilities,
         weight_class,
+        tenant_id: None,
     }
 }
 

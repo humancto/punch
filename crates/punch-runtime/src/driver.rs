@@ -84,6 +84,50 @@ pub struct CompletionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Think-tag stripping
+// ---------------------------------------------------------------------------
+
+/// Strip reasoning/thinking tags from LLM responses.
+///
+/// Many reasoning models (Qwen, DeepSeek, etc.) wrap internal chain-of-thought
+/// in `<think>...</think>`, `<thinking>...</thinking>`, or `<reasoning>...</reasoning>`
+/// tags. This function extracts only the visible output.
+///
+/// If the entire response is inside think tags (no visible output), returns
+/// the original content unchanged so the user still sees something.
+pub fn strip_thinking_tags(content: &str) -> String {
+    let mut result = content.to_string();
+
+    // Strip all known thinking tag variants
+    for tag in &["think", "thinking", "reasoning", "reflection"] {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+
+        // Remove all occurrences of <tag>...</tag> blocks
+        while let Some(start) = result.find(&open) {
+            if let Some(end) = result[start..].find(&close) {
+                let block_end = start + end + close.len();
+                result = format!("{}{}", &result[..start], &result[block_end..]);
+            } else {
+                // Unclosed tag — remove from open tag to end
+                result = result[..start].to_string();
+                break;
+            }
+        }
+    }
+
+    let trimmed = result.trim().to_string();
+
+    // If stripping removed everything, return original content
+    // (the model used all tokens for thinking)
+    if trimmed.is_empty() {
+        content.to_string()
+    } else {
+        trimmed
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
 
@@ -120,6 +164,17 @@ impl AnthropicDriver {
     pub fn new(api_key: String, base_url: Option<String>) -> Self {
         Self {
             client: Client::new(),
+            api_key,
+            base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+        }
+    }
+
+    /// Create a new Anthropic driver with a shared HTTP client.
+    ///
+    /// This allows connection pooling across all drivers.
+    pub fn with_client(client: Client, api_key: String, base_url: Option<String>) -> Self {
+        Self {
+            client,
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
         }
@@ -263,6 +318,9 @@ impl AnthropicDriver {
             }
         }
 
+        // Strip thinking tags from reasoning models
+        let text_content = strip_thinking_tags(&text_content);
+
         let message = Message {
             role: Role::Assistant,
             content: text_content,
@@ -363,6 +421,21 @@ impl OpenAiCompatibleDriver {
     pub fn new(api_key: String, base_url: String, provider_name: String) -> Self {
         Self {
             client: Client::new(),
+            api_key,
+            base_url,
+            provider_name,
+        }
+    }
+
+    /// Create a new OpenAI-compatible driver with a shared HTTP client.
+    pub fn with_client(
+        client: Client,
+        api_key: String,
+        base_url: String,
+        provider_name: String,
+    ) -> Self {
+        Self {
+            client,
             api_key,
             base_url,
             provider_name,
@@ -486,7 +559,9 @@ impl OpenAiCompatibleDriver {
         };
 
         let msg = &choice["message"];
-        let content = msg["content"].as_str().unwrap_or("").to_string();
+        let raw_content = msg["content"].as_str().unwrap_or("");
+        // Strip thinking tags from reasoning models (Qwen, DeepSeek R1, etc.)
+        let content = strip_thinking_tags(raw_content);
 
         let mut tool_calls = Vec::new();
         if let Some(tc_array) = msg["tool_calls"].as_array() {
@@ -614,6 +689,16 @@ impl GeminiDriver {
     pub fn new(api_key: String, base_url: Option<String>) -> Self {
         Self {
             client: Client::new(),
+            api_key,
+            base_url: base_url
+                .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string()),
+        }
+    }
+
+    /// Create a new Gemini driver with a shared HTTP client.
+    pub fn with_client(client: Client, api_key: String, base_url: Option<String>) -> Self {
+        Self {
+            client,
             api_key,
             base_url: base_url
                 .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string()),
@@ -798,6 +883,9 @@ impl GeminiDriver {
                 .unwrap_or(0),
         };
 
+        // Strip thinking tags from reasoning models
+        let text_content = strip_thinking_tags(&text_content);
+
         let message = Message {
             role: Role::Assistant,
             content: text_content,
@@ -882,6 +970,14 @@ impl OllamaDriver {
     pub fn new(base_url: Option<String>) -> Self {
         Self {
             client: Client::new(),
+            base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
+        }
+    }
+
+    /// Create a new Ollama driver with a shared HTTP client.
+    pub fn with_client(client: Client, base_url: Option<String>) -> Self {
+        Self {
+            client,
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
         }
     }
@@ -988,7 +1084,9 @@ impl OllamaDriver {
     /// Parse the Ollama chat response.
     pub fn parse_response(&self, body: &serde_json::Value) -> PunchResult<CompletionResponse> {
         let msg = &body["message"];
-        let content = msg["content"].as_str().unwrap_or("").to_string();
+        let raw_content = msg["content"].as_str().unwrap_or("");
+        // Strip thinking tags from reasoning models (Qwen, DeepSeek, etc.)
+        let content = strip_thinking_tags(raw_content);
 
         let mut tool_calls = Vec::new();
         if let Some(tc_array) = msg["tool_calls"].as_array() {
@@ -1091,6 +1189,21 @@ impl BedrockDriver {
     pub fn new(access_key: String, secret_key: String, region: String) -> Self {
         Self {
             client: Client::new(),
+            access_key,
+            secret_key,
+            region,
+        }
+    }
+
+    /// Create a new Bedrock driver with a shared HTTP client.
+    pub fn with_client(
+        client: Client,
+        access_key: String,
+        secret_key: String,
+        region: String,
+    ) -> Self {
+        Self {
+            client,
             access_key,
             secret_key,
             region,
@@ -1239,6 +1352,9 @@ impl BedrockDriver {
             input_tokens: body["usage"]["inputTokens"].as_u64().unwrap_or(0),
             output_tokens: body["usage"]["outputTokens"].as_u64().unwrap_or(0),
         };
+
+        // Strip thinking tags from reasoning models
+        let text_content = strip_thinking_tags(&text_content);
 
         let message = Message {
             role: Role::Assistant,
@@ -1470,6 +1586,28 @@ impl AzureOpenAiDriver {
         }
     }
 
+    /// Create a new Azure OpenAI driver with a shared HTTP client.
+    pub fn with_client(
+        client: Client,
+        api_key: String,
+        resource: String,
+        deployment: String,
+        api_version: Option<String>,
+    ) -> Self {
+        let base_url = format!("https://{}.openai.azure.com", resource);
+        Self {
+            inner: OpenAiCompatibleDriver::with_client(
+                client,
+                api_key,
+                base_url,
+                "azure_openai".to_string(),
+            ),
+            resource,
+            deployment,
+            api_version: api_version.unwrap_or_else(|| "2024-02-01".to_string()),
+        }
+    }
+
     /// Build the Azure OpenAI endpoint URL.
     pub fn build_url(&self) -> String {
         format!(
@@ -1592,7 +1730,19 @@ fn default_base_url(provider: &Provider) -> &'static str {
 /// Reads the API key from the environment variable specified in
 /// `config.api_key_env`. Returns an error if the env var is missing
 /// (except for Ollama which does not require auth).
+/// Create a driver from config, optionally using a shared HTTP client.
+///
+/// If `shared_client` is `Some`, the driver will use that client for
+/// connection pooling. Otherwise it creates its own client (backward compat).
 pub fn create_driver(config: &ModelConfig) -> PunchResult<Arc<dyn LlmDriver>> {
+    create_driver_with_client(config, None)
+}
+
+/// Create a driver from config with an optional shared [`reqwest::Client`].
+pub fn create_driver_with_client(
+    config: &ModelConfig,
+    shared_client: Option<&Client>,
+) -> PunchResult<Arc<dyn LlmDriver>> {
     let api_key = match &config.api_key_env {
         Some(env_var) => std::env::var(env_var).map_err(|_| {
             PunchError::Auth(format!(
@@ -1612,9 +1762,38 @@ pub fn create_driver(config: &ModelConfig) -> PunchResult<Arc<dyn LlmDriver>> {
         .unwrap_or_else(|| default_base_url(&config.provider).to_string());
 
     match &config.provider {
-        Provider::Anthropic => Ok(Arc::new(AnthropicDriver::new(api_key, Some(base_url)))),
-        Provider::Google => Ok(Arc::new(GeminiDriver::new(api_key, Some(base_url)))),
-        Provider::Ollama => Ok(Arc::new(OllamaDriver::new(Some(base_url)))),
+        Provider::Anthropic => {
+            if let Some(client) = shared_client {
+                Ok(Arc::new(AnthropicDriver::with_client(
+                    client.clone(),
+                    api_key,
+                    Some(base_url),
+                )))
+            } else {
+                Ok(Arc::new(AnthropicDriver::new(api_key, Some(base_url))))
+            }
+        }
+        Provider::Google => {
+            if let Some(client) = shared_client {
+                Ok(Arc::new(GeminiDriver::with_client(
+                    client.clone(),
+                    api_key,
+                    Some(base_url),
+                )))
+            } else {
+                Ok(Arc::new(GeminiDriver::new(api_key, Some(base_url))))
+            }
+        }
+        Provider::Ollama => {
+            if let Some(client) = shared_client {
+                Ok(Arc::new(OllamaDriver::with_client(
+                    client.clone(),
+                    Some(base_url),
+                )))
+            } else {
+                Ok(Arc::new(OllamaDriver::new(Some(base_url))))
+            }
+        }
         Provider::Bedrock => {
             // For Bedrock, api_key is expected to be "ACCESS_KEY:SECRET_KEY" or
             // we read AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from env.
@@ -1637,7 +1816,16 @@ pub fn create_driver(config: &ModelConfig) -> PunchResult<Arc<dyn LlmDriver>> {
             } else {
                 "us-east-1".to_string()
             };
-            Ok(Arc::new(BedrockDriver::new(access_key, secret_key, region)))
+            if let Some(client) = shared_client {
+                Ok(Arc::new(BedrockDriver::with_client(
+                    client.clone(),
+                    access_key,
+                    secret_key,
+                    region,
+                )))
+            } else {
+                Ok(Arc::new(BedrockDriver::new(access_key, secret_key, region)))
+            }
         }
         Provider::AzureOpenAi => {
             // For Azure, base_url should be "https://{resource}.openai.azure.com"
@@ -1653,18 +1841,37 @@ pub fn create_driver(config: &ModelConfig) -> PunchResult<Arc<dyn LlmDriver>> {
                 base_url.clone()
             };
             let deployment = config.model.clone();
-            Ok(Arc::new(AzureOpenAiDriver::new(
-                api_key,
-                resource,
-                deployment,
-                None,
-            )))
+            if let Some(client) = shared_client {
+                Ok(Arc::new(AzureOpenAiDriver::with_client(
+                    client.clone(),
+                    api_key,
+                    resource,
+                    deployment,
+                    None,
+                )))
+            } else {
+                Ok(Arc::new(AzureOpenAiDriver::new(
+                    api_key,
+                    resource,
+                    deployment,
+                    None,
+                )))
+            }
         }
         provider => {
             let name = provider.to_string();
-            Ok(Arc::new(OpenAiCompatibleDriver::new(
-                api_key, base_url, name,
-            )))
+            if let Some(client) = shared_client {
+                Ok(Arc::new(OpenAiCompatibleDriver::with_client(
+                    client.clone(),
+                    api_key,
+                    base_url,
+                    name,
+                )))
+            } else {
+                Ok(Arc::new(OpenAiCompatibleDriver::new(
+                    api_key, base_url, name,
+                )))
+            }
         }
     }
 }
@@ -2824,5 +3031,165 @@ mod tests {
         let result = create_driver(&config);
         assert!(result.is_ok());
         unsafe { std::env::remove_var("TEST_CUSTOM_KEY_DRIVER") };
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_thinking_tags tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn strip_thinking_tags_removes_think_block() {
+        let input = "<think>internal reasoning here</think>The answer is 42.";
+        assert_eq!(strip_thinking_tags(input), "The answer is 42.");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_thinking_block() {
+        let input = "<thinking>step by step reasoning</thinking>Hello world!";
+        assert_eq!(strip_thinking_tags(input), "Hello world!");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_reasoning_block() {
+        let input = "<reasoning>let me figure this out</reasoning>The result is correct.";
+        assert_eq!(strip_thinking_tags(input), "The result is correct.");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_reflection_block() {
+        let input = "<reflection>checking my work</reflection>Yes, that's right.";
+        assert_eq!(strip_thinking_tags(input), "Yes, that's right.");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_multiple_blocks() {
+        let input = "<think>first thought</think>Hello <thinking>second thought</thinking>world!";
+        assert_eq!(strip_thinking_tags(input), "Hello world!");
+    }
+
+    #[test]
+    fn strip_thinking_tags_preserves_content_without_tags() {
+        let input = "Just a normal response with no thinking tags.";
+        assert_eq!(strip_thinking_tags(input), input);
+    }
+
+    #[test]
+    fn strip_thinking_tags_handles_multiline_tags() {
+        let input = "<think>\nLine 1\nLine 2\nLine 3\n</think>\nThe final answer.";
+        assert_eq!(strip_thinking_tags(input), "The final answer.");
+    }
+
+    #[test]
+    fn strip_thinking_tags_returns_original_if_all_thinking() {
+        // If the entire response is thinking with no visible output,
+        // return the original so the user sees something.
+        let input = "<think>this is all thinking content and nothing else</think>";
+        assert_eq!(strip_thinking_tags(input), input);
+    }
+
+    #[test]
+    fn strip_thinking_tags_handles_unclosed_tag() {
+        let input = "Some text<think>unclosed thinking block";
+        assert_eq!(strip_thinking_tags(input), "Some text");
+    }
+
+    #[test]
+    fn strip_thinking_tags_handles_empty_input() {
+        assert_eq!(strip_thinking_tags(""), "");
+    }
+
+    #[test]
+    fn strip_thinking_tags_handles_empty_think_block() {
+        let input = "<think></think>Visible content.";
+        assert_eq!(strip_thinking_tags(input), "Visible content.");
+    }
+
+    #[test]
+    fn strip_thinking_tags_trims_whitespace() {
+        let input = "  <think>reasoning</think>  Result  ";
+        assert_eq!(strip_thinking_tags(input), "Result");
+    }
+
+    #[test]
+    fn strip_thinking_tags_mixed_tag_types() {
+        let input = "<think>t1</think>A<reasoning>r1</reasoning>B<reflection>f1</reflection>C";
+        assert_eq!(strip_thinking_tags(input), "ABC");
+    }
+
+    #[test]
+    fn ollama_response_strips_thinking_tags() {
+        let driver = OllamaDriver::new(None);
+        let response_body = serde_json::json!({
+            "message": {
+                "role": "assistant",
+                "content": "<think>\nLet me think about this...\nThe user wants hello world.\n</think>\nHello, world!"
+            },
+            "done": true,
+            "prompt_eval_count": 20,
+            "eval_count": 50
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Hello, world!");
+        assert!(!resp.message.content.contains("<think>"));
+    }
+
+    #[test]
+    fn gemini_response_strips_thinking_tags() {
+        let driver = GeminiDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "<thinking>reasoning step</thinking>The answer is 7."}],
+                    "role": "model"
+                },
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 20
+            }
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "The answer is 7.");
+        assert!(!resp.message.content.contains("<thinking>"));
+    }
+
+    #[test]
+    fn anthropic_response_strips_thinking_tags() {
+        let driver = AnthropicDriver::new("test-key".to_string(), None);
+        let response_body = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "<think>internal thought</think>Clean output."}
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 5}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Clean output.");
+    }
+
+    #[test]
+    fn bedrock_response_strips_thinking_tags() {
+        let driver = BedrockDriver::new(
+            "key".to_string(),
+            "secret".to_string(),
+            "us-east-1".to_string(),
+        );
+        let response_body = serde_json::json!({
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": "<reasoning>deep thought</reasoning>Result here."}]
+                }
+            },
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 50, "outputTokens": 25}
+        });
+
+        let resp = driver.parse_response(&response_body).unwrap();
+        assert_eq!(resp.message.content, "Result here.");
     }
 }

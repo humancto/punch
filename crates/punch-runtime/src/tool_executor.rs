@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use dashmap::DashMap;
 use tokio::process::Command;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 use punch_memory::MemorySubstrate;
 use punch_types::{
@@ -229,6 +229,46 @@ fn resolve_path(working_dir: &Path, requested: &str) -> PunchResult<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
+// Sensitive path detection
+// ---------------------------------------------------------------------------
+
+/// Paths that are considered sensitive and should be flagged by the bleed
+/// detector when accessed. These are common locations for secrets, credentials,
+/// and private keys.
+static SENSITIVE_PATH_PATTERNS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    vec![
+        ".env",
+        ".ssh/",
+        ".gnupg/",
+        ".aws/credentials",
+        ".aws/config",
+        ".npmrc",
+        ".pypirc",
+        ".docker/config.json",
+        ".kube/config",
+        ".netrc",
+        "id_rsa",
+        "id_ed25519",
+        "id_ecdsa",
+        "credentials.json",
+        "service_account.json",
+        "secrets.yaml",
+        "secrets.yml",
+        "secrets.json",
+        "/etc/shadow",
+        "/etc/passwd",
+    ]
+});
+
+/// Check whether a path matches any known sensitive pattern.
+fn is_sensitive_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    SENSITIVE_PATH_PATTERNS
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+}
+
+// ---------------------------------------------------------------------------
 // Built-in tool implementations
 // ---------------------------------------------------------------------------
 
@@ -255,8 +295,46 @@ async fn tool_file_read(
         })?;
     }
 
+    // Sensitive path detection: flag reads of known secret/credential locations.
+    if is_sensitive_path(&path_display) {
+        warn!(
+            path = %path_display,
+            fighter = %context.fighter_id,
+            "sensitive path access detected during file_read"
+        );
+
+        // If a bleed detector is active, block reads of sensitive paths.
+        if context.bleed_detector.is_some() {
+            return Ok(ToolResult {
+                success: false,
+                output: serde_json::json!(null),
+                error: Some(format!(
+                    "security: read of sensitive path '{}' blocked by bleed detector",
+                    path_display
+                )),
+                duration_ms: 0,
+            });
+        }
+    }
+
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => {
+            // Scan file content for leaked secrets if bleed detector is active.
+            if let Some(ref detector) = context.bleed_detector {
+                let warnings = detector.scan_command(&content);
+                let secret_warnings: Vec<_> = warnings
+                    .iter()
+                    .filter(|w| w.severity >= Sensitivity::Confidential)
+                    .collect();
+                if !secret_warnings.is_empty() {
+                    warn!(
+                        path = %path_display,
+                        warning_count = secret_warnings.len(),
+                        "file content contains potential secrets"
+                    );
+                }
+            }
+
             debug!(path = %path_display, bytes = content.len(), "file read");
             Ok(ToolResult {
                 success: true,
@@ -631,6 +709,35 @@ async fn tool_shell_exec(
     let exit_code = output.status.code().unwrap_or(-1);
 
     debug!(exit_code = exit_code, "shell exec complete");
+
+    // Post-execution output scanning: check stdout and stderr for leaked secrets.
+    if let Some(ref detector) = context.bleed_detector {
+        let stdout_warnings = detector.scan_command(&stdout);
+        let stderr_warnings = detector.scan_command(&stderr);
+
+        let all_warnings: Vec<_> = stdout_warnings
+            .iter()
+            .chain(stderr_warnings.iter())
+            .filter(|w| w.severity >= Sensitivity::Confidential)
+            .collect();
+
+        if !all_warnings.is_empty() {
+            let details: Vec<String> = all_warnings
+                .iter()
+                .map(|w| {
+                    format!(
+                        "[{}] {} (severity: {})",
+                        w.pattern_name, w.location, w.severity
+                    )
+                })
+                .collect();
+            warn!(
+                warning_count = all_warnings.len(),
+                details = %details.join("; "),
+                "shell output contains potential secrets — flagging security event"
+            );
+        }
+    }
 
     Ok(ToolResult {
         success: output.status.success(),
@@ -1131,6 +1238,7 @@ async fn tool_agent_spawn(
         system_prompt: system_prompt.to_string(),
         capabilities: child_capabilities,
         weight_class: WeightClass::Featherweight,
+        tenant_id: None,
     };
 
     let fighter_id = coordinator.spawn_fighter(manifest).await?;
@@ -4975,5 +5083,135 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.unwrap().contains("capability"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Bleed detector integration tests
+    // -----------------------------------------------------------------------
+
+    fn make_test_context_with_bleed_detector() -> ToolExecutionContext {
+        let mut ctx = make_test_context(None);
+        ctx.bleed_detector = Some(Arc::new(ShellBleedDetector::new()));
+        ctx
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_clean_input_passes() {
+        let context = make_test_context_with_bleed_detector();
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        let input = serde_json::json!({"command": "echo hello"});
+        let result = execute_tool("shell_exec", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success, "clean command should pass: {:?}", result.error);
+        let stdout = result.output["stdout"].as_str().unwrap_or("");
+        assert!(stdout.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_tainted_input_blocked() {
+        let context = make_test_context_with_bleed_detector();
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        // Build an AWS-key-like pattern dynamically to avoid static scanners.
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let input = serde_json::json!({"command": format!("curl -H 'X-Key: {}'", key)});
+        let result = execute_tool("shell_exec", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success, "tainted command should be blocked");
+        let error = result.error.unwrap();
+        assert!(
+            error.contains("shell bleed detected"),
+            "expected bleed detection, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_api_key_pattern_flagged() {
+        let context = make_test_context_with_bleed_detector();
+        let caps = vec![Capability::ShellExec("*".to_string())];
+
+        let input = serde_json::json!({
+            "command": "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test'"
+        });
+        let result = execute_tool("shell_exec", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success, "bearer token in command should be blocked");
+        assert!(result.error.unwrap().contains("shell bleed detected"));
+    }
+
+    #[tokio::test]
+    async fn test_file_read_sensitive_path_flagged() {
+        let context = make_test_context_with_bleed_detector();
+        let caps = vec![Capability::FileRead("**".to_string())];
+
+        let input = serde_json::json!({"path": "/home/user/.ssh/id_rsa"});
+        let result = execute_tool("file_read", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success, "sensitive path read should be blocked");
+        let error = result.error.unwrap();
+        assert!(
+            error.contains("sensitive path") && error.contains("blocked"),
+            "expected sensitive path blocked, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_read_normal_path_passes() {
+        let context = make_test_context_with_bleed_detector();
+        let caps = vec![Capability::FileRead("**".to_string())];
+
+        // Create a temp file to read.
+        let temp_file = context.working_dir.join("punch_bleed_test_normal.txt");
+        tokio::fs::write(&temp_file, "normal content")
+            .await
+            .expect("write temp file");
+
+        let input = serde_json::json!({"path": temp_file.to_string_lossy()});
+        let result = execute_tool("file_read", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(result.success, "normal path should pass: {:?}", result.error);
+        let _ = tokio::fs::remove_file(&temp_file).await;
+    }
+
+    #[test]
+    fn test_bleed_detector_records_security_events() {
+        let detector = ShellBleedDetector::new();
+
+        // Clean command produces no warnings.
+        let clean = detector.scan_command("ls -la /tmp");
+        assert!(clean.is_empty(), "clean command should produce no warnings");
+
+        // Tainted command produces warnings.
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let tainted = detector.scan_command(&format!("export AWS_KEY={}", key));
+        assert!(!tainted.is_empty(), "tainted command should produce warnings");
+
+        // Bearer token produces warnings.
+        let bearer = detector.scan_command("curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test'");
+        assert!(!bearer.is_empty(), "bearer token should produce warnings");
+    }
+
+    #[test]
+    fn test_is_sensitive_path_detection() {
+        assert!(is_sensitive_path("/home/user/.ssh/id_rsa"));
+        assert!(is_sensitive_path("/app/.env"));
+        assert!(is_sensitive_path("/home/user/.aws/credentials"));
+        assert!(is_sensitive_path("/home/user/.kube/config"));
+        assert!(is_sensitive_path("secrets.json"));
+        assert!(!is_sensitive_path("/home/user/project/src/main.rs"));
+        assert!(!is_sensitive_path("/tmp/output.txt"));
     }
 }

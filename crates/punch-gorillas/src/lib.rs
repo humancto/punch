@@ -5,6 +5,14 @@
 //! Gorillas are autonomous agents that run on schedules without direct user
 //! interaction. They perform tasks like research, lead generation, monitoring,
 //! forecasting, and content creation.
+//!
+//! ## Modules
+//!
+//! - [`scheduler`] — Cron-based scheduling with priority queue
+//! - [`executor`] — Execution engine with lifecycle, retries, circuit breaker
+//! - [`tasks`] — Task queue with priorities, deduplication, dependencies
+//! - [`triggers`] — Event-driven gorilla activation (cron, webhook, file, message, chain)
+//! - [`runners`] — Built-in gorilla implementations (health monitor, data sweeper, reports)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +26,12 @@ use tracing::info;
 use punch_memory::MemorySubstrate;
 use punch_runtime::LlmDriver;
 use punch_types::{GorillaId, GorillaManifest, GorillaStatus, PunchError, PunchResult};
+
+pub mod executor;
+pub mod runners;
+pub mod scheduler;
+pub mod tasks;
+pub mod triggers;
 
 // ---------------------------------------------------------------------------
 // Core types

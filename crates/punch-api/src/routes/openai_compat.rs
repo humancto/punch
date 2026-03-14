@@ -494,6 +494,7 @@ async fn chat_completions(
             },
             capabilities: vec![],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         };
         state.ring.spawn_fighter(manifest).await
     };

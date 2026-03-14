@@ -1,14 +1,19 @@
 //! Route module organisation for The Arena API.
 
 pub mod a2a;
+pub mod budget;
 pub mod channels;
 pub mod chat;
 pub mod dashboard;
+pub mod docs;
 pub mod fighters;
 pub mod gorillas;
 pub mod health;
+pub mod metrics;
 pub mod openai_compat;
+pub mod tenants;
 pub mod triggers;
+pub mod troops;
 pub mod workflows;
 
 use axum::Router;
@@ -25,6 +30,11 @@ pub fn api_router() -> Router<AppState> {
         .merge(workflows::router())
         .merge(channels::router())
         .merge(triggers::router())
+        .merge(troops::router())
         .merge(dashboard::dashboard_router())
+        .merge(metrics::router())
         .merge(a2a::router())
+        .merge(budget::router())
+        .merge(tenants::router())
+        .merge(docs::router())
 }

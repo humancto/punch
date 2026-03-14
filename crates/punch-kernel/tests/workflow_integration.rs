@@ -495,7 +495,7 @@ async fn test_workflow_skip_step_with_recovery() {
         async fn complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
             let count = self.call_count.fetch_add(1, Ordering::SeqCst);
 
-            if count % 2 == 0 {
+            if count.is_multiple_of(2) {
                 // Fail on even calls (0, 2, 4...)
                 Err(punch_types::PunchError::Provider {
                     provider: "mock".to_string(),

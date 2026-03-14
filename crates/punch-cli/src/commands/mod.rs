@@ -1,6 +1,7 @@
 //! CLI command implementations.
 
 pub mod channel;
+pub mod chat;
 pub mod config;
 pub mod desktop;
 pub mod fighter;
@@ -11,6 +12,7 @@ pub mod start;
 pub mod status;
 pub mod trigger;
 pub mod tui;
+pub mod version;
 #[allow(dead_code)]
 pub mod webview;
 pub mod workflow;

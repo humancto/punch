@@ -16,7 +16,8 @@ use punch_types::a2a::A2ARegistry;
 use punch_types::{PunchConfig, PunchResult};
 
 use crate::AppState;
-use crate::middleware::auth::auth_middleware;
+use crate::middleware::auth::{auth_middleware, tenant_auth_middleware};
+use crate::middleware::metrics::{MetricsMiddlewareState, metrics_middleware};
 use crate::middleware::rate_limit::{RateLimiterState, rate_limit_middleware};
 use crate::routes;
 use crate::routes::a2a::A2AState;
@@ -80,9 +81,16 @@ pub async fn start_arena(ring: Arc<Ring>, config: &PunchConfig) -> PunchResult<(
 pub fn build_router(state: AppState, api_key: &str, rate_limit_rpm: u32) -> Router {
     let api = routes::api_router();
     let rate_limiter = RateLimiterState::new(rate_limit_rpm);
+    let metrics_state = MetricsMiddlewareState {
+        registry: Arc::clone(state.ring.metrics()),
+    };
 
     Router::new()
         .merge(api)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            tenant_auth_middleware,
+        ))
         .layer(middleware::from_fn_with_state(
             api_key.to_string(),
             auth_middleware,
@@ -90,6 +98,10 @@ pub fn build_router(state: AppState, api_key: &str, rate_limit_rpm: u32) -> Rout
         .layer(middleware::from_fn_with_state(
             rate_limiter,
             rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            metrics_state,
+            metrics_middleware,
         ))
         .layer(middleware::from_fn(security_headers))
         .layer(CompressionLayer::new())

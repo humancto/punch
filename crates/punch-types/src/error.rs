@@ -13,6 +13,15 @@ pub enum PunchError {
     #[error("gorilla error: {0}")]
     Gorilla(String),
 
+    #[error("troop error: {0}")]
+    Troop(String),
+
+    #[error("tenant error: {0}")]
+    Tenant(String),
+
+    #[error("quota exceeded: {0}")]
+    QuotaExceeded(String),
+
     #[error("bout error: {0}")]
     Bout(String),
 

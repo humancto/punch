@@ -21,16 +21,23 @@ use punch_runtime::{
     FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities,
 };
 use punch_types::{
-    AgentCoordinator, AgentInfo, AgentMessageResult, FighterId, FighterManifest, FighterStatus,
-    GorillaId, GorillaManifest, GorillaMetrics, GorillaStatus, PunchConfig, PunchError, PunchEvent,
-    PunchResult,
+    AgentCoordinator, AgentInfo, AgentMessageResult, CoordinationStrategy, FighterId,
+    FighterManifest, FighterStatus, GorillaId, GorillaManifest, GorillaMetrics, GorillaStatus,
+    PunchConfig, PunchError, PunchEvent, PunchResult, TenantId, TenantStatus, Troop,
+    TroopId,
 };
 
+use crate::agent_messaging::MessageRouter;
 use crate::background::BackgroundExecutor;
+use crate::budget::BudgetEnforcer;
 use crate::event_bus::EventBus;
 use crate::metering::MeteringEngine;
+use crate::metrics::{self, MetricsRegistry};
 use crate::scheduler::{QuotaConfig, Scheduler};
+use crate::swarm::SwarmCoordinator;
 use crate::triggers::{Trigger, TriggerEngine, TriggerId, TriggerSummary};
+use crate::troop::TroopManager;
+use crate::tenant_registry::TenantRegistry;
 use crate::workflow::{Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 // ---------------------------------------------------------------------------
@@ -104,8 +111,20 @@ pub struct Ring {
     workflow_engine: WorkflowEngine,
     /// Cost tracking and metering engine.
     metering: MeteringEngine,
+    /// Budget enforcement layer (opt-in spending limits).
+    budget_enforcer: Arc<BudgetEnforcer>,
     /// Event-driven trigger engine.
     trigger_engine: TriggerEngine,
+    /// Troop manager for multi-agent coordination.
+    troop_manager: TroopManager,
+    /// Swarm coordinator for emergent behavior tasks.
+    swarm_coordinator: SwarmCoordinator,
+    /// Inter-agent message router.
+    message_router: MessageRouter,
+    /// Production observability metrics.
+    metrics: Arc<MetricsRegistry>,
+    /// Multi-tenant registry.
+    tenant_registry: TenantRegistry,
     /// Shutdown signal sender.
     shutdown_tx: watch::Sender<bool>,
     /// Shutdown signal receiver.
@@ -127,6 +146,10 @@ impl Ring {
         let background =
             BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
         let metering = MeteringEngine::new(Arc::clone(&memory));
+        let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
+        let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+        let metrics_registry = Arc::new(MetricsRegistry::new());
+        metrics::register_default_metrics(&metrics_registry);
 
         Self {
             fighters: DashMap::new(),
@@ -139,7 +162,13 @@ impl Ring {
             background,
             workflow_engine: WorkflowEngine::new(),
             metering,
+            budget_enforcer,
             trigger_engine: TriggerEngine::new(),
+            troop_manager: TroopManager::new(),
+            swarm_coordinator: SwarmCoordinator::new(),
+            message_router: MessageRouter::new(),
+            metrics: metrics_registry,
+            tenant_registry: TenantRegistry::new(),
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -156,6 +185,10 @@ impl Ring {
         let background =
             BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
         let metering = MeteringEngine::new(Arc::clone(&memory));
+        let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
+        let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+        let metrics_registry = Arc::new(MetricsRegistry::new());
+        metrics::register_default_metrics(&metrics_registry);
 
         Self {
             fighters: DashMap::new(),
@@ -168,7 +201,13 @@ impl Ring {
             background,
             workflow_engine: WorkflowEngine::new(),
             metering,
+            budget_enforcer,
             trigger_engine: TriggerEngine::new(),
+            troop_manager: TroopManager::new(),
+            swarm_coordinator: SwarmCoordinator::new(),
+            message_router: MessageRouter::new(),
+            metrics: metrics_registry,
+            tenant_registry: TenantRegistry::new(),
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -211,9 +250,123 @@ impl Ring {
         &self.metering
     }
 
+    /// Get a reference to the budget enforcer.
+    pub fn budget_enforcer(&self) -> &Arc<BudgetEnforcer> {
+        &self.budget_enforcer
+    }
+
     /// Get a reference to the trigger engine.
     pub fn trigger_engine(&self) -> &TriggerEngine {
         &self.trigger_engine
+    }
+
+    /// Get a reference to the metrics registry.
+    pub fn metrics(&self) -> &Arc<MetricsRegistry> {
+        &self.metrics
+    }
+
+    /// Get a reference to the tenant registry.
+    pub fn tenant_registry(&self) -> &TenantRegistry {
+        &self.tenant_registry
+    }
+
+    // -- Tenant-scoped operations --------------------------------------------
+
+    /// Spawn a fighter scoped to a tenant, enforcing quota limits.
+    ///
+    /// Returns an error if the tenant is suspended or the fighter quota is
+    /// exceeded.
+    #[instrument(skip(self, manifest), fields(fighter_name = %manifest.name))]
+    pub async fn spawn_fighter_for_tenant(
+        &self,
+        tenant_id: &TenantId,
+        mut manifest: FighterManifest,
+    ) -> PunchResult<FighterId> {
+        // Verify tenant exists and is active.
+        let tenant = self
+            .tenant_registry
+            .get_tenant(tenant_id)
+            .ok_or_else(|| PunchError::Tenant(format!("tenant {} not found", tenant_id)))?;
+
+        if tenant.status == TenantStatus::Suspended {
+            return Err(PunchError::Tenant(format!(
+                "tenant {} is suspended",
+                tenant_id
+            )));
+        }
+
+        // Check fighter quota.
+        let current_count = self
+            .fighters
+            .iter()
+            .filter(|e| e.value().manifest.tenant_id.as_ref() == Some(tenant_id))
+            .count();
+
+        if current_count >= tenant.quota.max_fighters {
+            return Err(PunchError::QuotaExceeded(format!(
+                "tenant {} has reached max fighters limit ({})",
+                tenant_id, tenant.quota.max_fighters
+            )));
+        }
+
+        // Stamp the manifest with the tenant ID.
+        manifest.tenant_id = Some(*tenant_id);
+        Ok(self.spawn_fighter(manifest).await)
+    }
+
+    /// List fighters that belong to a specific tenant.
+    pub fn list_fighters_for_tenant(
+        &self,
+        tenant_id: &TenantId,
+    ) -> Vec<(FighterId, FighterManifest, FighterStatus)> {
+        self.fighters
+            .iter()
+            .filter(|entry| entry.value().manifest.tenant_id.as_ref() == Some(tenant_id))
+            .map(|entry| {
+                let id = *entry.key();
+                let e = entry.value();
+                (id, e.manifest.clone(), e.status)
+            })
+            .collect()
+    }
+
+    /// Kill a fighter, validating that the caller tenant owns it.
+    ///
+    /// Returns an error if the fighter doesn't belong to the given tenant.
+    #[instrument(skip(self), fields(%fighter_id, %tenant_id))]
+    pub fn kill_fighter_for_tenant(
+        &self,
+        fighter_id: &FighterId,
+        tenant_id: &TenantId,
+    ) -> PunchResult<()> {
+        let entry = self.fighters.get(fighter_id).ok_or_else(|| {
+            PunchError::Fighter(format!("fighter {} not found", fighter_id))
+        })?;
+
+        if entry.manifest.tenant_id.as_ref() != Some(tenant_id) {
+            return Err(PunchError::Auth(format!(
+                "fighter {} does not belong to tenant {}",
+                fighter_id, tenant_id
+            )));
+        }
+
+        drop(entry);
+        self.kill_fighter(fighter_id);
+        Ok(())
+    }
+
+    /// Check whether a tenant's tool access is allowed for the given tool name.
+    ///
+    /// Returns `true` if the tenant has no tool restrictions (empty list) or
+    /// the tool is in the allowed list.
+    pub fn check_tenant_tool_access(&self, tenant_id: &TenantId, tool_name: &str) -> bool {
+        match self.tenant_registry.get_tenant(tenant_id) {
+            Some(tenant) => {
+                tenant.quota.max_tools.is_empty()
+                    || tenant.quota.max_tools.iter().any(|t| t == tool_name)
+            }
+            None => false,
+        }
     }
 
     // -- Trigger operations --------------------------------------------------
@@ -260,6 +413,11 @@ impl Ring {
         };
 
         self.fighters.insert(id, entry);
+
+        // Record metrics.
+        self.metrics.counter_inc(metrics::FIGHTER_SPAWNS_TOTAL);
+        self.metrics
+            .gauge_set(metrics::ACTIVE_FIGHTERS, self.fighters.len() as i64);
 
         self.event_bus.publish(PunchEvent::FighterSpawned {
             fighter_id: id,
@@ -314,6 +472,27 @@ impl Ring {
             });
         }
 
+        // Check budget enforcement (opt-in — only blocks if limits are configured).
+        match self.budget_enforcer.check_budget(fighter_id).await {
+            Ok(crate::budget::BudgetVerdict::Blocked {
+                reason,
+                retry_after_secs,
+            }) => {
+                entry.status = FighterStatus::Resting;
+                return Err(PunchError::RateLimited {
+                    provider: format!("budget: {}", reason),
+                    retry_after_ms: retry_after_secs * 1000,
+                });
+            }
+            Ok(crate::budget::BudgetVerdict::Warning { message, .. }) => {
+                info!(warning = %message, "budget warning for fighter");
+            }
+            Ok(crate::budget::BudgetVerdict::Allowed) => {}
+            Err(e) => {
+                warn!(error = %e, "budget check failed, allowing request");
+            }
+        }
+
         // Ensure the fighter has an active bout.
         let bout_id = match entry.current_bout {
             Some(id) => id,
@@ -358,6 +537,9 @@ impl Ring {
             sandbox: None,
         };
 
+        // Record message metric.
+        self.metrics.counter_inc(metrics::MESSAGES_TOTAL);
+
         let result = run_fighter_loop(params).await;
 
         // Update state based on the outcome.
@@ -367,6 +549,16 @@ impl Ring {
                     entry.status = FighterStatus::Idle;
                     self.scheduler
                         .record_usage(fighter_id, loop_result.usage.total());
+
+                    // Record token usage metrics.
+                    self.metrics.counter_add(
+                        metrics::TOKENS_INPUT_TOTAL,
+                        loop_result.usage.input_tokens,
+                    );
+                    self.metrics.counter_add(
+                        metrics::TOKENS_OUTPUT_TOTAL,
+                        loop_result.usage.output_tokens,
+                    );
 
                     // Record usage through the metering engine.
                     if let Err(e) = self
@@ -384,6 +576,7 @@ impl Ring {
                 }
                 Err(_) => {
                     entry.status = FighterStatus::KnockedOut;
+                    self.metrics.counter_inc(metrics::ERRORS_TOTAL);
                 }
             }
         }
@@ -396,6 +589,8 @@ impl Ring {
     pub fn kill_fighter(&self, fighter_id: &FighterId) {
         if let Some((_, entry)) = self.fighters.remove(fighter_id) {
             self.scheduler.remove_fighter(fighter_id);
+            self.metrics
+                .gauge_set(metrics::ACTIVE_FIGHTERS, self.fighters.len() as i64);
             info!(name = %entry.manifest.name, "fighter killed");
         } else {
             warn!("attempted to kill unknown fighter");
@@ -479,6 +674,10 @@ impl Ring {
         drop(entry);
         drop(entry_ref);
 
+        // Record gorilla metrics.
+        self.metrics.counter_inc(metrics::GORILLA_RUNS_TOTAL);
+        self.metrics.gauge_inc(metrics::ACTIVE_GORILLAS);
+
         self.event_bus.publish(PunchEvent::GorillaUnleashed {
             gorilla_id: gorilla_id_owned,
             name,
@@ -509,6 +708,8 @@ impl Ring {
         entry.status = GorillaStatus::Caged;
         drop(entry);
         drop(entry_ref);
+
+        self.metrics.gauge_dec(metrics::ACTIVE_GORILLAS);
 
         self.event_bus.publish(PunchEvent::GorillaPaused {
             gorilla_id: *gorilla_id,
@@ -582,6 +783,144 @@ impl Ring {
     /// Get the LLM driver (useful for CLI commands that need to run ticks directly).
     pub fn driver(&self) -> &Arc<dyn LlmDriver> {
         &self.driver
+    }
+
+    // -- Troop / Swarm / Messaging accessors ---------------------------------
+
+    /// Get a reference to the troop manager.
+    pub fn troop_manager(&self) -> &TroopManager {
+        &self.troop_manager
+    }
+
+    /// Get a reference to the swarm coordinator.
+    pub fn swarm_coordinator(&self) -> &SwarmCoordinator {
+        &self.swarm_coordinator
+    }
+
+    /// Get a reference to the message router.
+    pub fn message_router(&self) -> &MessageRouter {
+        &self.message_router
+    }
+
+    // -- Troop operations ----------------------------------------------------
+
+    /// Form a new troop with a leader and initial members.
+    #[instrument(skip(self, members), fields(troop_name = %name))]
+    pub fn form_troop(
+        &self,
+        name: String,
+        leader: FighterId,
+        members: Vec<FighterId>,
+        strategy: CoordinationStrategy,
+    ) -> PunchResult<TroopId> {
+        // Verify the leader exists.
+        if self.fighters.get(&leader).is_none() {
+            return Err(PunchError::Troop(format!(
+                "leader fighter {} not found",
+                leader
+            )));
+        }
+
+        // Verify all members exist.
+        for member in &members {
+            if self.fighters.get(member).is_none() {
+                return Err(PunchError::Troop(format!(
+                    "member fighter {} not found",
+                    member
+                )));
+            }
+        }
+
+        let member_count = members.len() + 1; // +1 for leader if not in list
+        let troop_id = self.troop_manager.form_troop(name.clone(), leader, members, strategy);
+
+        self.event_bus.publish(PunchEvent::TroopFormed {
+            troop_id,
+            name,
+            member_count,
+        });
+
+        Ok(troop_id)
+    }
+
+    /// Disband (dissolve) a troop.
+    #[instrument(skip(self), fields(%troop_id))]
+    pub fn disband_troop(&self, troop_id: &TroopId) -> PunchResult<()> {
+        let name = self.troop_manager.disband_troop(troop_id)?;
+
+        self.event_bus.publish(PunchEvent::TroopDisbanded {
+            troop_id: *troop_id,
+            name,
+        });
+
+        Ok(())
+    }
+
+    /// Assign a task to a troop, returning the fighters that should handle it.
+    pub fn assign_troop_task(
+        &self,
+        troop_id: &TroopId,
+        task_description: &str,
+    ) -> PunchResult<Vec<FighterId>> {
+        self.troop_manager.assign_task(troop_id, task_description)
+    }
+
+    /// Get the current status of a troop.
+    pub fn get_troop_status(&self, troop_id: &TroopId) -> Option<Troop> {
+        self.troop_manager.get_troop(troop_id)
+    }
+
+    /// List all troops.
+    pub fn list_troops(&self) -> Vec<Troop> {
+        self.troop_manager.list_troops()
+    }
+
+    /// Recruit a fighter into a troop.
+    pub fn recruit_to_troop(
+        &self,
+        troop_id: &TroopId,
+        fighter_id: FighterId,
+    ) -> PunchResult<()> {
+        // Verify the fighter exists.
+        if self.fighters.get(&fighter_id).is_none() {
+            return Err(PunchError::Troop(format!(
+                "fighter {} not found",
+                fighter_id
+            )));
+        }
+        self.troop_manager.recruit(troop_id, fighter_id)
+    }
+
+    /// Dismiss a fighter from a troop.
+    pub fn dismiss_from_troop(
+        &self,
+        troop_id: &TroopId,
+        fighter_id: &FighterId,
+    ) -> PunchResult<()> {
+        self.troop_manager.dismiss(troop_id, fighter_id)
+    }
+
+    // -- Troop-aware fighter lifecycle ---------------------------------------
+
+    /// Kill a fighter, warning if they're in a troop.
+    ///
+    /// Unlike [`kill_fighter`], this checks troop membership and dismisses
+    /// the fighter from all troops before killing them.
+    #[instrument(skip(self), fields(%fighter_id))]
+    pub fn kill_fighter_safe(&self, fighter_id: &FighterId) {
+        // Dismiss from any troops first.
+        let troop_ids = self.troop_manager.get_fighter_troops(fighter_id);
+        for troop_id in troop_ids {
+            if let Err(e) = self.troop_manager.dismiss(&troop_id, fighter_id) {
+                warn!(
+                    %troop_id,
+                    %fighter_id,
+                    error = %e,
+                    "failed to dismiss fighter from troop before kill"
+                );
+            }
+        }
+        self.kill_fighter(fighter_id);
     }
 
     // -- Workflow operations -------------------------------------------------

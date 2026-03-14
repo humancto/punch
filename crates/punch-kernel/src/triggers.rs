@@ -336,6 +336,8 @@ fn event_kind_string(event: &PunchEvent) -> String {
         PunchEvent::BoutStarted { .. } => "bout_started".to_string(),
         PunchEvent::BoutEnded { .. } => "bout_ended".to_string(),
         PunchEvent::ComboTriggered { .. } => "combo_triggered".to_string(),
+        PunchEvent::TroopFormed { .. } => "troop_formed".to_string(),
+        PunchEvent::TroopDisbanded { .. } => "troop_disbanded".to_string(),
         PunchEvent::Error { .. } => "error".to_string(),
     }
 }

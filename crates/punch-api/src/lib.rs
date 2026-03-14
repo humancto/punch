@@ -6,6 +6,7 @@
 //! gorillas, sending messages, and exposing an OpenAI-compatible chat endpoint.
 
 pub mod middleware;
+pub mod openapi;
 pub mod routes;
 pub mod server;
 

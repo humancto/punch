@@ -2091,15 +2091,19 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "dashmap",
+ "libc",
  "punch-memory",
  "punch-runtime",
  "punch-types",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "toml",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2127,11 +2131,13 @@ name = "punch-memory"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "flate2",
  "punch-types",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

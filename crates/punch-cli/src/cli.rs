@@ -70,6 +70,18 @@ pub enum Commands {
     Chat {
         /// Optional message (interactive mode if omitted)
         message: Option<String>,
+
+        /// Model to use for the chat (overrides config)
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// System prompt for the chat
+        #[arg(short, long)]
+        system: Option<String>,
+
+        /// Enable streaming output
+        #[arg(long)]
+        stream: bool,
     },
 
     /// Manage configuration
@@ -120,6 +132,14 @@ pub enum FighterCommands {
     Spawn {
         /// Template name or path
         template: String,
+
+        /// Fighter name override
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Model to use (overrides template default)
+        #[arg(short, long)]
+        model: Option<String>,
     },
 
     /// List all fighters
@@ -136,11 +156,18 @@ pub enum FighterCommands {
         /// Fighter ID
         id: String,
         /// Message to send
+        #[arg(short, long)]
         message: String,
     },
 
     /// Terminate a fighter
     Kill {
+        /// Fighter ID
+        id: String,
+    },
+
+    /// Show fighter status
+    Status {
         /// Fighter ID
         id: String,
     },
@@ -187,6 +214,12 @@ pub enum MoveCommands {
         query: String,
     },
 
+    /// Show detailed info about a move
+    Info {
+        /// Move name
+        name: String,
+    },
+
     /// Install a move
     Install {
         /// Move name
@@ -201,9 +234,11 @@ pub enum WorkflowCommands {
 
     /// Execute a workflow
     Run {
-        /// Workflow ID
+        /// Workflow name or ID
+        #[arg(value_name = "NAME")]
         id: String,
         /// Input text for the workflow
+        #[arg(short, long)]
         input: String,
     },
 
@@ -211,6 +246,13 @@ pub enum WorkflowCommands {
     Status {
         /// Run ID
         run_id: String,
+    },
+
+    /// Create a workflow from a definition file
+    Create {
+        /// Path to workflow definition file (TOML or JSON)
+        #[arg(short, long)]
+        file: String,
     },
 }
 
@@ -224,6 +266,12 @@ pub enum ChannelCommands {
         /// Platform to test (telegram, discord, slack)
         platform: String,
     },
+
+    /// Show detailed status of a channel
+    Status {
+        /// Channel name
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -234,14 +282,24 @@ pub enum TriggerCommands {
     /// Add a new trigger
     Add {
         /// Trigger type: keyword, schedule, event, webhook
-        #[arg(name = "type")]
+        #[arg(long, name = "type")]
         trigger_type: String,
+        /// Gorilla to associate with the trigger
+        #[arg(long)]
+        gorilla: Option<String>,
         /// Configuration (JSON string)
+        #[arg(long)]
         config: String,
     },
 
     /// Remove a trigger by ID
     Remove {
+        /// Trigger ID (UUID)
+        id: String,
+    },
+
+    /// Test a trigger (dry run)
+    Test {
         /// Trigger ID (UUID)
         id: String,
     },

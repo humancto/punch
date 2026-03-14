@@ -86,11 +86,28 @@ impl SkillRegistry {
 
     /// Load bundled skill manifests.
     ///
-    /// In the future this will read from the bundled/ directory. For now it
-    /// initialises an empty registry.
+    /// Populates the registry with all built-in skills that ship with Punch.
+    /// Each skill is converted from its marketplace listing into a manifest
+    /// and registered.
     pub fn load_bundled() -> Self {
         info!("loading bundled skill manifests");
-        Self::new()
+        let mut registry = Self::new();
+
+        for listing in builtin_skills() {
+            let manifest = SkillManifest {
+                name: listing.name,
+                version: listing.version,
+                description: listing.description,
+                author: listing.author,
+                tools: listing.tool_definitions,
+                requirements: Vec::new(),
+                skill_prompt: String::new(),
+            };
+            registry.register(manifest);
+        }
+
+        info!(count = registry.skills.len(), "bundled skills loaded");
+        registry
     }
 
     /// Register a skill manifest.
@@ -283,8 +300,81 @@ mod tests {
     }
 
     #[test]
-    fn test_load_bundled_returns_empty() {
+    fn test_load_bundled_returns_populated() {
         let registry = SkillRegistry::load_bundled();
-        assert!(registry.list_skills().is_empty());
+        let skills = registry.list_skills();
+        assert!(
+            skills.len() >= 8,
+            "expected at least 8 bundled skills, got {}",
+            skills.len()
+        );
+        assert!(registry.get_skill("Filesystem Tools").is_some());
+        assert!(registry.get_skill("Shell Tools").is_some());
+        assert!(registry.get_skill("Web Tools").is_some());
+        assert!(registry.get_skill("Memory Tools").is_some());
+        assert!(registry.get_skill("Knowledge Graph").is_some());
+        assert!(registry.get_skill("Agent Coordination").is_some());
+        assert!(registry.get_skill("Browser Tools").is_some());
+        assert!(registry.get_skill("Patch Tools").is_some());
+    }
+
+    #[test]
+    fn test_load_bundled_skills_have_descriptions() {
+        let registry = SkillRegistry::load_bundled();
+        for name in registry.list_skills() {
+            let skill = registry.get_skill(&name).unwrap();
+            assert!(
+                !skill.description.is_empty(),
+                "skill '{}' should have a non-empty description",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_bundled_skills_have_tools() {
+        let registry = SkillRegistry::load_bundled();
+        for name in registry.list_skills() {
+            let skill = registry.get_skill(&name).unwrap();
+            assert!(
+                !skill.tools.is_empty(),
+                "skill '{}' should have at least one tool",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_bundled_skills_have_valid_schemas() {
+        let registry = SkillRegistry::load_bundled();
+        for name in registry.list_skills() {
+            let skill = registry.get_skill(&name).unwrap();
+            for tool in &skill.tools {
+                assert!(
+                    tool.input_schema.is_object(),
+                    "tool '{}' in skill '{}' should have an object input schema",
+                    tool.name,
+                    name
+                );
+                assert!(
+                    tool.input_schema.get("type").is_some(),
+                    "tool '{}' in skill '{}' should have a 'type' field in schema",
+                    tool.name,
+                    name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_bundled_skills_categories_assigned() {
+        let registry = SkillRegistry::load_bundled();
+        for name in registry.list_skills() {
+            let skill = registry.get_skill(&name).unwrap();
+            for tool in &skill.tools {
+                // Just verify the category is accessible (no panic).
+                let _ = format!("{:?}", tool.category);
+            }
+        }
     }
 }

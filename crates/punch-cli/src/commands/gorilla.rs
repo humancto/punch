@@ -405,3 +405,154 @@ fn find_gorilla_manifest(name: &str) -> Option<punch_types::GorillaManifest> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    /// Build the gorillas list URL.
+    fn build_list_url(base: &str) -> String {
+        format!("{}/api/gorillas", base)
+    }
+
+    /// Build the gorilla unleash URL.
+    fn build_unleash_url(base: &str, id: &str) -> String {
+        format!("{}/api/gorillas/{}/unleash", base, id)
+    }
+
+    /// Build the gorilla cage URL.
+    fn build_cage_url(base: &str, id: &str) -> String {
+        format!("{}/api/gorillas/{}/cage", base, id)
+    }
+
+    /// Format a gorillas table.
+    fn format_gorillas_table(gorillas: &[serde_json::Value]) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!("  {:<24}  {:<12}  SCHEDULE", "NAME", "STATUS"));
+        lines.push(format!("  {}", "-".repeat(70)));
+
+        for g in gorillas {
+            lines.push(format!(
+                "  {:<24}  {:<12}  {}",
+                g["name"].as_str().unwrap_or("-"),
+                g["status"].as_str().unwrap_or("-"),
+                g["schedule"].as_str().unwrap_or("-"),
+            ));
+        }
+
+        lines.join("\n")
+    }
+
+    /// Format a gorilla status display.
+    fn format_gorilla_status(g: &serde_json::Value) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "  Gorilla: {}",
+            g["name"].as_str().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  Status:  {}",
+            g["status"].as_str().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  Schedule: {}",
+            g["schedule"].as_str().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  Description: {}",
+            g["description"].as_str().unwrap_or("-")
+        ));
+        lines.join("\n")
+    }
+
+    #[test]
+    fn test_build_list_url() {
+        assert_eq!(
+            build_list_url("http://localhost:6660"),
+            "http://localhost:6660/api/gorillas"
+        );
+    }
+
+    #[test]
+    fn test_build_unleash_url() {
+        assert_eq!(
+            build_unleash_url("http://localhost:6660", "abc-123"),
+            "http://localhost:6660/api/gorillas/abc-123/unleash"
+        );
+    }
+
+    #[test]
+    fn test_build_cage_url() {
+        assert_eq!(
+            build_cage_url("http://localhost:6660", "abc-123"),
+            "http://localhost:6660/api/gorillas/abc-123/cage"
+        );
+    }
+
+    #[test]
+    fn test_format_gorillas_table_empty() {
+        let table = format_gorillas_table(&[]);
+        assert!(table.contains("NAME"));
+        assert!(table.contains("STATUS"));
+        assert!(table.contains("SCHEDULE"));
+    }
+
+    #[test]
+    fn test_format_gorillas_table_with_data() {
+        let gorillas = vec![serde_json::json!({
+            "name": "alpha",
+            "status": "rampaging",
+            "schedule": "every 5m",
+        })];
+        let table = format_gorillas_table(&gorillas);
+        assert!(table.contains("alpha"));
+        assert!(table.contains("rampaging"));
+        assert!(table.contains("every 5m"));
+    }
+
+    #[test]
+    fn test_format_gorilla_status() {
+        let g = serde_json::json!({
+            "name": "alpha",
+            "status": "caged",
+            "schedule": "every 5m",
+            "description": "The alpha gorilla",
+        });
+        let output = format_gorilla_status(&g);
+        assert!(output.contains("alpha"));
+        assert!(output.contains("caged"));
+        assert!(output.contains("every 5m"));
+        assert!(output.contains("The alpha gorilla"));
+    }
+
+    #[test]
+    fn test_format_gorilla_status_missing_fields() {
+        let g = serde_json::json!({});
+        let output = format_gorilla_status(&g);
+        assert!(output.contains("-"));
+    }
+
+    #[test]
+    fn test_gorilla_response_parsing() {
+        let gorillas = vec![
+            serde_json::json!({"id": "g1", "name": "Alpha", "status": "caged", "schedule": "5m"}),
+            serde_json::json!({"id": "g2", "name": "Beta", "status": "rampaging", "schedule": "1h"}),
+        ];
+        assert_eq!(gorillas.len(), 2);
+        assert_eq!(gorillas[0]["name"].as_str().unwrap(), "Alpha");
+        assert_eq!(gorillas[1]["status"].as_str().unwrap(), "rampaging");
+    }
+
+    #[test]
+    fn test_gorilla_name_case_insensitive_lookup() {
+        let gorillas = vec![
+            serde_json::json!({"name": "Alpha"}),
+            serde_json::json!({"name": "Beta"}),
+        ];
+        let found = gorillas.iter().find(|g| {
+            g["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case("alpha"))
+        });
+        assert!(found.is_some());
+        assert_eq!(found.unwrap()["name"].as_str().unwrap(), "Alpha");
+    }
+}

@@ -2,10 +2,16 @@
 
 use crate::cli::ChannelCommands;
 
+/// Base URL for the Punch daemon API.
+fn api_base() -> String {
+    std::env::var("PUNCH_API_URL").unwrap_or_else(|_| "http://127.0.0.1:6660".to_string())
+}
+
 pub async fn run(command: ChannelCommands, config_path: Option<String>) -> i32 {
     match command {
         ChannelCommands::List => run_list(config_path).await,
         ChannelCommands::Test { platform } => run_test(&platform, config_path).await,
+        ChannelCommands::Status { name } => run_status(&name).await,
     }
 }
 
@@ -169,4 +175,210 @@ async fn run_test(platform: &str, config_path: Option<String>) -> i32 {
     }
 
     0
+}
+
+async fn run_status(name: &str) -> i32 {
+    let url = format!("{}/api/channels/{}", api_base(), name);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build();
+
+    let client = match client {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [X] Failed to create HTTP client: {}", e);
+            return 1;
+        }
+    };
+
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(data) => {
+                    println!();
+                    println!(
+                        "  Channel: {}",
+                        data["name"].as_str().unwrap_or(name)
+                    );
+                    println!(
+                        "  Type:    {}",
+                        data["channel_type"].as_str().unwrap_or("-")
+                    );
+                    println!(
+                        "  Status:  {}",
+                        data["status"].as_str().unwrap_or("unknown")
+                    );
+
+                    if let Some(connected) = data["connected"].as_bool() {
+                        println!(
+                            "  Connected: {}",
+                            if connected { "yes" } else { "no" }
+                        );
+                    }
+
+                    if let Some(last_msg) = data["last_message_at"].as_str() {
+                        println!("  Last message: {}", last_msg);
+                    }
+
+                    if let Some(msg_count) = data["message_count"].as_u64() {
+                        println!("  Messages: {}", msg_count);
+                    }
+
+                    if let Some(fighter) = data["default_fighter"].as_str() {
+                        println!("  Default Fighter: {}", fighter);
+                    }
+
+                    println!();
+                    0
+                }
+                Err(e) => {
+                    eprintln!("  [X] Failed to parse response: {}", e);
+                    1
+                }
+            }
+        }
+        Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+            eprintln!("  [X] Channel '{}' not found.", name);
+            eprintln!("  Run `punch channel list` to see configured channels.");
+            1
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            eprintln!("  [X] API error ({}): {}", status, body);
+            1
+        }
+        Err(e) => {
+            if e.is_connect() {
+                eprintln!("  [X] Cannot connect to Punch daemon at {}", api_base());
+                eprintln!("      Is the daemon running? Try: punch start");
+            } else {
+                eprintln!("  [X] Request failed: {}", e);
+            }
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Build the channels list URL.
+    fn build_list_url(base: &str) -> String {
+        format!("{}/api/channels", base)
+    }
+
+    /// Build the channel test URL.
+    fn build_test_url(base: &str, platform: &str) -> String {
+        match platform {
+            "telegram" => format!("{}/api/channels/telegram/webhook", base),
+            "discord" => format!("{}/api/channels/discord/webhook", base),
+            "slack" => format!("{}/api/channels/slack/events", base),
+            _ => format!("{}/api/channels/{}/test", base, platform),
+        }
+    }
+
+    /// Build the channel status URL.
+    fn build_status_url(base: &str, name: &str) -> String {
+        format!("{}/api/channels/{}", base, name)
+    }
+
+    /// Format channel status for display.
+    fn format_channel_status(data: &serde_json::Value) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "  Channel: {}",
+            data["name"].as_str().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  Type:    {}",
+            data["channel_type"].as_str().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  Status:  {}",
+            data["status"].as_str().unwrap_or("unknown")
+        ));
+        lines.join("\n")
+    }
+
+    #[test]
+    fn test_build_list_url() {
+        assert_eq!(
+            build_list_url("http://localhost:6660"),
+            "http://localhost:6660/api/channels"
+        );
+    }
+
+    #[test]
+    fn test_build_test_url_telegram() {
+        assert_eq!(
+            build_test_url("http://localhost:6660", "telegram"),
+            "http://localhost:6660/api/channels/telegram/webhook"
+        );
+    }
+
+    #[test]
+    fn test_build_test_url_discord() {
+        assert_eq!(
+            build_test_url("http://localhost:6660", "discord"),
+            "http://localhost:6660/api/channels/discord/webhook"
+        );
+    }
+
+    #[test]
+    fn test_build_test_url_slack() {
+        assert_eq!(
+            build_test_url("http://localhost:6660", "slack"),
+            "http://localhost:6660/api/channels/slack/events"
+        );
+    }
+
+    #[test]
+    fn test_build_status_url() {
+        assert_eq!(
+            build_status_url("http://localhost:6660", "telegram"),
+            "http://localhost:6660/api/channels/telegram"
+        );
+    }
+
+    #[test]
+    fn test_format_channel_status() {
+        let data = serde_json::json!({
+            "name": "telegram",
+            "channel_type": "telegram",
+            "status": "connected",
+        });
+        let output = format_channel_status(&data);
+        assert!(output.contains("telegram"));
+        assert!(output.contains("connected"));
+    }
+
+    #[test]
+    fn test_format_channel_status_missing_fields() {
+        let data = serde_json::json!({});
+        let output = format_channel_status(&data);
+        assert!(output.contains("-"));
+        assert!(output.contains("unknown"));
+    }
+
+    #[test]
+    fn test_channel_status_response_parsing() {
+        let data = serde_json::json!({
+            "name": "discord",
+            "channel_type": "discord",
+            "status": "active",
+            "connected": true,
+            "message_count": 42,
+            "default_fighter": "oracle",
+        });
+        assert_eq!(data["name"].as_str().unwrap(), "discord");
+        assert!(data["connected"].as_bool().unwrap());
+        assert_eq!(data["message_count"].as_u64().unwrap(), 42);
+        assert_eq!(data["default_fighter"].as_str().unwrap(), "oracle");
+    }
+
+    #[test]
+    fn test_api_base_default() {
+        let url = build_status_url("http://127.0.0.1:6660", "slack");
+        assert_eq!(url, "http://127.0.0.1:6660/api/channels/slack");
+    }
 }

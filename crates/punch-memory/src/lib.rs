@@ -6,16 +6,19 @@
 //! wraps a connection behind a `tokio::sync::Mutex` so it can be shared
 //! safely across async tasks.
 
+pub mod backup;
 pub mod bouts;
 pub mod consolidation;
 pub mod embeddings;
 pub mod fighters;
 pub mod knowledge;
+pub mod maintenance;
 pub mod memories;
 pub mod migrations;
 pub mod substrate;
 pub mod usage;
 
+pub use backup::{BackupInfo, BackupManager};
 pub use bouts::{BoutId, BoutSummary};
 pub use consolidation::{ConsolidationConfig, ConsolidationResult, MemoryConsolidator};
 pub use embeddings::{

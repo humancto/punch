@@ -191,12 +191,17 @@ impl Default for SkillMarketplace {
 // Built-in skills
 // ---------------------------------------------------------------------------
 
-/// Helper to build a simple tool definition.
-fn tool(name: &str, description: &str, category: ToolCategory) -> ToolDefinition {
+/// Helper to build a tool definition with a proper input schema.
+fn tool(
+    name: &str,
+    description: &str,
+    category: ToolCategory,
+    schema: serde_json::Value,
+) -> ToolDefinition {
     ToolDefinition {
         name: name.to_string(),
         description: description.to_string(),
-        input_schema: serde_json::json!({"type": "object"}),
+        input_schema: schema,
         category,
     }
 }
@@ -217,18 +222,51 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             tool_definitions: vec![
                 tool(
                     "file_read",
-                    "Read the contents of a file",
+                    "Read the contents of a file at the given path. Returns the file content as a string.",
                     ToolCategory::FileSystem,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file to read (absolute or relative to working directory)"
+                            }
+                        },
+                        "required": ["path"]
+                    }),
                 ),
                 tool(
                     "file_write",
-                    "Write content to a file",
+                    "Write string content to a file at the given path. Creates parent directories if needed.",
                     ToolCategory::FileSystem,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file to write (absolute or relative to working directory)"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "The content to write to the file"
+                            }
+                        },
+                        "required": ["path", "content"]
+                    }),
                 ),
                 tool(
                     "file_list",
-                    "List files in a directory",
+                    "List files and directories at the given path. Returns name and type for each entry.",
                     ToolCategory::FileSystem,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Directory path to list (defaults to current working directory)"
+                            }
+                        }
+                    }),
                 ),
             ],
             install_count: 0,
@@ -250,8 +288,18 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             ],
             tool_definitions: vec![tool(
                 "shell_exec",
-                "Execute a shell command",
+                "Execute a shell command and return stdout, stderr, and exit code. Commands run via sh -c.",
                 ToolCategory::Shell,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute"
+                        }
+                    },
+                    "required": ["command"]
+                }),
             )],
             install_count: 0,
             rating: 0.0,
@@ -273,10 +321,42 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             tool_definitions: vec![
                 tool(
                     "web_search",
-                    "Search the web for information",
+                    "Search the web using DuckDuckGo and return a list of results with titles, URLs, and snippets.",
                     ToolCategory::Web,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return (default: 10)"
+                            }
+                        },
+                        "required": ["query"]
+                    }),
                 ),
-                tool("web_fetch", "Fetch content from a URL", ToolCategory::Web),
+                tool(
+                    "web_fetch",
+                    "Fetch the content of a web page at the given URL. Returns the page text content.",
+                    ToolCategory::Web,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string",
+                                "description": "The URL to fetch"
+                            },
+                            "max_length": {
+                                "type": "integer",
+                                "description": "Maximum content length in characters (default: 50000)"
+                            }
+                        },
+                        "required": ["url"]
+                    }),
+                ),
             ],
             install_count: 0,
             rating: 0.0,
@@ -298,13 +378,46 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             tool_definitions: vec![
                 tool(
                     "memory_store",
-                    "Store a value in memory",
+                    "Store a key-value pair in the agent's persistent memory for later recall.",
                     ToolCategory::Memory,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string",
+                                "description": "The key to store the value under"
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "The value to store"
+                            },
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional tags for categorizing the memory"
+                            }
+                        },
+                        "required": ["key", "value"]
+                    }),
                 ),
                 tool(
                     "memory_recall",
-                    "Recall a value from memory",
+                    "Recall stored values from the agent's persistent memory by key or semantic search.",
                     ToolCategory::Memory,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query or exact key to recall"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return (default: 5)"
+                            }
+                        },
+                        "required": ["query"]
+                    }),
                 ),
             ],
             install_count: 0,
@@ -327,18 +440,72 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             tool_definitions: vec![
                 tool(
                     "knowledge_add_entity",
-                    "Add an entity to the knowledge graph",
+                    "Add an entity with a name, type, and optional description to the knowledge graph.",
                     ToolCategory::Knowledge,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Name of the entity"
+                            },
+                            "entity_type": {
+                                "type": "string",
+                                "description": "Type/category of the entity (e.g. 'person', 'concept', 'tool')"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Optional description of the entity"
+                            }
+                        },
+                        "required": ["name", "entity_type"]
+                    }),
                 ),
                 tool(
                     "knowledge_add_relation",
-                    "Add a relation between entities",
+                    "Add a directed relation between two entities in the knowledge graph.",
                     ToolCategory::Knowledge,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "from": {
+                                "type": "string",
+                                "description": "Name of the source entity"
+                            },
+                            "relation": {
+                                "type": "string",
+                                "description": "The relation type (e.g. 'depends_on', 'uses', 'created_by')"
+                            },
+                            "to": {
+                                "type": "string",
+                                "description": "Name of the target entity"
+                            }
+                        },
+                        "required": ["from", "relation", "to"]
+                    }),
                 ),
                 tool(
                     "knowledge_query",
-                    "Query the knowledge graph",
+                    "Query the knowledge graph for entities and their relations.",
                     ToolCategory::Knowledge,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query for entities or relations"
+                            },
+                            "entity_type": {
+                                "type": "string",
+                                "description": "Optional filter by entity type"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of results (default: 10)"
+                            }
+                        },
+                        "required": ["query"]
+                    }),
                 ),
             ],
             install_count: 0,
@@ -359,13 +526,57 @@ pub fn builtin_skills() -> Vec<SkillListing> {
                 "builtin".to_string(),
             ],
             tool_definitions: vec![
-                tool("agent_spawn", "Spawn a new agent", ToolCategory::Agent),
+                tool(
+                    "agent_spawn",
+                    "Spawn a new agent with the given name and system prompt. Returns the new agent's ID.",
+                    ToolCategory::Agent,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Name for the new agent"
+                            },
+                            "system_prompt": {
+                                "type": "string",
+                                "description": "System prompt defining the agent's role and behavior"
+                            }
+                        },
+                        "required": ["name", "system_prompt"]
+                    }),
+                ),
                 tool(
                     "agent_message",
-                    "Send a message to another agent",
+                    "Send a message to another agent and receive its response.",
                     ToolCategory::Agent,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "fighter_id": {
+                                "type": "string",
+                                "description": "ID of the target agent (UUID)"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Name of the target agent (alternative to fighter_id)"
+                            },
+                            "message": {
+                                "type": "string",
+                                "description": "The message to send"
+                            }
+                        },
+                        "required": ["message"]
+                    }),
                 ),
-                tool("agent_list", "List all active agents", ToolCategory::Agent),
+                tool(
+                    "agent_list",
+                    "List all active agents in the ring with their IDs, names, and statuses.",
+                    ToolCategory::Agent,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                ),
             ],
             install_count: 0,
             rating: 0.0,
@@ -386,8 +597,18 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             ],
             tool_definitions: vec![tool(
                 "browser_navigate",
-                "Navigate to a URL in the browser",
+                "Navigate to a URL in the browser. Opens the page and waits for it to load.",
                 ToolCategory::Browser,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to navigate to"
+                        }
+                    },
+                    "required": ["url"]
+                }),
             )],
             install_count: 0,
             rating: 0.0,
@@ -408,8 +629,22 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             ],
             tool_definitions: vec![tool(
                 "patch_apply",
-                "Apply a unified diff patch",
+                "Apply a unified diff patch to a file. Supports fuzzy matching for slight offset mismatches.",
                 ToolCategory::FileSystem,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to patch"
+                        },
+                        "diff": {
+                            "type": "string",
+                            "description": "The unified diff text to apply"
+                        }
+                    },
+                    "required": ["path", "diff"]
+                }),
             )],
             install_count: 0,
             rating: 0.0,
@@ -436,7 +671,12 @@ mod tests {
             version: "1.0.0".to_string(),
             category: category.to_string(),
             tags: vec!["test".to_string(), category.to_string()],
-            tool_definitions: vec![tool("test_tool", "a test tool", ToolCategory::Shell)],
+            tool_definitions: vec![tool(
+                "test_tool",
+                "a test tool",
+                ToolCategory::Shell,
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
             install_count: 0,
             rating: 0.0,
             published_at: Utc::now(),

@@ -22,7 +22,7 @@ use tracing::{debug, error, info, instrument, warn};
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
     AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
-    Role, SandboxEnforcer, ToolCallResult, ToolDefinition,
+    Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
 };
 
 use crate::context_budget::ContextBudget;
@@ -147,7 +147,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         coordinator: params.coordinator.clone(),
         approval_engine: params.approval_engine.clone(),
         sandbox: params.sandbox.clone(),
-        bleed_detector: None,
+        bleed_detector: Some(Arc::new(ShellBleedDetector::new())),
         browser_pool: None,
     };
 
@@ -172,7 +172,14 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             model: params.manifest.model.model.clone(),
             messages: messages.clone(),
             tools: params.available_tools.clone(),
-            max_tokens: params.manifest.model.max_tokens.unwrap_or(4096),
+            max_tokens: params.manifest.model.max_tokens.unwrap_or(
+                // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
+                // so they need a higher default to leave room for visible output.
+                match params.manifest.model.provider {
+                    punch_types::Provider::Ollama => 8192,
+                    _ => 4096,
+                }
+            ),
             temperature: params.manifest.model.temperature,
             system_prompt: Some(system_prompt.clone()),
         };

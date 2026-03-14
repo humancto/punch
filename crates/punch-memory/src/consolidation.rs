@@ -430,6 +430,7 @@ mod tests {
             system_prompt: "test".into(),
             capabilities: Vec::new(),
             weight_class: WeightClass::Featherweight,
+            tenant_id: None,
         }
     }
 

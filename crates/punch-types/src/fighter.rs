@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::capability::Capability;
 use crate::config::ModelConfig;
+use crate::tenant::TenantId;
 
 /// Unique identifier for a Fighter (conversational agent).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -69,6 +70,9 @@ pub struct FighterManifest {
     pub capabilities: Vec<Capability>,
     /// The model tier / weight class.
     pub weight_class: WeightClass,
+    /// The tenant that owns this fighter. None for single-tenant / backward compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<TenantId>,
 }
 
 /// Current operational status of a Fighter.
@@ -273,11 +277,13 @@ mod tests {
             system_prompt: "You are helpful".to_string(),
             capabilities: vec![Capability::Memory],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         };
         let json = serde_json::to_string(&manifest).expect("serialize");
         let deser: FighterManifest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deser.name, "TestFighter");
         assert_eq!(deser.weight_class, WeightClass::Middleweight);
         assert_eq!(deser.capabilities.len(), 1);
+        assert!(deser.tenant_id.is_none());
     }
 }

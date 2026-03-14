@@ -13,21 +13,25 @@
 //! - **Bout**: A session / conversation
 //! - **Move**: A tool invocation
 
+pub mod circuit_breaker;
 pub mod context_budget;
 pub mod driver;
 pub mod fighter_loop;
 pub mod guard;
+pub mod http_pool;
 pub mod mcp;
 pub mod session_repair;
 pub mod tool_executor;
 pub mod tools;
 
+pub use circuit_breaker::{CircuitStatus, CircuitState, ProviderCircuitBreaker};
 pub use context_budget::{ContextBudget, TrimAction};
 pub use driver::{
     AnthropicDriver, AzureOpenAiDriver, BedrockDriver, CompletionRequest, CompletionResponse,
     GeminiDriver, LlmDriver, OllamaDriver, OpenAiCompatibleDriver, StopReason, TokenUsage,
-    create_driver,
+    create_driver, create_driver_with_client, strip_thinking_tags,
 };
+pub use http_pool::{HttpPool, HttpPoolConfig};
 pub use fighter_loop::{FighterLoopParams, FighterLoopResult, run_fighter_loop};
 pub use guard::{GuardConfig, GuardVerdict, LoopGuard, LoopGuardVerdict};
 pub use mcp::McpClient;

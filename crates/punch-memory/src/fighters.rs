@@ -158,6 +158,7 @@ mod tests {
             system_prompt: "You are a test fighter.".into(),
             capabilities: Vec::new(),
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         }
     }
 

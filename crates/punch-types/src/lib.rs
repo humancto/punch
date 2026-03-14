@@ -25,8 +25,10 @@ pub mod secret_store;
 pub mod signing;
 pub mod ssrf;
 pub mod taint;
+pub mod tenant;
 pub mod tool;
 pub mod tool_policy;
+pub mod troop;
 pub mod workspace;
 
 pub use a2a::{
@@ -75,7 +77,8 @@ pub use patch::{
     apply_patch_fuzzy, generate_unified_diff, parse_unified_diff, reverse_patch, validate_patch,
 };
 pub use prompt_guard::{
-    InjectionAlert, InjectionPattern, InjectionSeverity, PromptGuard, ScanDecision,
+    InjectionAlert, InjectionPattern, InjectionSeverity, PromptGuard, PromptGuardConfig,
+    PromptGuardResult, RecommendedAction, ScanDecision, ThreatLevel,
 };
 pub use provider_health::{
     CircuitBreakerConfig, HealthStatus, ProviderHealth, ProviderHealthMonitor,
@@ -91,11 +94,17 @@ pub use signing::{
     verify_manifest, verify_signed_manifest, verifying_key_from_hex,
 };
 pub use ssrf::{SsrfProtector, SsrfViolation};
+pub use tenant::{Tenant, TenantId, TenantQuota, TenantStatus};
 pub use taint::{
     Sensitivity, ShellBleedDetector, ShellBleedWarning, TaintLabel, TaintSource, TaintTracker,
 };
 pub use tool::{ToolCategory, ToolDefinition, ToolResult};
 pub use tool_policy::{
     PolicyCondition, PolicyDecision, PolicyEffect, PolicyRule, PolicyScope, ToolPolicyEngine,
+};
+pub use troop::{
+    AgentMessage, AgentMessageType, AuctionBid, CoordinationStrategy, MessageChannel,
+    MessagePriority, RestartStrategy, SelectionCriteria, SubtaskStatus, SwarmSubtask, SwarmTask,
+    Troop, TroopId, TroopStatus,
 };
 pub use workspace::{ActiveFile, ChangeType, FileChange, GitInfo, ProjectType, WorkspaceContext};

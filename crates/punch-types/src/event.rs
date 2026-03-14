@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::fighter::FighterId;
 use crate::gorilla::GorillaId;
+use crate::troop::TroopId;
 
 /// Events emitted by the Punch system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +49,14 @@ pub enum PunchEvent {
         combo_name: String,
         triggered_by: String,
     },
+    /// A troop has been formed.
+    TroopFormed {
+        troop_id: TroopId,
+        name: String,
+        member_count: usize,
+    },
+    /// A troop has been disbanded.
+    TroopDisbanded { troop_id: TroopId, name: String },
     /// An error occurred in the system.
     Error { source: String, message: String },
 }

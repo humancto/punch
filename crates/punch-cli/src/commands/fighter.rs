@@ -94,6 +94,7 @@ fn resolve_template(template: AgentTemplate, default_model: &ModelConfig) -> Fig
         system_prompt: template.system_prompt,
         capabilities,
         weight_class,
+        tenant_id: None,
     }
 }
 
@@ -191,6 +192,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                     .to_string(),
             capabilities: vec![],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         },
         "striker" => FighterManifest {
             name: "Striker".to_string(),
@@ -208,6 +210,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::Memory,
             ],
             weight_class: WeightClass::Heavyweight,
+            tenant_id: None,
         },
         "scout" => FighterManifest {
             name: "Scout".to_string(),
@@ -224,6 +227,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::Memory,
             ],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         },
         "oracle" => FighterManifest {
             name: "Oracle".to_string(),
@@ -235,6 +239,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 .to_string(),
             capabilities: vec![Capability::Memory],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         },
         "coder" => FighterManifest {
             name: "Coder".to_string(),
@@ -250,6 +255,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::Memory,
             ],
             weight_class: WeightClass::Heavyweight,
+            tenant_id: None,
         },
         _ => {
             return Err(format!(
@@ -306,11 +312,16 @@ pub async fn run(command: FighterCommands, config_path: Option<String>) -> i32 {
     load_dotenv();
 
     match command {
-        FighterCommands::Spawn { template } => run_spawn(template, config_path).await,
+        FighterCommands::Spawn {
+            template,
+            name: _,
+            model: _,
+        } => run_spawn(template, config_path).await,
         FighterCommands::List => run_list(config_path).await,
         FighterCommands::Chat { name } => run_chat(name, config_path).await,
         FighterCommands::Send { id, message } => run_send(id, message, config_path).await,
         FighterCommands::Kill { id } => run_kill(id, config_path).await,
+        FighterCommands::Status { id } => run_fighter_status(id, config_path).await,
     }
 }
 
@@ -343,6 +354,7 @@ pub async fn run_quick_chat(message: Option<String>, config_path: Option<String>
                 .to_string(),
             capabilities: vec![],
             weight_class: WeightClass::Middleweight,
+            tenant_id: None,
         },
     };
 
@@ -610,6 +622,7 @@ async fn run_chat(name: Option<String>, config_path: Option<String>) -> i32 {
                             .to_string(),
                     capabilities: vec![],
                     weight_class: WeightClass::Middleweight,
+                    tenant_id: None,
                 },
             };
             ring.spawn_fighter(manifest).await
@@ -798,6 +811,110 @@ async fn run_kill(id: String, config_path: Option<String>) -> i32 {
     ring.kill_fighter(&fighter_id);
     println!("  Fighter {} has been knocked out.", id);
     0
+}
+
+async fn run_fighter_status(id: String, config_path: Option<String>) -> i32 {
+    // Try daemon first.
+    if let Some(base_url) = daemon_url(config_path.as_deref()) {
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/fighters/{}", base_url, id);
+
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    println!();
+                    println!(
+                        "  Fighter: {}",
+                        data["name"].as_str().unwrap_or("-")
+                    );
+                    println!("  ID:      {}", data["id"].as_str().unwrap_or(&id));
+                    println!(
+                        "  Status:  {}",
+                        data["status"].as_str().unwrap_or("-")
+                    );
+                    println!(
+                        "  Class:   {}",
+                        data["weight_class"].as_str().unwrap_or("-")
+                    );
+                    println!(
+                        "  Model:   {}",
+                        data["model"].as_str().unwrap_or("-")
+                    );
+                    if let Some(bout) = data["bout_id"].as_str() {
+                        println!("  Bout:    {}", bout);
+                    }
+                    if let Some(msgs) = data["message_count"].as_u64() {
+                        println!("  Messages: {}", msgs);
+                    }
+                    println!();
+                    return 0;
+                }
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                eprintln!("  [X] Fighter '{}' not found.", id);
+                return 1;
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                eprintln!("  [X] API error ({}): {}", status, body);
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("  [X] Failed to reach daemon: {}", e);
+                return 1;
+            }
+        }
+    }
+
+    // No daemon — try in-process.
+    let config = match load_config(config_path.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [X] {}", e);
+            return 1;
+        }
+    };
+
+    let ring = match create_ring(&config).await {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+
+    let fighter_id = match Uuid::parse_str(&id) {
+        Ok(uuid) => FighterId(uuid),
+        Err(_) => {
+            eprintln!("  [X] Invalid fighter ID: {}", id);
+            return 1;
+        }
+    };
+
+    match ring.get_fighter(&fighter_id) {
+        Some(entry) => {
+            println!();
+            println!("  Fighter: {}", entry.manifest.name);
+            println!("  ID:      {}", fighter_id);
+            println!("  Status:  {}", entry.status);
+            println!("  Class:   {}", entry.manifest.weight_class);
+            println!(
+                "  Model:   {} ({})",
+                entry.manifest.model.model, entry.manifest.model.provider
+            );
+            println!(
+                "  Bout:    {}",
+                entry
+                    .current_bout
+                    .map(|b| b.0.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            );
+            println!();
+            0
+        }
+        None => {
+            eprintln!("  [X] Fighter '{}' not found.", id);
+            1
+        }
+    }
 }
 
 /// Create a Ring from config for CLI operations.

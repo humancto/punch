@@ -188,6 +188,7 @@ async fn execute_task(
         system_prompt: build_task_system_prompt(&task_input),
         capabilities: Vec::new(),
         weight_class: WeightClass::Middleweight,
+        tenant_id: None,
     };
 
     // Spawn the fighter.

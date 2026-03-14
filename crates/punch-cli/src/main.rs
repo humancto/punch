@@ -34,7 +34,12 @@ async fn main() {
         Commands::Fighter { command } => commands::fighter::run(command, cli.config).await,
         Commands::Gorilla { command } => commands::gorilla::run(command, cli.config).await,
         Commands::Move { command } => commands::moves::run(command).await,
-        Commands::Chat { message } => commands::fighter::run_quick_chat(message, cli.config).await,
+        Commands::Chat {
+            message,
+            model,
+            system,
+            stream,
+        } => commands::chat::run(message, model, system, stream, cli.config).await,
         Commands::Workflow { command } => commands::workflow::run(command).await,
         Commands::Channel { command } => commands::channel::run(command, cli.config).await,
         Commands::Trigger { command } => commands::trigger::run(command).await,
@@ -43,14 +48,7 @@ async fn main() {
         Commands::Desktop { port, native } => {
             commands::desktop::run(cli.config, port, native).await
         }
-        Commands::Version => {
-            println!(
-                "punch {} ({})",
-                env!("CARGO_PKG_VERSION"),
-                env!("CARGO_PKG_HOMEPAGE")
-            );
-            0
-        }
+        Commands::Version => commands::version::run(),
     };
 
     std::process::exit(exit_code);
