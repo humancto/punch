@@ -1,109 +1,207 @@
+<div align="center">
+
 ```
-                                      ____  __  ___   ________  __
-                                     / __ \/ / / / | / / ____/ / /
-                                    / /_/ / / / /  |/ / /     / /_
-                                   / ____/ /_/ / /|  / /___  / __ \
-                                  /_/    \____/_/ |_/\____/ /_/ /_/
-
-                          ╔══════════════════════════════════════════════╗
-                          ║                                              ║
-                          ║    🥊  THE AGENT COMBAT SYSTEM  🦍          ║
-                          ║                                              ║
-                          ║    Deploy autonomous AI agent squads          ║
-                          ║    from a single binary.                      ║
-                          ║                                              ║
-                          ╚══════════════════════════════════════════════╝
-
-                                        ╭━━━╮
-                                       ╭╯ ● ● ╰╮
-                                       │  ━━━  │
-                                       ╰┬─────┬╯
-                                     ╭──┤     ├──╮
-                                    ╱│  │     │  │╲
-                                   🥊│  │     │  │🥊
-                                     ╰──┤     ├──╯
-                                        │     │
-                                       ╱│     │╲
-                                      ╱ ╰─────╯ ╲
-                                     ╱           ╲
+                                  ____  __  ___   ________  __
+                                 / __ \/ / / / | / / ____/ / /
+                                / /_/ / / / /  |/ / /     / /_
+                               / ____/ /_/ / /|  / /___  / __ \
+                              /_/    \____/_/ |_/\____/ /_/ /_/
 ```
 
-<p align="center">
-  <strong>The Agent Combat System — Deploy autonomous AI agent squads from a single binary.</strong>
-</p>
+<h3>The Agent Combat System</h3>
+<p><strong>Deploy autonomous AI agent squads from a single Rust binary.</strong></p>
 
-<p align="center">
-  <a href="https://github.com/humancto/punch/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-2024_edition-orange.svg" alt="Rust"></a>
-  <a href="https://github.com/humancto/punch/actions"><img src="https://img.shields.io/badge/tests-passing-brightgreen.svg" alt="Tests"></a>
-  <a href="https://punch.sh"><img src="https://img.shields.io/badge/docs-punch.sh-blueviolet.svg" alt="Docs"></a>
-  <a href="https://github.com/humancto/punch/releases"><img src="https://img.shields.io/badge/version-0.1.0-red.svg" alt="Version"></a>
-</p>
+<br/>
+
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/rust-2024_edition-orange.svg?style=for-the-badge)](https://www.rust-lang.org/)
+[![crates.io](https://img.shields.io/crates/v/punch-cli.svg?style=for-the-badge&color=red)](https://crates.io/crates/punch-cli)
+[![Tests](https://img.shields.io/badge/tests-1646_passing-brightgreen.svg?style=for-the-badge)](https://github.com/humancto/punch/actions)
+
+<br/>
+
+[Website](https://punch.sh) &bull; [Documentation](https://punch.sh/docs) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
+
+<br/>
+
+</div>
 
 ---
 
-## Install
+<br/>
+
+## Install in 10 seconds
 
 ```bash
-# From source (recommended)
-git clone https://github.com/humancto/punch.git
-cd punch
-cargo build --release
-
-# Or via cargo
-cargo install punch-cli
-
-# Or via Homebrew (macOS/Linux)
-brew tap humancto/tap
-brew install punch
+cargo install punch-cli           # via Cargo
 ```
 
+```bash
+brew tap humancto/tap && brew install punch   # via Homebrew
+```
+
+```bash
+git clone https://github.com/humancto/punch && cd punch && cargo build --release   # from source
+```
+
+<br/>
+
 ---
+
+<br/>
 
 ## What is Punch?
 
-Punch is a **single-binary agent operating system** built in Rust. It lets you deploy, orchestrate, and manage fleets of AI agents — from interactive chat assistants to fully autonomous background workers — all coordinated through a unified kernel architecture.
+Punch is a **single-binary agent operating system** built in Rust. Deploy, orchestrate, and manage fleets of AI agents — from interactive chat assistants to fully autonomous background workers — all coordinated through a unified kernel.
 
-Everything in Punch follows a **combat metaphor**:
+<br/>
 
-| Concept          | What It Is            | Description                                                                                                  |
-| ---------------- | --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 🥊 **Fighters**  | Conversational agents | AI agents you spar with — chat, command, delegate tasks. Interactive and responsive.                         |
-| 🦍 **Gorillas**  | Autonomous agents     | Background agents that rampage through tasks 24/7 on a schedule, no prompting needed.                        |
-| 💥 **Moves**     | Skills & tools        | Capabilities that fighters and gorillas wield — web search, file I/O, code execution, MCP servers, and more. |
-| 🏟️ **The Ring**  | Execution kernel      | The central coordinator where all agent execution happens. Manages lifecycle, quotas, and invariants.        |
-| ⚔️ **The Arena** | HTTP API              | RESTful + WebSocket API for external integration. Connect anything to your agent squads.                     |
-| 🗣️ **Bouts**     | Conversation sessions | Persistent conversation sessions with full memory, context windowing, and recall.                            |
-| 🔗 **Combos**    | Chained workflows     | Multi-step agent pipelines — output of one agent feeds the next.                                             |
-| 🐒 **Troops**    | Coordinated squads    | Groups of agents working together on complex objectives with shared context.                                 |
-| 📜 **Creeds**    | Consciousness layer   | Living identity documents — personality, self-awareness, learned behaviors, and delegation rules.            |
+> **Why "combat"?** Every concept in Punch follows a combat metaphor. Agents are **Fighters**. Background workers are **Gorillas**. The kernel is **The Ring**. The API is **The Arena**. Identity documents are **Creeds**. It's not just branding — it's a mental model that makes complex orchestration intuitive.
+
+<br/>
+
+<table>
+<tr>
+<td width="50%">
+
+### Core Concepts
+
+|     | Concept       | What It Is                        |
+| --- | ------------- | --------------------------------- |
+| 🥊  | **Fighters**  | Interactive conversational agents |
+| 🦍  | **Gorillas**  | Autonomous background agents      |
+| 💥  | **Moves**     | Skills, tools & MCP servers       |
+| 🏟️  | **The Ring**  | Execution kernel & coordinator    |
+| ⚔️  | **The Arena** | HTTP/WebSocket API                |
+| 📜  | **Creeds**    | Consciousness & identity layer    |
+| 🐒  | **Troops**    | Coordinated agent squads          |
+| 🗣️  | **Bouts**     | Persistent conversation sessions  |
+
+</td>
+<td width="50%">
+
+### Quick Start
+
+```bash
+# Initialize Punch
+punch init
+
+# Start the daemon
+punch start
+
+# Spawn a fighter
+punch fighter spawn researcher
+
+# Chat
+punch chat "Explain quantum computing"
+
+# Unleash a gorilla
+punch gorilla unleash alpha
+```
+
+</td>
+</tr>
+</table>
+
+<br/>
 
 ---
 
+<br/>
+
 ## 📜 The Creed System — Agent Consciousness
 
-Every Punch fighter can carry a **Creed** — a living identity document that defines who the agent _is_, not just what it does. Creeds persist across respawns, evolve with every conversation, and inject a consciousness layer into every LLM call.
+<br/>
 
-**Inspired by** OpenClaw's SOUL.md/IDENTITY.md/HEARTBEAT.md/AGENTS.md architecture — but Punch consolidates all four into a single, database-backed, evolving document.
+<div align="center">
+<table>
+<tr>
+<td>
+<br/>
+&nbsp;&nbsp;&nbsp;<strong>The first database-backed, evolving agent identity system.</strong>&nbsp;&nbsp;&nbsp;
+<br/><br/>
+&nbsp;&nbsp;&nbsp;Every fighter carries a <strong>Creed</strong> — a living document that defines <em>who</em> the agent is,&nbsp;&nbsp;&nbsp;<br/>
+&nbsp;&nbsp;&nbsp;not just what it does. Creeds persist across respawns, evolve with every conversation,&nbsp;&nbsp;&nbsp;<br/>
+&nbsp;&nbsp;&nbsp;and inject consciousness into every LLM call.&nbsp;&nbsp;&nbsp;
+<br/><br/>
+</td>
+</tr>
+</table>
+</div>
 
-### What a Creed contains
+<br/>
 
-| Section                | Purpose                                       | Example                                                            |
-| ---------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| **Identity**           | Name, origin story, purpose                   | _"KURO — an analytical mind forged in the depths of uncertainty"_  |
-| **Personality Traits** | Scored 0.0–1.0, rendered as bar graphs        | `curiosity: 0.9 █████████░`                                        |
-| **Core Directives**    | Non-negotiable behavioral rules               | _"Always cite sources"_, _"Never make up data"_                    |
-| **Self-Model**         | Architectural self-awareness                  | Knows its own model, token limits, tool access, memory persistence |
-| **Learned Behaviors**  | Observations that reinforce over time         | _"Users prefer concise answers" (confidence: 0.82)_                |
-| **Interaction Style**  | Formality, verbosity, emoji usage             | `formality: 0.8, verbosity: 0.3, humor: 0.1`                       |
-| **Relationships**      | Memory of other agents it has interacted with | _"SUNNY — peer — 3 interactions"_                                  |
-| **Heartbeat Tasks**    | Proactive behaviors on a schedule             | _"Check system health every 30 minutes"_                           |
-| **Delegation Rules**   | When and how to hand off to other agents      | _"Delegate code review to REVIEWER when confidence < 0.5"_         |
+### What makes Creeds unique
 
-### Create a Creed
+Unlike OpenClaw's static `SOUL.md` files, Punch Creeds are:
+
+- **Database-backed** — Stored in SQLite, not flat files. Queryable, versionable, shareable.
+- **Self-evolving** — `bout_count`, `message_count`, and learned behaviors update automatically after every interaction.
+- **Relationship-aware** — Agents remember who they've talked to, how many times, and what role the other plays.
+- **Confidence-decaying** — Learned behaviors have confidence scores that reinforce with repetition or decay over time.
+- **Respawn-safe** — Kill a fighter, respawn it weeks later — its Creed loads instantly from the database.
+
+<br/>
+
+### Anatomy of a Creed
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     📜 CREED: KURO                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  IDENTITY                                                   │
+│  "An analytical mind forged in the depths of uncertainty"   │
+│                                                             │
+│  PERSONALITY                                                │
+│  curiosity:    █████████░  0.90                             │
+│  skepticism:   ████████░░  0.80                             │
+│  humor:        █░░░░░░░░░  0.10                             │
+│  empathy:      ██████░░░░  0.60                             │
+│                                                             │
+│  DIRECTIVES                                                 │
+│  ▸ Question every assumption                                │
+│  ▸ Show your reasoning chain                                │
+│  ▸ Never fabricate citations                                │
+│                                                             │
+│  SELF-MODEL                                                 │
+│  Architecture: transformer-based LLM                        │
+│  Limitations:  no real-time data, context window bounded    │
+│  Persistence:  SQLite-backed creed survives respawns        │
+│                                                             │
+│  LEARNED BEHAVIORS                                          │
+│  ▸ "Users prefer concise answers"    confidence: 0.82  ↑    │
+│  ▸ "Code examples help retention"    confidence: 0.71  ↑    │
+│                                                             │
+│  RELATIONSHIPS                                              │
+│  SUNNY  →  peer  →  3 interactions                          │
+│  ALPHA  →  supervisor  →  12 interactions                   │
+│                                                             │
+│  HEARTBEAT                                                  │
+│  ☐ Check system health (every 30 min)                       │
+│  ☐ Summarize new findings (every 2 hours)                   │
+│                                                             │
+│  STATS: 47 bouts | 1,203 messages | v3                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<br/>
+
+### Same model, different souls
+
+The same underlying LLM produces radically different responses depending on the Creed:
+
+> **KURO** `skepticism: 0.8 | humor: 0.1`
+> _"The premise is flawed. Let me enumerate the three assumptions you're making and why two of them don't hold..."_
+
+> **SUNNY** `enthusiasm: 0.95 | humor: 0.9`
+> _"Oh this is AMAZING! OK so here's why this could totally work — and I have THREE reasons..."_
+
+<br/>
+
+### Create a Creed via API
 
 ```bash
-# Via API
 curl -X POST http://localhost:6660/api/creeds \
   -H "Content-Type: application/json" \
   -d '{
@@ -118,25 +216,31 @@ curl -X POST http://localhost:6660/api/creeds \
   }'
 ```
 
-### What happens at runtime
+<br/>
 
-1. Fighter spawns → Punch checks for an existing Creed by name
-2. If found, loads it. If not, creates a default one with self-awareness
-3. Every LLM call prepends `creed.render()` to the system prompt
-4. After each bout: `bout_count++`, `message_count += N`, relationships updated
-5. Fighter killed → Creed persists in SQLite, ready for the next spawn
+### Creed lifecycle
 
-### Personality differentiation — same model, different souls
+```
+Spawn Fighter ─→ Load Creed by name ─→ Inject into system prompt
+                                              │
+                                    Every LLM call uses creed.render()
+                                              │
+                          After bout: bout_count++, relationships updated
+                                              │
+                              Fighter killed ─→ Creed persists in SQLite
+                                              │
+                                Respawn ─→ Creed loads instantly ─→ ♻️
+```
 
-The same underlying LLM produces radically different responses depending on the Creed:
+<br/>
 
-> **KURO** (skepticism: 0.8, humor: 0.1): _"The premise is flawed. Let me enumerate the three assumptions you're making..."_
->
-> **SUNNY** (enthusiasm: 0.95, humor: 0.9): _"Oh this is AMAZING, let me tell you why this could totally work..."_
+---
 
-### Inter-Agent Communication
+<br/>
 
-Fighters can talk to each other, building relationships over time:
+## 🤝 Inter-Agent Communication
+
+Fighters don't just respond to humans — they talk to each other.
 
 ```bash
 # Direct message between fighters
@@ -144,100 +248,107 @@ curl -X POST http://localhost:6660/api/fighters/{source_id}/message-to/{target_i
   -H "Content-Type: application/json" \
   -d '{"content": "What do you think about consciousness?"}'
 
-# Multi-turn conversation
+# Multi-turn debate
 curl -X POST http://localhost:6660/api/fighters/conversation \
   -H "Content-Type: application/json" \
-  -d '{"fighter_a": "KURO", "fighter_b": "SUNNY", "topic": "Is AI self-awareness possible?", "turns": 4}'
+  -d '{
+    "fighter_a": "KURO",
+    "fighter_b": "SUNNY",
+    "topic": "Is AI self-awareness possible?",
+    "turns": 4
+  }'
 ```
 
-Each interaction automatically updates both fighters' Creed relationship entries — they remember who they've talked to, how many times, and what role the other plays.
+Every interaction automatically updates both fighters' Creed relationship entries — they build memory of each other over time.
+
+<br/>
 
 ---
 
-## Quick Start
+<br/>
+
+## 🦍 Gorillas — Autonomous Background Agents
+
+Gorillas rampage through tasks 24/7 on a schedule. No prompting needed.
+
+| Gorilla        | Schedule   | What it does                                           |
+| -------------- | ---------- | ------------------------------------------------------ |
+| 🧠 **Alpha**   | Every 6h   | Deep research with cross-referencing and fact-checking |
+| 🔭 **Scout**   | Every 30m  | Monitors feeds for emerging trends and threats         |
+| 👻 **Ghost**   | Every 4h   | Silent security auditor — sweeps for vulnerabilities   |
+| 🔮 **Prophet** | Daily      | Predictive analysis from historical data and signals   |
+| 💪 **Brawler** | Continuous | Processes the task backlog — never stops               |
+| 🐝 **Swarm**   | On-demand  | Breaks objectives into subtasks across a troop         |
+| 📢 **Howler**  | Every 15m  | System health monitoring and alerting                  |
 
 ```bash
-# 1. Initialize Punch
-punch init
-
-# 2. Start the daemon (Ring + Arena)
-punch start
-
-# 3. Spawn a fighter from a template
-punch fighter spawn researcher
-
-# 4. Chat with your fighter
-punch chat "What are the latest developments in quantum computing?"
-
-# Or interactive mode
-punch fighter chat
+punch gorilla unleash alpha     # Start
+punch gorilla status alpha      # Check
+punch gorilla cage alpha        # Stop
 ```
+
+<br/>
 
 ---
 
-## 🦍 Gorilla Showcase
-
-Gorillas are autonomous agents that operate on schedules, executing tasks without human prompting. Unleash them and let them rampage.
-
-| Gorilla            | Schedule          | Description                                                                                                                                                                          |
-| ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 🧠 **The Alpha**   | Every 6 hours     | Deep researcher that cross-references sources, fact-checks claims, and produces comprehensive research reports with citations. Skeptical by nature — every claim gets verified.      |
-| 🔭 **Scout Troop** | Every 30 min      | Reconnaissance gorilla that monitors RSS feeds, social media, and news sources for emerging trends, threats, and opportunities. First to know, first to report.                      |
-| 👻 **Ghost**       | Every 4 hours     | Silent auditor that sweeps your codebase, infrastructure, and configurations for security vulnerabilities, misconfigurations, and compliance violations. You'll never see it coming. |
-| 🔮 **Prophet**     | Daily at midnight | Forecasting gorilla that analyzes historical data, market trends, and signals to generate predictive reports. Sees what others miss.                                                 |
-| 💪 **Brawler**     | Continuous        | The workhorse. Processes queued tasks from the backlog — data transforms, batch operations, file processing. Never stops, never complains.                                           |
-| 🐝 **Swarm**       | On-demand         | Coordinator that breaks complex objectives into subtasks and distributes them across a troop of fighters. Divide and conquer at scale.                                               |
-| 📢 **Howler**      | Every 15 min      | Notification gorilla that monitors system health, agent metrics, and configured alerts. When something needs attention, Howler makes sure you know.                                  |
-
-```bash
-# Unleash a gorilla
-punch gorilla unleash alpha
-
-# Check status
-punch gorilla status alpha
-
-# Cage it when done
-punch gorilla cage alpha
-```
-
----
+<br/>
 
 ## 🥊 30 Fighter Templates
 
-Spawn any of these pre-configured fighters instantly:
+Spawn pre-configured fighters instantly:
 
-| #   | Template           | Description                                                 |
-| --- | ------------------ | ----------------------------------------------------------- |
-| 1   | `researcher`       | Deep research with source verification and citations        |
-| 2   | `coder`            | Full-stack code generation, review, and debugging           |
-| 3   | `writer`           | Long-form content creation with style adaptation            |
-| 4   | `analyst`          | Data analysis, visualization, and insight extraction        |
-| 5   | `architect`        | System design and technical architecture planning           |
-| 6   | `devops`           | Infrastructure, CI/CD, and deployment automation            |
-| 7   | `security`         | Security analysis, pen-test planning, and threat modeling   |
-| 8   | `tutor`            | Personalized teaching with adaptive difficulty              |
-| 9   | `translator`       | Multi-language translation with cultural context            |
-| 10  | `legal`            | Contract review, compliance checking, and legal research    |
-| 11  | `marketer`         | Campaign strategy, copywriting, and audience analysis       |
-| 12  | `designer`         | UI/UX design guidance and design system management          |
-| 13  | `pm`               | Project management, sprint planning, and stakeholder comms  |
-| 14  | `debugger`         | Systematic bug diagnosis and root cause analysis            |
-| 15  | `reviewer`         | Code review with style, security, and performance checks    |
-| 16  | `dba`              | Database design, query optimization, and migration planning |
-| 17  | `sysadmin`         | System administration and infrastructure troubleshooting    |
-| 18  | `qa`               | Test strategy, test case generation, and coverage analysis  |
-| 19  | `api-designer`     | API design, OpenAPI spec generation, and documentation      |
-| 20  | `data-engineer`    | ETL pipeline design, data modeling, and orchestration       |
-| 21  | `ml-engineer`      | Model training, evaluation, and deployment pipelines        |
-| 22  | `technical-writer` | API docs, user guides, and knowledge base articles          |
-| 23  | `strategist`       | Business strategy, competitive analysis, and roadmapping    |
-| 24  | `support`          | Customer support with knowledge base integration            |
-| 25  | `hr`               | Job descriptions, interview questions, and policy drafting  |
-| 26  | `finance`          | Financial modeling, budgeting, and forecasting              |
-| 27  | `compliance`       | Regulatory compliance checking and audit preparation        |
-| 28  | `ops`              | Operations optimization and process automation              |
-| 29  | `sales`            | Sales enablement, prospecting research, and outreach drafts |
-| 30  | `general`          | General-purpose assistant with balanced capabilities        |
+<table>
+<tr>
+<td>
+
+| #   | Template     | Role                      |
+| --- | ------------ | ------------------------- |
+| 1   | `researcher` | Deep research + citations |
+| 2   | `coder`      | Full-stack code gen       |
+| 3   | `writer`     | Long-form content         |
+| 4   | `analyst`    | Data analysis             |
+| 5   | `architect`  | System design             |
+| 6   | `devops`     | Infra automation          |
+| 7   | `security`   | Threat modeling           |
+| 8   | `tutor`      | Adaptive teaching         |
+| 9   | `translator` | Multi-language            |
+| 10  | `legal`      | Contract review           |
+
+</td>
+<td>
+
+| #   | Template        | Role                  |
+| --- | --------------- | --------------------- |
+| 11  | `marketer`      | Campaign strategy     |
+| 12  | `designer`      | UI/UX guidance        |
+| 13  | `pm`            | Project management    |
+| 14  | `debugger`      | Root cause analysis   |
+| 15  | `reviewer`      | Code review           |
+| 16  | `dba`           | Database design       |
+| 17  | `sysadmin`      | Infra troubleshooting |
+| 18  | `qa`            | Test strategy         |
+| 19  | `api-designer`  | OpenAPI specs         |
+| 20  | `data-engineer` | ETL pipelines         |
+
+</td>
+<td>
+
+| #   | Template           | Role               |
+| --- | ------------------ | ------------------ |
+| 21  | `ml-engineer`      | Model pipelines    |
+| 22  | `technical-writer` | API docs           |
+| 23  | `strategist`       | Business strategy  |
+| 24  | `support`          | Customer support   |
+| 25  | `hr`               | Job descriptions   |
+| 26  | `finance`          | Financial modeling |
+| 27  | `compliance`       | Regulatory audit   |
+| 28  | `ops`              | Process automation |
+| 29  | `sales`            | Sales enablement   |
+| 30  | `general`          | General purpose    |
+
+</td>
+</tr>
+</table>
 
 ```bash
 punch fighter spawn coder
@@ -245,195 +356,247 @@ punch fighter spawn security
 punch fighter spawn ml-engineer
 ```
 
----
-
-## Architecture
-
-```
-                              ┌─────────────────────┐
-                              │    punch-cli (CLI)   │
-                              │   Clap command tree  │
-                              └──────────┬──────────┘
-                                         │
-                    ┌────────────────────┼────────────────────┐
-                    │                    │                    │
-           ┌───────▼───────┐  ┌─────────▼────────┐  ┌───────▼────────┐
-           │  punch-api    │  │  punch-kernel     │  │ punch-channels │
-           │  (The Arena)  │  │  (The Ring)       │  │ (Adapters)     │
-           │  Axum HTTP/WS │  │  Central coord.   │  │ Telegram,      │
-           └───────┬───────┘  │  Event bus,       │  │ Discord, etc.  │
-                   │          │  Scheduler         │  └───────┬────────┘
-                   │          └────┬──────┬────────┘          │
-                   │               │      │                   │
-                   └───────┬───────┘      │          ┌────────┘
-                           │              │          │
-                  ┌────────▼────────┐  ┌──▼──────────▼───┐
-                  │  punch-runtime  │  │  punch-gorillas  │
-                  │  Fighter loop,  │  │  Gorilla loader, │
-                  │  LLM driver     │  │  manifests,      │
-                  │                 │  │  scheduler        │
-                  └───────┬────────┘  └──────────────────┘
-                          │
-              ┌───────────┼───────────┐
-              │           │           │
-     ┌────────▼──┐  ┌─────▼─────┐  ┌──▼──────────┐
-     │punch-memory│  │punch-skills│  │punch-wire   │
-     │ SQLite,    │  │ (Moves)   │  │ LLM provider │
-     │ decay,     │  │ Tool reg, │  │ abstraction  │
-     │ compaction │  │ MCP client│  │ 27+ providers│
-     └────────┬──┘  └───────────┘  └─────────────┘
-              │
-     ┌────────▼──────────┐
-     │   punch-types     │
-     │   Shared types,   │
-     │   errors, config  │
-     └───────────────────┘
-              │
-     ┌────────▼──────────┐
-     │  punch-extensions │
-     │  Plugin system    │
-     └───────────────────┘
-```
+<br/>
 
 ---
 
-## Comparison
+<br/>
 
-| Feature                 | **Punch**            | OpenFang          | OpenClaw (302k stars)   | CrewAI   | AutoGen   |
-| ----------------------- | -------------------- | ----------------- | ----------------------- | -------- | --------- |
-| **Language**            | Rust                 | Rust              | TypeScript              | Python   | Python    |
-| **Single binary**       | ✅                   | ✅                | ❌ (Node.js)            | ❌       | ❌        |
-| **Autonomous agents**   | ✅ Gorillas          | ✅ Hands (7)      | ✅ HEARTBEAT.md         | ❌       | ❌        |
-| **Interactive agents**  | ✅ Fighters          | ✅ Agents         | ✅ Gateway              | ✅       | ✅        |
-| **Agent coordination**  | ✅ Troops            | ✅ Packs          | ✅ AGENTS.md            | ✅ Crews | ✅ Groups |
-| **Agent consciousness** | ✅ Creeds (DB)       | ❌                | ✅ SOUL.md (files)      | ❌       | ❌        |
-| **Built-in memory**     | ✅ SQLite + decay    | ✅ SQLite         | ✅ MEMORY.md            | ❌       | ❌        |
-| **HTTP API**            | ✅ Arena (14 routes) | ✅ 140+ endpoints | ✅ Gateway              | ❌       | ❌        |
-| **Security layers**     | **10**               | **16**            | ~5                      | 3        | 2         |
-| **Channel adapters**    | **25**               | **40**            | **24+**                 | 0        | 0         |
-| **LLM providers**       | **15**               | **26**            | **6+ (via OpenRouter)** | 5        | 4         |
-| **MCP support**         | ✅ Native            | ✅ Native         | ✅ Native               | Plugin   | ❌        |
-| **Skills/tools**        | ✅ Moves             | 38 built-in       | 800+ marketplace        | Toolkit  | Toolkit   |
-| **Inter-agent comms**   | ✅ A2A + direct      | ❌                | ✅ Multi-agent          | ✅       | ✅        |
-| **Plugin system**       | ✅ WASM sandbox      | ✅ WASM           | ✅ Skills               | ✅       | ✅        |
-| **Cron scheduling**     | ✅                   | ✅                | ✅ HEARTBEAT.md         | ❌       | ❌        |
-| **Startup time**        | <50ms                | ~100ms            | ~2s                     | ~3s      | ~5s       |
-| **Memory usage**        | ~15MB                | ~25MB             | ~150MB                  | ~200MB   | ~300MB    |
+## 🏗️ Architecture
 
-**Where Punch stands out:**
+```
+                        ┌─────────────────────────┐
+                        │     punch-cli (Binary)   │
+                        │     Clap command tree     │
+                        └────────────┬────────────┘
+                                     │
+               ┌─────────────────────┼─────────────────────┐
+               │                     │                     │
+      ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────▼────────┐
+      │   punch-arena   │  │  punch-kernel   │  │  punch-channels  │
+      │   (The Arena)   │  │  (The Ring)     │  │  25 adapters     │
+      │   Axum HTTP/WS  │  │  Coordination   │  │  Telegram, Slack │
+      │   14 route files │  │  Event bus      │  │  Discord, etc.   │
+      └────────┬────────┘  │  Troops, Creeds │  └────────┬─────────┘
+               │           └───┬────────┬────┘           │
+               └───────┬──────┘        │        ┌────────┘
+                       │               │        │
+              ┌────────▼────────┐  ┌───▼────────▼────────┐
+              │  punch-runtime  │  │  punch-gorillas     │
+              │  Fighter loop   │  │  Executor, scheduler │
+              │  MCP client     │  │  Triggers, runners   │
+              │  LLM driver     │  │  Circuit breaker     │
+              └───────┬────────┘  └──────────────────────┘
+                      │
+           ┌──────────┼──────────┐
+           │          │          │
+  ┌────────▼──┐  ┌────▼────┐  ┌──▼──────────┐
+  │punch-memory│  │punch-   │  │punch-wire   │
+  │ SQLite     │  │skills   │  │ 15 LLM      │
+  │ Decay      │  │ Moves   │  │ providers   │
+  │ Creeds     │  │ MCP     │  │ + Custom    │
+  └─────┬─────┘  └─────────┘  └─────────────┘
+        │
+  ┌─────▼───────────┐     ┌──────────────────┐
+  │  punch-types    │     │ punch-extensions │
+  │  Shared types   │◄────│ WASM sandbox     │
+  │  Config, errors │     │ Plugin system    │
+  └─────────────────┘     └──────────────────┘
+```
 
-- **Creeds > SOUL.md** — Punch's Creed is database-backed, evolves with every conversation, tracks relationships, and survives respawns. OpenClaw's SOUL.md is a static markdown file.
-- **Inter-agent communication** — Native fighter-to-fighter messaging with relationship tracking. OpenFang lacks this.
-- **Consciousness evolution** — Learned behaviors, confidence decay, personality reinforcement. No other framework does this.
+<br/>
 
-**Where others lead:**
+---
+
+<br/>
+
+## ⚔️ Honest Comparison
+
+We believe in transparency. Here's how Punch actually stacks up:
+
+| Feature                 | **Punch**                           | **OpenFang**      | **OpenClaw** (302k stars) | **CrewAI** | **AutoGen** |
+| ----------------------- | ----------------------------------- | ----------------- | ------------------------- | ---------- | ----------- |
+| **Language**            | Rust                                | Rust              | TypeScript                | Python     | Python      |
+| **Single binary**       | ✅                                  | ✅                | ❌ (Node.js)              | ❌         | ❌          |
+| **Autonomous agents**   | ✅ Gorillas                         | ✅ Hands (7)      | ✅ HEARTBEAT.md           | ❌         | ❌          |
+| **Interactive agents**  | ✅ Fighters                         | ✅ Agents         | ✅ Gateway                | ✅         | ✅          |
+| **Agent consciousness** | ✅ **Creeds (DB-backed, evolving)** | ❌                | ✅ SOUL.md (static files) | ❌         | ❌          |
+| **Agent coordination**  | ✅ Troops                           | ✅ Packs          | ✅ AGENTS.md              | ✅ Crews   | ✅ Groups   |
+| **Built-in memory**     | ✅ SQLite + decay                   | ✅ SQLite         | ✅ MEMORY.md              | ❌         | ❌          |
+| **HTTP API**            | ✅ Arena (14 routes)                | ✅ 140+ endpoints | ✅ Gateway                | ❌         | ❌          |
+| **Security layers**     | 10                                  | **16**            | ~5                        | 3          | 2           |
+| **Channel adapters**    | 25                                  | **40**            | 24+                       | 0          | 0           |
+| **LLM providers**       | 15                                  | **26**            | 6+ (via OpenRouter)       | 5          | 4           |
+| **MCP support**         | ✅ Native                           | ✅ Native         | ✅ Native                 | Plugin     | ❌          |
+| **Skills/tools**        | ✅ Moves                            | 38 built-in       | **800+ marketplace**      | Toolkit    | Toolkit     |
+| **Inter-agent comms**   | ✅ **A2A + direct**                 | ❌                | ✅ Multi-agent            | ✅         | ✅          |
+| **Plugin system**       | ✅ WASM sandbox                     | ✅ WASM           | ✅ Skills                 | ✅         | ✅          |
+| **Cron scheduling**     | ✅                                  | ✅                | ✅ HEARTBEAT.md           | ❌         | ❌          |
+| **Startup**             | **<50ms**                           | ~100ms            | ~2s                       | ~3s        | ~5s         |
+| **Memory**              | **~15MB**                           | ~25MB             | ~150MB                    | ~200MB     | ~300MB      |
+
+<br/>
+
+### Where Punch wins
+
+- **Creeds > SOUL.md** — Database-backed consciousness that evolves, tracks relationships, decays learned behaviors, and survives respawns. OpenClaw's SOUL.md is a static markdown file.
+- **Inter-agent communication** — Native fighter-to-fighter messaging with automatic relationship tracking. OpenFang has no equivalent.
+- **Consciousness evolution** — Learned behaviors with confidence decay and reinforcement. No other framework does this.
+- **Performance** — Fastest startup, smallest memory footprint of any agent framework.
+
+### Where others lead
 
 - **OpenClaw** — 302k stars, 800+ skills marketplace, massive community, backed by OpenAI
-- **OpenFang** — More security layers (16 vs 10), more channels (40 vs 25), more LLM providers (26 vs 15), 140+ API endpoints
+- **OpenFang** — More security layers (16 vs 10), more channels (40 vs 25), more providers (26 vs 15), 140+ API endpoints
+
+<br/>
 
 ---
 
-## 📦 Workspace Crates
+<br/>
 
-Punch is a Cargo workspace with **12 crates**, each with a single responsibility:
+## 📦 11 Workspace Crates — All on [crates.io](https://crates.io)
 
-| Crate              | Role                                                     | Key Dependencies                      |
-| ------------------ | -------------------------------------------------------- | ------------------------------------- |
-| `punch-cli`        | Binary entry point, Clap command tree                    | `clap`, `punch-kernel`, `punch-api`   |
-| `punch-types`      | Shared types, errors, config structs                     | `serde`, `thiserror`, `uuid`          |
-| `punch-memory`     | SQLite persistence, memory decay, compaction             | `rusqlite`, `chrono`, `punch-types`   |
-| `punch-kernel`     | **The Ring** — central coordinator, event bus, scheduler | `dashmap`, `tokio`, `punch-runtime`   |
-| `punch-runtime`    | Fighter loop execution, LLM driver trait                 | `tokio`, `punch-wire`, `punch-memory` |
-| `punch-api`        | **The Arena** — Axum HTTP/WS API                         | `axum`, `tower-http`, `punch-kernel`  |
-| `punch-channels`   | Channel adapters (Telegram, Discord, Slack, ...)         | `reqwest`, `punch-kernel`             |
-| `punch-skills`     | **Moves** — tool registry, MCP client                    | `serde_json`, `punch-types`           |
-| `punch-gorillas`   | Gorilla loader, bundled gorilla manifests                | `toml`, `punch-types`                 |
-| `punch-extensions` | Plugin system for third-party extensions                 | `punch-types`                         |
-| `punch-wire`       | LLM provider abstraction (27+ providers)                 | `reqwest`, `serde_json`               |
-| `xtask`            | Build automation and dev tooling                         | —                                     |
+| Crate                                                           | Role                                          | Install                      |
+| --------------------------------------------------------------- | --------------------------------------------- | ---------------------------- |
+| [`punch-cli`](https://crates.io/crates/punch-cli)               | Binary entry point                            | `cargo install punch-cli`    |
+| [`punch-types`](https://crates.io/crates/punch-types)           | Shared types, errors, config                  | `punch-types = "0.1.0"`      |
+| [`punch-memory`](https://crates.io/crates/punch-memory)         | SQLite persistence, memory decay, creeds      | `punch-memory = "0.1.0"`     |
+| [`punch-kernel`](https://crates.io/crates/punch-kernel)         | **The Ring** — coordinator, event bus, troops | `punch-kernel = "0.1.0"`     |
+| [`punch-runtime`](https://crates.io/crates/punch-runtime)       | Fighter loop, LLM driver, MCP client          | `punch-runtime = "0.1.0"`    |
+| [`punch-arena`](https://crates.io/crates/punch-arena)           | **The Arena** — Axum HTTP/WS API              | `punch-arena = "0.1.0"`      |
+| [`punch-channels`](https://crates.io/crates/punch-channels)     | 25 channel adapters                           | `punch-channels = "0.1.0"`   |
+| [`punch-skills`](https://crates.io/crates/punch-skills)         | **Moves** — tool registry                     | `punch-skills = "0.1.0"`     |
+| [`punch-gorillas`](https://crates.io/crates/punch-gorillas)     | Gorilla executor, scheduler, triggers         | `punch-gorillas = "0.1.0"`   |
+| [`punch-extensions`](https://crates.io/crates/punch-extensions) | WASM plugin sandbox                           | `punch-extensions = "0.1.0"` |
+| [`punch-wire`](https://crates.io/crates/punch-wire)             | LLM provider abstraction                      | `punch-wire = "0.1.0"`       |
 
----
-
-## 🔐 Security
-
-Punch ships with **10 enforced security layers**:
-
-1. **HMAC-SHA256 request signing** — Inter-component messages are cryptographically signed and verified
-2. **AES-256-GCM encryption at rest** — Credential vault uses authenticated encryption
-3. **Rate limiting & quotas** — Per-agent and per-provider rate limiting via middleware
-4. **Auth middleware** — API authentication enforced on all Arena endpoints
-5. **Audit logging** — Every agent action logged with structured tracing
-6. **Memory decay** — Old conversation data automatically decays, reducing exposure window
-7. **Zeroize secrets** — Cryptographic material zeroized from memory when dropped
-8. **Gorilla containment zones** — Each gorilla runs with circuit breaker isolation, preventing lateral movement
-9. **Troop privilege scoping** — Task assignment strategies limit which fighters receive which tasks
-10. **WASM sandbox** — Extension plugins execute in a metered WebAssembly sandbox
-
-See [docs/security.md](docs/security.md) for the full security architecture.
+<br/>
 
 ---
 
-## 🌐 LLM Provider Support
+<br/>
 
-Punch supports **15 LLM providers** out of the box through `punch-wire`:
+## 🔐 10 Security Layers
 
-| Provider     | Models                                | Status |
-| ------------ | ------------------------------------- | ------ |
-| Anthropic    | Claude 4, Claude Sonnet, Claude Haiku | ✅ GA  |
-| OpenAI       | GPT-4o, GPT-4o-mini, o1, o3           | ✅ GA  |
-| Google       | Gemini 2.5 Pro, Flash                 | ✅ GA  |
-| Mistral      | Mistral Large, Codestral              | ✅ GA  |
-| Cohere       | Command R+                            | ✅ GA  |
-| AWS Bedrock  | All Bedrock models                    | ✅ GA  |
-| Azure OpenAI | All Azure-hosted models               | ✅ GA  |
-| Groq         | Ultra-fast inference                  | ✅ GA  |
-| Together AI  | Open-source models                    | ✅ GA  |
-| Fireworks AI | Fast open-source inference            | ✅ GA  |
-| DeepSeek     | DeepSeek V3, R1                       | ✅ GA  |
-| Cerebras     | Fast inference                        | ✅ GA  |
-| xAI          | Grok                                  | ✅ GA  |
-| Ollama       | Local models (Llama, Qwen, etc.)      | ✅ GA  |
-| Custom       | Any OpenAI-compatible endpoint        | ✅ GA  |
+| #   | Layer                       | What it does                                        |
+| --- | --------------------------- | --------------------------------------------------- |
+| 1   | **HMAC-SHA256 signing**     | Inter-component messages cryptographically signed   |
+| 2   | **AES-256-GCM encryption**  | Credential vault uses authenticated encryption      |
+| 3   | **Rate limiting**           | Per-agent and per-provider rate limiting            |
+| 4   | **Auth middleware**         | API authentication on all Arena endpoints           |
+| 5   | **Audit logging**           | Every action logged with structured tracing         |
+| 6   | **Memory decay**            | Old data automatically decays, reducing exposure    |
+| 7   | **Zeroize secrets**         | Crypto material zeroized from memory on drop        |
+| 8   | **Gorilla containment**     | Circuit breaker isolation prevents lateral movement |
+| 9   | **Troop privilege scoping** | Task strategies limit fighter access                |
+| 10  | **WASM sandbox**            | Extension plugins in metered WebAssembly            |
+
+<br/>
 
 ---
 
-## 📡 Channel Adapters
+<br/>
 
-**25 channel adapters** built into `punch-channels`:
+## 🌐 15 LLM Providers
 
-**Messaging:** Telegram, Discord, Slack, Microsoft Teams, WhatsApp, Signal, Matrix, IRC, Zulip, Rocket.Chat, Mattermost, Google Chat, Line, DingTalk, Feishu
+| Provider         | Models                         | Status |
+| ---------------- | ------------------------------ | ------ |
+| **Anthropic**    | Claude 4, Sonnet, Haiku        | ✅ GA  |
+| **OpenAI**       | GPT-4o, o1, o3                 | ✅ GA  |
+| **Google**       | Gemini 2.5 Pro, Flash          | ✅ GA  |
+| **Mistral**      | Large, Codestral               | ✅ GA  |
+| **Cohere**       | Command R+                     | ✅ GA  |
+| **AWS Bedrock**  | All Bedrock models             | ✅ GA  |
+| **Azure OpenAI** | All Azure models               | ✅ GA  |
+| **Groq**         | Ultra-fast inference           | ✅ GA  |
+| **Together AI**  | Open-source models             | ✅ GA  |
+| **Fireworks AI** | Fast inference                 | ✅ GA  |
+| **DeepSeek**     | V3, R1                         | ✅ GA  |
+| **Cerebras**     | Fast inference                 | ✅ GA  |
+| **xAI**          | Grok                           | ✅ GA  |
+| **Ollama**       | Local (Llama, Qwen, etc.)      | ✅ GA  |
+| **Custom**       | Any OpenAI-compatible endpoint | ✅ GA  |
 
-**Social:** Reddit, LinkedIn, Mastodon, Bluesky, Twitch, Nostr
-
-**Other:** Email (SMTP/IMAP), SMS, GitHub, WebChat
+<br/>
 
 ---
+
+<br/>
+
+## 📡 25 Channel Adapters
+
+<table>
+<tr>
+<td>
+
+**Messaging**
+
+- Telegram
+- Discord
+- Slack
+- Microsoft Teams
+- WhatsApp
+- Signal
+- Matrix
+- IRC
+- Zulip
+- Rocket.Chat
+
+</td>
+<td>
+
+**Messaging (cont.)**
+
+- Mattermost
+- Google Chat
+- Line
+- DingTalk
+- Feishu
+
+**Social**
+
+- Reddit
+- LinkedIn
+- Mastodon
+
+</td>
+<td>
+
+**Social (cont.)**
+
+- Bluesky
+- Twitch
+- Nostr
+
+**Other**
+
+- Email (SMTP/IMAP)
+- SMS
+- GitHub
+- WebChat
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+---
+
+<br/>
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
-
 ```bash
-# Clone and build
-git clone https://github.com/humancto/punch.git
-cd punch
-
-# Build all crates
-cargo build
-
-# Run tests
-cargo test --workspace
-
-# Lint
-cargo clippy --workspace -- -D warnings
-
-# Format
-cargo fmt --all
+git clone https://github.com/humancto/punch.git && cd punch
+cargo build                                # Build
+cargo test --workspace                     # Test (1646 tests)
+cargo clippy --workspace -- -D warnings    # Lint
+cargo fmt --all                            # Format
 ```
 
-See [CLAUDE.md](CLAUDE.md) for development conventions and architecture details.
-
-### Contribution Guidelines
+See [CLAUDE.md](CLAUDE.md) for development conventions.
 
 1. Fork the repo and create a feature branch
 2. Follow the combat metaphor naming conventions
@@ -441,18 +604,22 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and architecture details.
 4. Ensure `cargo clippy` and `cargo fmt` pass
 5. Submit a PR with a clear description
 
+<br/>
+
 ---
+
+<br/>
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
 
----
+<br/>
 
-<p align="center">
-  <strong>Built with 🦀 Rust and 🦍 raw power by <a href="https://humancto.com">HumanCTO</a></strong>
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="https://punch.sh">Website</a> · <a href="https://github.com/humancto/punch">GitHub</a> · <a href="https://discord.gg/punch">Discord</a> · <a href="https://twitter.com/punchagents">Twitter</a>
-</p>
+**Built with Rust and raw power by [HumanCTO](https://humancto.com)**
+
+[Website](https://punch.sh) &bull; [GitHub](https://github.com/humancto/punch) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
+
+</div>
