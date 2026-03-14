@@ -54,7 +54,7 @@ cargo build --release
 cargo install punch-cli
 
 # Or via Homebrew (macOS/Linux)
-brew tap humancto/punch
+brew tap humancto/tap
 brew install punch
 ```
 

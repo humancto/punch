@@ -106,5 +106,5 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          echo "Homebrew tap update for tag $TAG_NAME"
-          echo "Configure humancto/homebrew-punch repository with formula"
+          echo "Update humancto/homebrew-tap Formula/punch.rb with tag $TAG_NAME"
+          echo "Update sha256 hashes from release artifacts"
