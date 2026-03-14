@@ -16,6 +16,7 @@ punch-types = { version = "0.1.0", path = "../punch-types" }
 punch-kernel = { version = "0.1.0", path = "../punch-kernel" }
 punch-memory = { version = "0.1.0", path = "../punch-memory" }
 punch-channels = { version = "0.1.0", path = "../punch-channels" }
+punch-skills = { version = "0.1.0", path = "../punch-skills" }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }

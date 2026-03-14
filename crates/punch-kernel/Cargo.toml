@@ -12,6 +12,7 @@ description = "The Ring — central kernel and orchestrator for the Punch Agent 
 punch-types = { version = "0.1.0", path = "../punch-types" }
 punch-memory = { version = "0.1.0", path = "../punch-memory" }
 punch-runtime = { version = "0.1.0", path = "../punch-runtime" }
+punch-skills = { version = "0.1.0", path = "../punch-skills" }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
