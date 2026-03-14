@@ -9,6 +9,7 @@
 pub mod backup;
 pub mod bouts;
 pub mod consolidation;
+pub mod creed;
 pub mod embeddings;
 pub mod fighters;
 pub mod knowledge;

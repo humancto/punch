@@ -425,7 +425,49 @@ impl Ring {
         });
 
         info!(%id, name, "fighter spawned");
+
+        // --- Creed binding ---
+        // If a creed exists for this fighter name, bind it to the new instance.
+        // This ensures the creed persists across kill/respawn cycles.
+        {
+            let memory = Arc::clone(&self.memory);
+            let creed_name = name.clone();
+            let fid = id;
+            tokio::spawn(async move {
+                if let Ok(Some(_)) = memory.load_creed_by_name(&creed_name).await {
+                    if let Err(e) = memory.bind_creed_to_fighter(&creed_name, &fid).await {
+                        warn!(error = %e, fighter = %creed_name, "failed to bind creed on spawn");
+                    } else {
+                        info!(fighter = %creed_name, id = %fid, "creed bound to fighter on spawn");
+                    }
+                }
+            });
+        }
+
         id
+    }
+
+    /// Create a default creed for a fighter if none exists.
+    /// The default creed includes self-awareness from the manifest.
+    pub async fn ensure_creed(&self, fighter_name: &str, manifest: &FighterManifest) {
+        match self.memory.load_creed_by_name(fighter_name).await {
+            Ok(Some(_)) => {
+                // Creed already exists.
+            }
+            Ok(None) => {
+                // Create a default creed with self-awareness.
+                let creed = punch_types::Creed::new(fighter_name)
+                    .with_self_awareness(manifest);
+                if let Err(e) = self.memory.save_creed(&creed).await {
+                    warn!(error = %e, "failed to create default creed");
+                } else {
+                    info!(fighter = %fighter_name, "default creed created with self-awareness");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to check for existing creed");
+            }
+        }
     }
 
     /// Send a user message to a fighter and run the agent loop (without coordinator).

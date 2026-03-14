@@ -350,8 +350,8 @@ async fn test_builtin_migrations_create_schema() {
     let builtins = MigrationEngine::builtin_migrations();
     let applied = engine.migrate_up(&builtins).unwrap();
 
-    assert_eq!(applied.len(), 10, "should apply all 10 built-in migrations");
-    assert_eq!(engine.current_version().unwrap(), 10);
+    assert_eq!(applied.len(), 11, "should apply all 11 built-in migrations");
+    assert_eq!(engine.current_version().unwrap(), 11);
 
     // Verify core tables exist.
     let c = arc.lock().unwrap();

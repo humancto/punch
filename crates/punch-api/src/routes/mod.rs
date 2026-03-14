@@ -4,6 +4,7 @@ pub mod a2a;
 pub mod budget;
 pub mod channels;
 pub mod chat;
+pub mod creed;
 pub mod dashboard;
 pub mod docs;
 pub mod fighters;
@@ -35,6 +36,7 @@ pub fn api_router() -> Router<AppState> {
         .merge(metrics::router())
         .merge(a2a::router())
         .merge(budget::router())
+        .merge(creed::router())
         .merge(tenants::router())
         .merge(docs::router())
 }

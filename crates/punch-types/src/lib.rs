@@ -6,6 +6,7 @@ pub mod cdp;
 pub mod capability;
 pub mod config;
 pub mod coordinator;
+pub mod creed;
 pub mod error;
 pub mod event;
 pub mod fighter;
@@ -53,6 +54,10 @@ pub use cdp::{
 pub use capability::{Capability, CapabilityGrant};
 pub use config::{ModelConfig, Provider, PunchConfig};
 pub use coordinator::{AgentCoordinator, AgentInfo, AgentMessageResult};
+pub use creed::{
+    Creed, CreedId, DelegationRule, HeartbeatTask, InteractionStyle, LearnedBehavior, Relationship,
+    SelfModel,
+};
 pub use error::{PunchError, PunchResult};
 pub use event::{EventPayload, PunchEvent};
 pub use fighter::{FighterId, FighterManifest, FighterStats, FighterStatus, WeightClass};

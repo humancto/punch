@@ -432,6 +432,28 @@ impl MigrationEngine {
                 .into(),
                 down_sql: "DROP TABLE IF EXISTS embeddings;".into(),
             },
+            Migration {
+                version: 11,
+                name: "create_creeds_table".into(),
+                up_sql: "CREATE TABLE IF NOT EXISTS creeds (
+                    id          TEXT PRIMARY KEY,
+                    fighter_name TEXT NOT NULL,
+                    fighter_id  TEXT,
+                    creed_data  TEXT NOT NULL,
+                    version     INTEGER NOT NULL DEFAULT 1,
+                    bout_count  INTEGER NOT NULL DEFAULT 0,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_creeds_fighter_name ON creeds(fighter_name);
+                CREATE INDEX IF NOT EXISTS idx_creeds_fighter_id ON creeds(fighter_id);"
+                    .into(),
+                down_sql: "DROP INDEX IF EXISTS idx_creeds_fighter_id;
+                DROP INDEX IF EXISTS idx_creeds_fighter_name;
+                DROP TABLE IF EXISTS creeds;"
+                    .into(),
+            },
         ]
     }
 
@@ -750,8 +772,8 @@ mod tests {
 
         // All built-in migrations should apply without error.
         let applied = engine.migrate_up(&builtins).unwrap();
-        assert_eq!(applied.len(), 10);
-        assert_eq!(engine.current_version().unwrap(), 10);
+        assert_eq!(applied.len(), 11);
+        assert_eq!(engine.current_version().unwrap(), 11);
     }
 
     #[test]
@@ -881,6 +903,6 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version.unwrap_or(0), 10);
+        assert_eq!(version.unwrap_or(0), 11);
     }
 }

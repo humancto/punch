@@ -174,9 +174,10 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             tools: params.available_tools.clone(),
             max_tokens: params.manifest.model.max_tokens.unwrap_or(
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
-                // so they need a higher default to leave room for visible output.
+                // so they need a much higher default to leave room for visible output.
+                // The thinking budget can easily consume 2000-4000 tokens alone.
                 match params.manifest.model.provider {
-                    punch_types::Provider::Ollama => 8192,
+                    punch_types::Provider::Ollama => 16384,
                     _ => 4096,
                 }
             ),
@@ -254,6 +255,20 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     total_tokens = total_usage.total(),
                     "fighter loop complete"
                 );
+
+                // --- CREED EVOLUTION ---
+                // Update the creed with bout statistics after completion.
+                if let Ok(Some(mut creed)) = params.memory.load_creed_by_name(&params.manifest.name).await {
+                    creed.record_bout();
+                    creed.record_messages(guard.iterations() as u64 + 1); // +1 for user msg
+                    // Bind to current fighter instance
+                    creed.fighter_id = Some(params.fighter_id);
+                    if let Err(e) = params.memory.save_creed(&creed).await {
+                        warn!(error = %e, "failed to update creed after bout");
+                    } else {
+                        debug!(fighter = %params.manifest.name, bout_count = creed.bout_count, "creed evolved");
+                    }
+                }
 
                 return Ok(FighterLoopResult {
                     response,
@@ -473,6 +488,22 @@ async fn build_system_prompt(
     memory: &MemorySubstrate,
 ) -> String {
     let mut prompt = manifest.system_prompt.clone();
+
+    // --- CREED INJECTION ---
+    // Load the fighter's creed (consciousness layer) if one exists.
+    // The creed is tied to fighter NAME so it persists across respawns.
+    match memory.load_creed_by_name(&manifest.name).await {
+        Ok(Some(creed)) => {
+            prompt.push_str("\n\n");
+            prompt.push_str(&creed.render());
+        }
+        Ok(None) => {
+            // No creed defined — fighter runs without consciousness layer.
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to load creed for fighter");
+        }
+    }
 
     // Try to recall recent/relevant memories.
     match memory.recall_memories(fighter_id, "", 10).await {
