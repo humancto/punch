@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 
+use serde::Deserialize as SerdeDeserialize;
 use tracing::{debug, error, info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
@@ -179,7 +180,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 match params.manifest.model.provider {
                     punch_types::Provider::Ollama => 16384,
                     _ => 4096,
-                }
+                },
             ),
             temperature: params.manifest.model.temperature,
             system_prompt: Some(system_prompt.clone()),
@@ -258,7 +259,11 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
 
                 // --- CREED EVOLUTION ---
                 // Update the creed with bout statistics after completion.
-                if let Ok(Some(mut creed)) = params.memory.load_creed_by_name(&params.manifest.name).await {
+                if let Ok(Some(mut creed)) = params
+                    .memory
+                    .load_creed_by_name(&params.manifest.name)
+                    .await
+                {
                     creed.record_bout();
                     creed.record_messages(guard.iterations() as u64 + 1); // +1 for user msg
                     // Bind to current fighter instance
@@ -268,6 +273,20 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     } else {
                         debug!(fighter = %params.manifest.name, bout_count = creed.bout_count, "creed evolved");
                     }
+                }
+
+                // Spawn async reflection to extract learned behaviors from the bout.
+                // This runs in the background and does not block the response.
+                {
+                    let driver = Arc::clone(&params.driver);
+                    let memory = Arc::clone(&params.memory);
+                    let model = params.manifest.model.model.clone();
+                    let fighter_name = params.manifest.name.clone();
+                    let reflection_messages = messages.clone();
+                    tokio::spawn(async move {
+                        reflect_on_bout(driver, memory, model, fighter_name, reflection_messages)
+                            .await;
+                    });
                 }
 
                 return Ok(FighterLoopResult {
@@ -527,4 +546,145 @@ async fn build_system_prompt(
     }
 
     prompt
+}
+
+/// A single learned behavior extracted from post-bout reflection.
+#[derive(Debug, SerdeDeserialize)]
+struct ReflectionItem {
+    observation: String,
+    confidence: f64,
+}
+
+/// Post-bout reflection output from the LLM.
+#[derive(Debug, SerdeDeserialize)]
+struct ReflectionOutput {
+    behaviors: Vec<ReflectionItem>,
+    #[serde(default)]
+    interaction_quality: Option<f64>,
+}
+
+/// Reflect on a completed bout to extract learned behaviors.
+///
+/// Makes a lightweight LLM call asking the model to extract insights from
+/// the conversation. Updates the creed with new learned behaviors and
+/// adjusts the user relationship trust based on interaction quality.
+async fn reflect_on_bout(
+    driver: Arc<dyn LlmDriver>,
+    memory: Arc<MemorySubstrate>,
+    model: String,
+    fighter_name: String,
+    messages: Vec<Message>,
+) {
+    // Only use the last 20 messages to keep the reflection call small
+    let recent: Vec<Message> = messages.into_iter().rev().take(20).rev().collect();
+
+    let reflection_prompt = r#"You just completed a conversation. Reflect on it and extract learned behaviors.
+
+Respond ONLY with valid JSON (no markdown fences, no commentary):
+{
+  "behaviors": [
+    {"observation": "what you learned", "confidence": 0.0-1.0}
+  ],
+  "interaction_quality": 0.0-1.0
+}
+
+Rules:
+- Extract 0-3 genuinely new insights about the user, effective patterns, or self-improvement notes
+- confidence: 0.5 = uncertain, 0.9 = very confident
+- interaction_quality: how productive/positive was this interaction (0.5 = neutral, 0.9 = great)
+- If nothing notable was learned, return: {"behaviors": [], "interaction_quality": 0.7}
+- DO NOT restate your directives or identity as learned behaviors"#;
+
+    let request = CompletionRequest {
+        model,
+        messages: recent,
+        tools: vec![],
+        max_tokens: 512,
+        temperature: Some(0.3),
+        system_prompt: Some(reflection_prompt.to_string()),
+    };
+
+    let response = match driver.complete(request).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            debug!(error = %e, fighter = %fighter_name, "reflection LLM call failed (non-critical)");
+            return;
+        }
+    };
+
+    let content = response.message.content.trim().to_string();
+
+    // Try to parse JSON, stripping markdown fences if present
+    let json_str = if let Some(start) = content.find('{') {
+        if let Some(end) = content.rfind('}') {
+            &content[start..=end]
+        } else {
+            &content
+        }
+    } else {
+        &content
+    };
+
+    let output: ReflectionOutput = match serde_json::from_str(json_str) {
+        Ok(o) => o,
+        Err(e) => {
+            debug!(error = %e, fighter = %fighter_name, "failed to parse reflection JSON (non-critical)");
+            return;
+        }
+    };
+
+    // Load creed, apply changes, save
+    let mut creed = match memory.load_creed_by_name(&fighter_name).await {
+        Ok(Some(c)) => c,
+        _ => return,
+    };
+
+    // Apply confidence decay to existing behaviors
+    creed.decay_learned_behaviors(0.01, 0.3);
+
+    // Learn new behaviors
+    for item in &output.behaviors {
+        if !item.observation.is_empty() {
+            creed.learn(&item.observation, item.confidence.clamp(0.0, 1.0));
+        }
+    }
+
+    // Prune to max 20 behaviors
+    creed.prune_learned_behaviors(20);
+
+    // Update user relationship trust based on interaction quality
+    if let Some(quality) = output.interaction_quality {
+        let quality = quality.clamp(0.0, 1.0);
+        if let Some(rel) = creed
+            .relationships
+            .iter_mut()
+            .find(|r| r.entity_type == "user")
+        {
+            rel.trust = (rel.trust * 0.9 + quality * 0.1).clamp(0.0, 1.0);
+            rel.interaction_count += 1;
+        } else {
+            creed.relationships.push(punch_types::Relationship {
+                entity: "user".to_string(),
+                entity_type: "user".to_string(),
+                nature: "operator".to_string(),
+                trust: quality,
+                interaction_count: 1,
+                notes: format!(
+                    "First interaction: {}",
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+                ),
+            });
+        }
+    }
+
+    if let Err(e) = memory.save_creed(&creed).await {
+        warn!(error = %e, fighter = %fighter_name, "failed to save creed after reflection");
+    } else {
+        info!(
+            fighter = %fighter_name,
+            new_behaviors = output.behaviors.len(),
+            total_behaviors = creed.learned_behaviors.len(),
+            "creed evolved via post-bout reflection"
+        );
+    }
 }

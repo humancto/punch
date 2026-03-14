@@ -24,9 +24,10 @@ use punch_runtime::{
 use punch_types::{
     AgentCoordinator, AgentInfo, AgentMessageResult, CoordinationStrategy, FighterId,
     FighterManifest, FighterStatus, GorillaId, GorillaManifest, GorillaMetrics, GorillaStatus,
-    PunchConfig, PunchError, PunchEvent, PunchResult, TenantId, TenantStatus, Troop,
-    TroopId,
+    PunchConfig, PunchError, PunchEvent, PunchResult, TenantId, TenantStatus, Troop, TroopId,
 };
+
+use punch_skills::{SkillMarketplace, builtin_skills};
 
 use crate::agent_messaging::MessageRouter;
 use crate::background::BackgroundExecutor;
@@ -36,9 +37,9 @@ use crate::metering::MeteringEngine;
 use crate::metrics::{self, MetricsRegistry};
 use crate::scheduler::{QuotaConfig, Scheduler};
 use crate::swarm::SwarmCoordinator;
+use crate::tenant_registry::TenantRegistry;
 use crate::triggers::{Trigger, TriggerEngine, TriggerId, TriggerSummary};
 use crate::troop::TroopManager;
-use crate::tenant_registry::TenantRegistry;
 use crate::workflow::{Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 // ---------------------------------------------------------------------------
@@ -126,6 +127,8 @@ pub struct Ring {
     metrics: Arc<MetricsRegistry>,
     /// Multi-tenant registry.
     tenant_registry: TenantRegistry,
+    /// Skill marketplace for discovering and installing moves.
+    marketplace: SkillMarketplace,
     /// Shutdown signal sender.
     shutdown_tx: watch::Sender<bool>,
     /// Shutdown signal receiver.
@@ -152,6 +155,11 @@ impl Ring {
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
+        let marketplace = SkillMarketplace::new();
+        for listing in builtin_skills() {
+            marketplace.publish(listing);
+        }
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -170,6 +178,7 @@ impl Ring {
             message_router: MessageRouter::new(),
             metrics: metrics_registry,
             tenant_registry: TenantRegistry::new(),
+            marketplace,
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -191,6 +200,11 @@ impl Ring {
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
+        let marketplace = SkillMarketplace::new();
+        for listing in builtin_skills() {
+            marketplace.publish(listing);
+        }
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -209,6 +223,7 @@ impl Ring {
             message_router: MessageRouter::new(),
             metrics: metrics_registry,
             tenant_registry: TenantRegistry::new(),
+            marketplace,
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -269,6 +284,11 @@ impl Ring {
     /// Get a reference to the tenant registry.
     pub fn tenant_registry(&self) -> &TenantRegistry {
         &self.tenant_registry
+    }
+
+    /// Access the skill marketplace.
+    pub fn marketplace(&self) -> &SkillMarketplace {
+        &self.marketplace
     }
 
     // -- Tenant-scoped operations --------------------------------------------
@@ -340,9 +360,10 @@ impl Ring {
         fighter_id: &FighterId,
         tenant_id: &TenantId,
     ) -> PunchResult<()> {
-        let entry = self.fighters.get(fighter_id).ok_or_else(|| {
-            PunchError::Fighter(format!("fighter {} not found", fighter_id))
-        })?;
+        let entry = self
+            .fighters
+            .get(fighter_id)
+            .ok_or_else(|| PunchError::Fighter(format!("fighter {} not found", fighter_id)))?;
 
         if entry.manifest.tenant_id.as_ref() != Some(tenant_id) {
             return Err(PunchError::Auth(format!(
@@ -457,8 +478,7 @@ impl Ring {
             }
             Ok(None) => {
                 // Create a default creed with self-awareness.
-                let creed = punch_types::Creed::new(fighter_name)
-                    .with_self_awareness(manifest);
+                let creed = punch_types::Creed::new(fighter_name).with_self_awareness(manifest);
                 if let Err(e) = self.memory.save_creed(&creed).await {
                     warn!(error = %e, "failed to create default creed");
                 } else {
@@ -594,10 +614,8 @@ impl Ring {
                         .record_usage(fighter_id, loop_result.usage.total());
 
                     // Record token usage metrics.
-                    self.metrics.counter_add(
-                        metrics::TOKENS_INPUT_TOTAL,
-                        loop_result.usage.input_tokens,
-                    );
+                    self.metrics
+                        .counter_add(metrics::TOKENS_INPUT_TOTAL, loop_result.usage.input_tokens);
                     self.metrics.counter_add(
                         metrics::TOKENS_OUTPUT_TOTAL,
                         loop_result.usage.output_tokens,
@@ -888,11 +906,7 @@ impl Ring {
     ///
     /// Loads both creeds, adds or updates the peer relationship entry
     /// (incrementing interaction_count), and saves them back.
-    pub async fn update_fighter_relationships(
-        &self,
-        fighter_a_name: &str,
-        fighter_b_name: &str,
-    ) {
+    pub async fn update_fighter_relationships(&self, fighter_a_name: &str, fighter_b_name: &str) {
         let memory = Arc::clone(&self.memory);
         let a_name = fighter_a_name.to_string();
         let b_name = fighter_b_name.to_string();
@@ -901,7 +915,7 @@ impl Ring {
         tokio::spawn(async move {
             // Update A's creed with relationship to B.
             if let Ok(Some(mut creed_a)) = memory.load_creed_by_name(&a_name).await {
-                update_relationship(&mut creed_a, &b_name);
+                update_relationship(&mut creed_a, &b_name, None);
                 if let Err(e) = memory.save_creed(&creed_a).await {
                     warn!(error = %e, fighter = %a_name, "failed to save creed relationship update");
                 }
@@ -909,7 +923,7 @@ impl Ring {
 
             // Update B's creed with relationship to A.
             if let Ok(Some(mut creed_b)) = memory.load_creed_by_name(&b_name).await {
-                update_relationship(&mut creed_b, &a_name);
+                update_relationship(&mut creed_b, &a_name, None);
                 if let Err(e) = memory.save_creed(&creed_b).await {
                     warn!(error = %e, fighter = %b_name, "failed to save creed relationship update");
                 }
@@ -964,7 +978,9 @@ impl Ring {
         }
 
         let member_count = members.len() + 1; // +1 for leader if not in list
-        let troop_id = self.troop_manager.form_troop(name.clone(), leader, members, strategy);
+        let troop_id = self
+            .troop_manager
+            .form_troop(name.clone(), leader, members, strategy);
 
         self.event_bus.publish(PunchEvent::TroopFormed {
             troop_id,
@@ -1008,11 +1024,7 @@ impl Ring {
     }
 
     /// Recruit a fighter into a troop.
-    pub fn recruit_to_troop(
-        &self,
-        troop_id: &TroopId,
-        fighter_id: FighterId,
-    ) -> PunchResult<()> {
+    pub fn recruit_to_troop(&self, troop_id: &TroopId, fighter_id: FighterId) -> PunchResult<()> {
         // Verify the fighter exists.
         if self.fighters.get(&fighter_id).is_none() {
             return Err(PunchError::Troop(format!(
@@ -1100,13 +1112,16 @@ impl Ring {
 // ---------------------------------------------------------------------------
 
 /// Update or insert a peer relationship in a creed.
-fn update_relationship(creed: &mut punch_types::Creed, peer_name: &str) {
+fn update_relationship(creed: &mut punch_types::Creed, peer_name: &str, trust_nudge: Option<f64>) {
     if let Some(rel) = creed
         .relationships
         .iter_mut()
         .find(|r| r.entity == peer_name && r.entity_type == "fighter")
     {
         rel.interaction_count += 1;
+        if let Some(nudge) = trust_nudge {
+            rel.trust = (rel.trust * 0.9 + nudge * 0.1).clamp(0.0, 1.0);
+        }
         rel.notes = format!(
             "Last interaction: {}",
             chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
@@ -1116,7 +1131,7 @@ fn update_relationship(creed: &mut punch_types::Creed, peer_name: &str) {
             entity: peer_name.to_string(),
             entity_type: "fighter".to_string(),
             nature: "peer".to_string(),
-            trust: 0.5,
+            trust: trust_nudge.unwrap_or(0.5),
             interaction_count: 1,
             notes: format!(
                 "First interaction: {}",

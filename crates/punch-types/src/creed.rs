@@ -319,6 +319,32 @@ impl Creed {
         self.updated_at = now;
     }
 
+    /// Apply time-based confidence decay to learned behaviors.
+    /// Behaviors that fall below min_confidence are removed.
+    pub fn decay_learned_behaviors(&mut self, decay_rate: f64, min_confidence: f64) {
+        let now = chrono::Utc::now();
+        self.learned_behaviors.retain_mut(|b| {
+            let age_secs = (now - b.last_reinforced).num_seconds().max(0) as f64;
+            let age_days = age_secs / 86400.0;
+            if age_days > 0.0 {
+                b.confidence *= (1.0 - decay_rate).powf(age_days);
+            }
+            b.confidence >= min_confidence
+        });
+    }
+
+    /// Prune learned behaviors to keep only the top N by confidence.
+    pub fn prune_learned_behaviors(&mut self, max: usize) {
+        if self.learned_behaviors.len() > max {
+            self.learned_behaviors.sort_by(|a, b| {
+                b.confidence
+                    .partial_cmp(&a.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            self.learned_behaviors.truncate(max);
+        }
+    }
+
     /// Render the creed as a system prompt section to inject.
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -713,5 +739,45 @@ mod tests {
     fn test_creed_id_default() {
         let id = CreedId::default();
         assert_ne!(id.0, Uuid::nil());
+    }
+
+    #[test]
+    fn test_decay_learned_behaviors() {
+        let mut creed = Creed::new("ECHO");
+        // Add a behavior with old timestamp
+        creed.learned_behaviors.push(LearnedBehavior {
+            observation: "Old observation".to_string(),
+            confidence: 0.5,
+            reinforcement_count: 1,
+            first_observed: chrono::Utc::now() - chrono::Duration::days(100),
+            last_reinforced: chrono::Utc::now() - chrono::Duration::days(100),
+        });
+        // Add a fresh behavior
+        creed.learned_behaviors.push(LearnedBehavior {
+            observation: "Fresh observation".to_string(),
+            confidence: 0.9,
+            reinforcement_count: 3,
+            first_observed: chrono::Utc::now(),
+            last_reinforced: chrono::Utc::now(),
+        });
+
+        creed.decay_learned_behaviors(0.01, 0.3);
+        // Old one should be decayed below threshold and removed
+        // Fresh one should remain
+        assert_eq!(creed.learned_behaviors.len(), 1);
+        assert_eq!(creed.learned_behaviors[0].observation, "Fresh observation");
+    }
+
+    #[test]
+    fn test_prune_learned_behaviors() {
+        let mut creed = Creed::new("ECHO");
+        for i in 0..25 {
+            creed.learn(&format!("Observation {}", i), (i as f64) / 25.0);
+        }
+        assert_eq!(creed.learned_behaviors.len(), 25);
+        creed.prune_learned_behaviors(20);
+        assert_eq!(creed.learned_behaviors.len(), 20);
+        // Should keep the highest confidence ones
+        assert!(creed.learned_behaviors[0].confidence >= creed.learned_behaviors[19].confidence);
     }
 }
