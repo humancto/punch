@@ -2,6 +2,10 @@
 name = "punch-api"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "The Arena — HTTP API server for the Punch Agent Combat System"
 
 [dependencies]
