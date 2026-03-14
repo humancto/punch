@@ -5,6 +5,7 @@
 //! Skills are bundles of tools, requirements, and domain-specific prompts
 //! that can be loaded into a fighter to grant it new capabilities.
 
+pub mod loader;
 pub mod marketplace;
 
 use std::collections::HashMap;
@@ -14,8 +15,12 @@ use tracing::info;
 
 use punch_types::ToolDefinition;
 
+pub use loader::{
+    load_all_skills, load_skill_from_dir, load_skills_from_dir, parse_skill_md,
+    render_skills_prompt, LoadedSkill, SkillFrontmatter, SkillPrecedence,
+};
 pub use marketplace::{
-    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
+    builtin_skills, InstalledSkill, SkillListing, SkillMarketplace, SkillSource,
 };
 
 // ---------------------------------------------------------------------------

@@ -524,6 +524,30 @@ async fn build_system_prompt(
         }
     }
 
+    // --- SKILL INJECTION ---
+    // Load markdown-based skills from workspace, user, and bundled directories.
+    {
+        let workspace_skills = std::path::Path::new("./skills");
+        let user_skills = std::env::var("HOME")
+            .ok()
+            .map(|h| std::path::PathBuf::from(h).join(".punch").join("skills"));
+        // Bundled skills ship in the binary's directory
+        let bundled_skills = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("skills")));
+
+        let skills = punch_skills::load_all_skills(
+            Some(workspace_skills),
+            user_skills.as_deref(),
+            bundled_skills.as_deref(),
+        );
+
+        if !skills.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&punch_skills::render_skills_prompt(&skills));
+        }
+    }
+
     // Try to recall recent/relevant memories.
     match memory.recall_memories(fighter_id, "", 10).await {
         Ok(memories) if !memories.is_empty() => {
