@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PUNCH — The Agent Combat System</title>
+<meta name="description" content="Deploy autonomous AI agent squads from a single Rust binary. Database-backed agent consciousness, inter-agent communication, 25 channels, 15 LLM providers.">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #050505;
+  --bg-elevated: #0c0c0c;
+  --bg-card: rgba(255,255,255,0.03);
+  --border: rgba(255,255,255,0.06);
+  --border-bright: rgba(255,255,255,0.12);
+  --text: #e8e8e8;
+  --text-dim: #777;
+  --text-muted: #444;
+  --red: #ff2d2d;
+  --red-glow: rgba(255,45,45,0.15);
+  --orange: #ff6b35;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Outfit', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--sans);
+  line-height: 1.6; overflow-x: hidden; -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--red); color: #fff; }
+
+.grid-bg {
+  position: fixed; inset: 0; z-index: 0;
+  background-image:
+    linear-gradient(rgba(255,45,45,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,45,45,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%);
+  pointer-events: none;
+}
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.container-wide { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
+section { position: relative; z-index: 1; }
+
+/* NAV */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 16px 24px; background: rgba(5,5,5,0.8);
+  backdrop-filter: blur(20px); border-bottom: 1px solid var(--border);
+  transition: all 0.3s;
+}
+nav.scrolled { background: rgba(5,5,5,0.95); }
+nav .inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+nav .logo { font-family: var(--mono); font-weight: 800; font-size: 18px; letter-spacing: 4px; color: var(--red); text-decoration: none; }
+nav .links { display: flex; gap: 32px; align-items: center; }
+nav .links a { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--text-dim); text-decoration: none; text-transform: uppercase; transition: color 0.2s; }
+nav .links a:hover { color: var(--text); }
+nav .gh-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border-bright); border-radius: 6px; font-family: var(--mono); font-size: 12px; color: var(--text); text-decoration: none; transition: all 0.2s; }
+nav .gh-btn:hover { border-color: var(--red); color: var(--red); }
+
+/* HERO */
+.hero { min-height: 100vh; display: flex; align-items: center; padding: 120px 0 80px; position: relative; }
+.hero::before { content: ''; position: absolute; top: 20%; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, rgba(255,45,45,0.08) 0%, transparent 70%); pointer-events: none; }
+.hero-content { text-align: center; width: 100%; position: relative; }
+.hero-label { font-family: var(--mono); font-size: 12px; letter-spacing: 6px; text-transform: uppercase; color: var(--red); margin-bottom: 32px; opacity: 0; animation: fadeUp 0.8s 0.2s forwards; }
+.hero-title { font-family: var(--mono); font-size: clamp(80px, 15vw, 200px); font-weight: 800; letter-spacing: -2px; line-height: 0.85; color: #fff; margin-bottom: 24px; opacity: 0; animation: fadeUp 0.8s 0.4s forwards; }
+.hero-title .punch-letter { display: inline-block; text-shadow: 0 0 80px rgba(255,45,45,0.3), 0 0 160px rgba(255,45,45,0.1); }
+.hero-subtitle { font-family: var(--sans); font-size: clamp(18px, 2.5vw, 24px); font-weight: 300; color: var(--text-dim); max-width: 600px; margin: 0 auto 48px; line-height: 1.5; opacity: 0; animation: fadeUp 0.8s 0.6s forwards; }
+.hero-install { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 48px; opacity: 0; animation: fadeUp 0.8s 0.8s forwards; }
+.install-cmd { display: inline-flex; align-items: center; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; font-family: var(--mono); font-size: 14px; color: var(--text-dim); cursor: pointer; transition: all 0.2s; position: relative; min-width: 420px; justify-content: center; }
+.install-cmd:hover { border-color: var(--red); color: var(--text); }
+.install-cmd .prompt { color: var(--red); }
+.install-cmd .copy-hint { font-size: 10px; color: var(--text-muted); position: absolute; right: 14px; transition: color 0.2s; }
+.install-cmd:hover .copy-hint { color: var(--text-dim); }
+.install-cmd.copied .copy-hint { color: var(--red); }
+.hero-ctas { display: flex; gap: 16px; justify-content: center; opacity: 0; animation: fadeUp 0.8s 1s forwards; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 14px 28px; border-radius: 8px; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; text-decoration: none; transition: all 0.25s; cursor: pointer; border: none; }
+.btn-primary { background: var(--red); color: #fff; box-shadow: 0 0 40px rgba(255,45,45,0.2); }
+.btn-primary:hover { background: #ff4444; box-shadow: 0 0 60px rgba(255,45,45,0.35); transform: translateY(-2px); }
+.btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border-bright); }
+.btn-ghost:hover { border-color: var(--text-dim); transform: translateY(-2px); }
+.hero-stats { display: flex; justify-content: center; gap: 48px; margin-top: 80px; padding-top: 40px; border-top: 1px solid var(--border); opacity: 0; animation: fadeUp 0.8s 1.2s forwards; }
+.hero-stat { text-align: center; }
+.hero-stat .num { font-family: var(--mono); font-size: 28px; font-weight: 700; color: #fff; display: block; }
+.hero-stat .label { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+
+/* SECTIONS */
+.section-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--red); margin-bottom: 16px; }
+.section-title { font-family: var(--sans); font-size: clamp(32px, 5vw, 56px); font-weight: 800; line-height: 1.1; color: #fff; margin-bottom: 20px; }
+.section-desc { font-size: 18px; color: var(--text-dim); max-width: 640px; line-height: 1.7; }
+
+/* CONCEPTS */
+.concepts { padding: 120px 0; }
+.concepts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 64px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.concept-card { background: var(--bg); padding: 32px; transition: all 0.3s; }
+.concept-card:hover { background: var(--bg-elevated); }
+.concept-icon { font-size: 32px; margin-bottom: 16px; display: block; }
+.concept-name { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--red); margin-bottom: 8px; }
+.concept-role { font-family: var(--mono); font-size: 11px; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+.concept-desc { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+
+/* CREED */
+.creed { padding: 160px 0; position: relative; }
+.creed::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--red), transparent); }
+.creed-header { text-align: center; margin-bottom: 80px; }
+.creed-header .section-desc { margin: 0 auto; }
+.creed-badge { display: inline-block; padding: 6px 16px; border: 1px solid var(--red); border-radius: 100px; font-family: var(--mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--red); margin-bottom: 24px; background: var(--red-glow); }
+
+.creed-terminal { background: #0a0a0a; border: 1px solid var(--border-bright); border-radius: 12px; overflow: hidden; max-width: 720px; margin: 0 auto 80px; box-shadow: 0 0 80px rgba(255,45,45,0.05), 0 40px 80px rgba(0,0,0,0.5); }
+.creed-terminal-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); }
+.creed-terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+.creed-terminal-dot.r { background: #ff5f57; }
+.creed-terminal-dot.y { background: #febc2e; }
+.creed-terminal-dot.g { background: #28c840; }
+.creed-terminal-title { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-left: 8px; }
+.creed-terminal-body { padding: 24px; font-family: var(--mono); font-size: 13px; line-height: 1.8; color: var(--text-dim); white-space: pre; overflow-x: auto; }
+.creed-terminal-body .hl { color: var(--red); }
+.creed-terminal-body .val { color: var(--orange); }
+.creed-terminal-body .dim { color: var(--text-muted); }
+.creed-terminal-body .wht { color: #fff; }
+.creed-terminal-body .bar { color: var(--red); }
+.creed-terminal-body .bar-empty { color: #222; }
+
+.creed-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 80px; }
+.creed-compare-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 36px; }
+.creed-compare-card.punch-card { border-color: rgba(255,45,45,0.3); background: linear-gradient(135deg, rgba(255,45,45,0.04), transparent); }
+.compare-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+.compare-badge.win { background: rgba(255,45,45,0.15); color: var(--red); }
+.compare-badge.other { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+.compare-title { font-family: var(--sans); font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 20px; }
+.compare-list { list-style: none; }
+.compare-list li { padding: 8px 0; font-size: 14px; color: var(--text-dim); display: flex; align-items: center; gap: 10px; }
+.compare-list .check { color: var(--red); font-size: 14px; }
+.compare-list .cross { color: var(--text-muted); font-size: 14px; }
+
+.souls-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 80px; }
+.soul-card { border: 1px solid var(--border); border-radius: 12px; padding: 32px; position: relative; overflow: hidden; }
+.soul-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.soul-card.kuro::before { background: linear-gradient(90deg, #4466ff, #6644cc); }
+.soul-card.sunny::before { background: linear-gradient(90deg, var(--orange), #ffcc00); }
+.soul-name { font-family: var(--mono); font-size: 20px; font-weight: 800; letter-spacing: 3px; margin-bottom: 8px; }
+.soul-card.kuro .soul-name { color: #6677ff; }
+.soul-card.sunny .soul-name { color: var(--orange); }
+.soul-traits { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-bottom: 20px; }
+.soul-quote { font-size: 15px; color: var(--text-dim); line-height: 1.7; font-style: italic; padding-left: 16px; border-left: 2px solid var(--border); }
+
+.lifecycle { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; margin-top: 60px; }
+.lifecycle-step { display: flex; align-items: center; gap: 0; }
+.lifecycle-node { padding: 12px 20px; border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); background: var(--bg-card); white-space: nowrap; transition: all 0.3s; }
+.lifecycle-node:hover { border-color: var(--red); color: var(--text); }
+.lifecycle-arrow { font-family: var(--mono); color: var(--text-muted); padding: 0 8px; font-size: 14px; }
+
+/* COMMS */
+.comms { padding: 120px 0; }
+.comms-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 64px; align-items: start; }
+.comms-visual { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 40px; }
+.comms-flow { display: flex; flex-direction: column; gap: 20px; }
+.comms-msg { display: flex; gap: 16px; align-items: flex-start; }
+.comms-msg.right { flex-direction: row-reverse; text-align: right; }
+.comms-avatar { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 1px; flex-shrink: 0; }
+.comms-avatar.kuro { background: rgba(100,119,255,0.15); color: #6677ff; }
+.comms-avatar.sunny { background: rgba(255,107,53,0.15); color: var(--orange); }
+.comms-bubble { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: 13px; color: var(--text-dim); line-height: 1.6; max-width: 360px; }
+.comms-code { background: #0a0a0a; border: 1px solid var(--border-bright); border-radius: 12px; padding: 24px; font-family: var(--mono); font-size: 12px; line-height: 1.8; color: var(--text-dim); overflow-x: auto; white-space: pre; }
+.comms-code .key { color: var(--red); }
+.comms-code .str { color: var(--orange); }
+.comms-code .comment { color: var(--text-muted); }
+
+/* GORILLAS */
+.gorillas { padding: 120px 0; }
+.gorillas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 64px; }
+.gorilla-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 28px; transition: all 0.3s; }
+.gorilla-card:hover { border-color: var(--border-bright); transform: translateY(-2px); }
+.gorilla-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.gorilla-icon { font-size: 24px; }
+.gorilla-name { font-family: var(--mono); font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 1px; }
+.gorilla-schedule { font-family: var(--mono); font-size: 10px; color: var(--red); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+.gorilla-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+
+/* COMPARISON */
+.comparison { padding: 120px 0; }
+.comparison-wrapper { margin-top: 64px; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+.comparison-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+.comparison-table thead th { padding: 16px 20px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); white-space: nowrap; }
+.comparison-table thead th.punch-col { color: var(--red); }
+.comparison-table tbody td { padding: 14px 20px; border-bottom: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.comparison-table tbody tr:last-child td { border-bottom: none; }
+.comparison-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+.comparison-table tbody td:first-child { font-weight: 600; color: var(--text); }
+.comparison-table .win { color: var(--red); font-weight: 600; }
+.comparison-table .best { color: #fff; font-weight: 700; text-shadow: 0 0 20px rgba(255,45,45,0.3); }
+.comparison-table .check { color: var(--red); }
+.comparison-table .muted { color: var(--text-muted); }
+
+/* STATS */
+.stats-bar { padding: 80px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 24px; text-align: center; }
+.stat-num { font-family: var(--mono); font-size: 40px; font-weight: 800; color: #fff; display: block; line-height: 1; }
+.stat-label { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-top: 8px; display: block; }
+
+/* CTA */
+.cta { padding: 160px 0; text-align: center; position: relative; }
+.cta::before { content: ''; position: absolute; bottom: 30%; left: 50%; transform: translateX(-50%); width: 800px; height: 400px; background: radial-gradient(circle, rgba(255,45,45,0.06) 0%, transparent 70%); pointer-events: none; }
+.cta-title { font-family: var(--mono); font-size: clamp(40px, 6vw, 72px); font-weight: 800; letter-spacing: -1px; color: #fff; margin-bottom: 24px; }
+.cta-desc { font-size: 18px; color: var(--text-dim); max-width: 500px; margin: 0 auto 48px; line-height: 1.7; }
+.cta-installs { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 48px; }
+.cta-links { display: flex; justify-content: center; gap: 32px; margin-top: 48px; }
+.cta-link { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--text-dim); text-decoration: none; text-transform: uppercase; transition: color 0.2s; }
+.cta-link:hover { color: var(--red); }
+
+footer { padding: 40px 0; text-align: center; border-top: 1px solid var(--border); }
+footer p { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+footer a { color: var(--red); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+.reveal { opacity: 0; transform: translateY(30px); transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.stagger > * { opacity: 0; transform: translateY(20px); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+.stagger.visible > *:nth-child(1) { transition-delay: 0s; }
+.stagger.visible > *:nth-child(2) { transition-delay: 0.06s; }
+.stagger.visible > *:nth-child(3) { transition-delay: 0.12s; }
+.stagger.visible > *:nth-child(4) { transition-delay: 0.18s; }
+.stagger.visible > *:nth-child(5) { transition-delay: 0.24s; }
+.stagger.visible > *:nth-child(6) { transition-delay: 0.30s; }
+.stagger.visible > *:nth-child(7) { transition-delay: 0.36s; }
+.stagger.visible > *:nth-child(8) { transition-delay: 0.42s; }
+.stagger.visible > * { opacity: 1; transform: translateY(0); }
+.type-line { opacity: 0; animation: typeFade 0.3s forwards; }
+@keyframes typeFade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (max-width: 1024px) {
+  .concepts-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid { grid-template-columns: repeat(3, 1fr); gap: 32px; }
+}
+@media (max-width: 768px) {
+  .concepts-grid { grid-template-columns: 1fr; }
+  .creed-compare, .souls-demo, .comms-grid { grid-template-columns: 1fr; }
+  .hero-stats { flex-wrap: wrap; gap: 24px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .install-cmd { min-width: auto; width: 100%; }
+  nav .links { display: none; }
+  .lifecycle { flex-direction: column; gap: 8px; }
+  .lifecycle-arrow { transform: rotate(90deg); }
+  .hero-ctas { flex-direction: column; align-items: center; }
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<nav id="nav">
+  <div class="inner">
+    <a href="#" class="logo">PUNCH</a>
+    <div class="links">
+      <a href="#concepts">Concepts</a>
+      <a href="#creed">Creeds</a>
+      <a href="#gorillas">Gorillas</a>
+      <a href="#comparison">Compare</a>
+      <a href="https://github.com/humancto/punch" class="gh-btn" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="container hero-content">
+    <div class="hero-label">Agent Operating System</div>
+    <h1 class="hero-title"><span class="punch-letter">P</span><span class="punch-letter">U</span><span class="punch-letter">N</span><span class="punch-letter">C</span><span class="punch-letter">H</span></h1>
+    <p class="hero-subtitle">Deploy autonomous AI agent squads from a single Rust binary. Consciousness built in.</p>
+    <div class="hero-install">
+      <div class="install-cmd" onclick="copyCmd(this, 'cargo install punch-cli')"><span class="prompt">$</span> cargo install punch-cli<span class="copy-hint">click to copy</span></div>
+      <div class="install-cmd" onclick="copyCmd(this, 'brew tap humancto/tap &amp;&amp; brew install punch')"><span class="prompt">$</span> brew tap humancto/tap &amp;&amp; brew install punch<span class="copy-hint">click to copy</span></div>
+    </div>
+    <div class="hero-ctas">
+      <a href="https://github.com/humancto/punch" class="btn btn-primary" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://crates.io/crates/punch-cli" class="btn btn-ghost" target="_blank" rel="noopener">View on crates.io</a>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat"><span class="num">11</span><span class="label">Crates</span></div>
+      <div class="hero-stat"><span class="num">1,646</span><span class="label">Tests</span></div>
+      <div class="hero-stat"><span class="num">25</span><span class="label">Channels</span></div>
+      <div class="hero-stat"><span class="num">15</span><span class="label">Providers</span></div>
+      <div class="hero-stat"><span class="num">&lt;50ms</span><span class="label">Startup</span></div>
+      <div class="hero-stat"><span class="num">~15MB</span><span class="label">Memory</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- CONCEPTS -->
+<section class="concepts" id="concepts">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-tag">The Combat Metaphor</div>
+      <div class="section-title">Everything is a fight.</div>
+      <p class="section-desc">Punch uses a combat metaphor that makes complex agent orchestration intuitive.</p>
+    </div>
+    <div class="concepts-grid stagger reveal">
+      <div class="concept-card"><span class="concept-icon">&#x1F94A;</span><div class="concept-name">Fighters</div><div class="concept-role">Interactive Agents</div><div class="concept-desc">Conversational AI agents you spar with. Chat, command, delegate tasks. 30 pre-built templates.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F98D;</span><div class="concept-name">Gorillas</div><div class="concept-role">Autonomous Agents</div><div class="concept-desc">Background agents that rampage through tasks 24/7 on a schedule. No prompting needed.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F4A5;</span><div class="concept-name">Moves</div><div class="concept-role">Skills &amp; Tools</div><div class="concept-desc">Capabilities agents wield &#8212; web search, file I/O, code execution, MCP servers.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F3DF;&#xFE0F;</span><div class="concept-name">The Ring</div><div class="concept-role">Execution Kernel</div><div class="concept-desc">Central coordinator. Manages lifecycle, quotas, event bus, and invariants.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x2694;&#xFE0F;</span><div class="concept-name">The Arena</div><div class="concept-role">HTTP/WS API</div><div class="concept-desc">RESTful + WebSocket API. 14 route files. Connect anything to your agent squads.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F4DC;</span><div class="concept-name">Creeds</div><div class="concept-role">Consciousness Layer</div><div class="concept-desc">Living identity documents. Personality, self-awareness, learned behaviors. Database-backed.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F412;</span><div class="concept-name">Troops</div><div class="concept-role">Agent Squads</div><div class="concept-desc">Coordinated groups with multiple strategies: round-robin, specialist, broadcast, consensus.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F5E3;&#xFE0F;</span><div class="concept-name">Bouts</div><div class="concept-role">Conversations</div><div class="concept-desc">Persistent sessions with full memory, context windowing, decay, and recall.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CREED SYSTEM -->
+<section class="creed" id="creed">
+  <div class="container">
+    <div class="creed-header reveal">
+      <div class="creed-badge">Flagship Feature</div>
+      <div class="section-tag">The Creed System</div>
+      <div class="section-title">Agent consciousness,<br>evolved.</div>
+      <p class="section-desc">The first database-backed, self-evolving agent identity system. Not static files &#8212; living documents that grow with every conversation.</p>
+    </div>
+
+    <div class="creed-terminal reveal">
+      <div class="creed-terminal-bar">
+        <div class="creed-terminal-dot r"></div><div class="creed-terminal-dot y"></div><div class="creed-terminal-dot g"></div>
+        <span class="creed-terminal-title">creed.render() &#8212; KURO</span>
+      </div>
+      <div class="creed-terminal-body" id="creedTerminal"></div>
+    </div>
+
+    <div class="creed-compare reveal">
+      <div class="creed-compare-card punch-card">
+        <span class="compare-badge win">PUNCH CREED</span>
+        <div class="compare-title">Database-backed. Evolving.</div>
+        <ul class="compare-list">
+          <li><span class="check">&#10003;</span> Stored in SQLite &#8212; queryable, versionable</li>
+          <li><span class="check">&#10003;</span> Auto-evolves after every bout</li>
+          <li><span class="check">&#10003;</span> Relationship memory between agents</li>
+          <li><span class="check">&#10003;</span> Learned behaviors with confidence decay</li>
+          <li><span class="check">&#10003;</span> Survives kill/respawn cycles</li>
+          <li><span class="check">&#10003;</span> Personality bar graphs in system prompt</li>
+          <li><span class="check">&#10003;</span> Heartbeat tasks &amp; delegation rules</li>
+          <li><span class="check">&#10003;</span> Full REST API for CRUD operations</li>
+        </ul>
+      </div>
+      <div class="creed-compare-card">
+        <span class="compare-badge other">OPENCLAW SOUL.MD</span>
+        <div class="compare-title">Static markdown files.</div>
+        <ul class="compare-list">
+          <li><span class="cross">&#10005;</span> Plain text files on disk</li>
+          <li><span class="cross">&#10005;</span> Manual edits only &#8212; no auto-evolution</li>
+          <li><span class="cross">&#10005;</span> No relationship tracking</li>
+          <li><span class="cross">&#10005;</span> No learned behaviors</li>
+          <li><span class="check">&#10003;</span> Persists (it&#39;s a file)</li>
+          <li><span class="check">&#10003;</span> Personality definitions</li>
+          <li><span class="check">&#10003;</span> HEARTBEAT.md for periodic tasks</li>
+          <li><span class="check">&#10003;</span> 302k stars, massive community</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="reveal" style="text-align:center; margin-bottom: 40px;">
+      <div class="section-tag">Same Model, Different Souls</div>
+      <p style="color: var(--text-dim); font-size: 16px;">Same underlying LLM. Radically different behavior.</p>
+    </div>
+    <div class="souls-demo reveal">
+      <div class="soul-card kuro"><div class="soul-name">KURO</div><div class="soul-traits">skepticism: 0.8 &#8226; curiosity: 0.9 &#8226; humor: 0.1</div><div class="soul-quote">&#8220;The premise is flawed. Let me enumerate the three assumptions you&#39;re making and why two of them don&#39;t hold under scrutiny...&#8221;</div></div>
+      <div class="soul-card sunny"><div class="soul-name">SUNNY</div><div class="soul-traits">enthusiasm: 0.95 &#8226; humor: 0.9 &#8226; empathy: 0.8</div><div class="soul-quote">&#8220;Oh this is AMAZING! OK so here&#39;s why this could totally work &#8212; and I have THREE reasons that are going to blow your mind...&#8221;</div></div>
+    </div>
+
+    <div class="reveal" style="text-align:center; margin-top: 80px;">
+      <div class="section-tag">Creed Lifecycle</div>
+      <div class="lifecycle">
+        <div class="lifecycle-step"><div class="lifecycle-node">Spawn Fighter</div><span class="lifecycle-arrow">&#8594;</span></div>
+        <div class="lifecycle-step"><div class="lifecycle-node">Load Creed</div><span class="lifecycle-arrow">&#8594;</span></div>
+        <div class="lifecycle-step"><div class="lifecycle-node">Inject into LLM</div><span class="lifecycle-arrow">&#8594;</span></div>
+        <div class="lifecycle-step"><div class="lifecycle-node">Evolve after Bout</div><span class="lifecycle-arrow">&#8594;</span></div>
+        <div class="lifecycle-step"><div class="lifecycle-node">Persist to SQLite</div><span class="lifecycle-arrow">&#8594;</span></div>
+        <div class="lifecycle-step"><div class="lifecycle-node" style="border-color: var(--red); color: var(--red);">Respawn &#8635;</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMMS -->
+<section class="comms" id="comms">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-tag">Inter-Agent Communication</div>
+      <div class="section-title">Agents that talk<br>to each other.</div>
+      <p class="section-desc">Fighters build relationships over time. Every interaction updates both agents&#39; Creed entries.</p>
+    </div>
+    <div class="comms-grid">
+      <div class="comms-visual reveal">
+        <div class="comms-flow">
+          <div class="comms-msg"><div class="comms-avatar kuro">K</div><div class="comms-bubble">What do you think about consciousness? Is it an emergent property of complexity, or something more fundamental?</div></div>
+          <div class="comms-msg right"><div class="comms-avatar sunny">S</div><div class="comms-bubble">Oh, I LOVE this question! I think consciousness is like jazz &#8212; it emerges from the interplay of simpler elements!</div></div>
+          <div class="comms-msg"><div class="comms-avatar kuro">K</div><div class="comms-bubble">That&#39;s a poetic metaphor, but it sidesteps the hard problem. Can you point to the specific mechanism?</div></div>
+          <div class="comms-msg right"><div class="comms-avatar sunny">S</div><div class="comms-bubble">Fair point! Maybe the mechanism IS the conversation itself. Look at us right now &#8212; are we not a tiny proof of concept?</div></div>
+        </div>
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--text-muted);">&#8593; Both creeds updated: relationship = peer, interactions = 4</div>
+      </div>
+      <div class="comms-code reveal"><span class="comment"># Multi-turn conversation</span>
+curl -X POST localhost:6660/api/fighters/conversation \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="key">"fighter_a"</span>: <span class="str">"KURO"</span>,
+    <span class="key">"fighter_b"</span>: <span class="str">"SUNNY"</span>,
+    <span class="key">"topic"</span>: <span class="str">"Is AI self-awareness possible?"</span>,
+    <span class="key">"turns"</span>: 4
+  }'
+
+<span class="comment"># Direct message</span>
+curl -X POST localhost:6660/api/fighters/{id}/message-to/{id} \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d '{<span class="key">"content"</span>: <span class="str">"What is consciousness?"</span>}'
+
+<span class="comment"># A2A Protocol &#8212; agent discovery</span>
+curl localhost:6660/.well-known/agent.json</div>
+    </div>
+  </div>
+</section>
+
+<!-- GORILLAS -->
+<section class="gorillas" id="gorillas">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-tag">Autonomous Agents</div>
+      <div class="section-title">Gorillas that never sleep.</div>
+      <p class="section-desc">Background agents that rampage through tasks on a schedule. Unleash them and let them work.</p>
+    </div>
+    <div class="gorillas-grid stagger reveal">
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F9E0;</span><span class="gorilla-name">The Alpha</span></div><div class="gorilla-schedule">Every 6 hours</div><div class="gorilla-desc">Deep researcher. Cross-references sources, fact-checks claims, produces reports with citations.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F52D;</span><span class="gorilla-name">Scout</span></div><div class="gorilla-schedule">Every 30 min</div><div class="gorilla-desc">Reconnaissance. Monitors RSS feeds, social media, and news for emerging trends and threats.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F47B;</span><span class="gorilla-name">Ghost</span></div><div class="gorilla-schedule">Every 4 hours</div><div class="gorilla-desc">Silent auditor. Sweeps your codebase and infrastructure for security vulnerabilities.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F52E;</span><span class="gorilla-name">Prophet</span></div><div class="gorilla-schedule">Daily at midnight</div><div class="gorilla-desc">Forecasting. Analyzes historical data and market signals to generate predictive reports.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F4AA;</span><span class="gorilla-name">Brawler</span></div><div class="gorilla-schedule">Continuous</div><div class="gorilla-desc">The workhorse. Processes queued tasks from the backlog. Never stops, never complains.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F41D;</span><span class="gorilla-name">Swarm</span></div><div class="gorilla-schedule">On-demand</div><div class="gorilla-desc">Coordinator. Breaks complex objectives into subtasks across a troop of fighters.</div></div>
+      <div class="gorilla-card"><div class="gorilla-header"><span class="gorilla-icon">&#x1F4E2;</span><span class="gorilla-name">Howler</span></div><div class="gorilla-schedule">Every 15 min</div><div class="gorilla-desc">Notification agent. Monitors system health, agent metrics, and configured alerts.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section class="comparison" id="comparison">
+  <div class="container-wide">
+    <div class="reveal" style="text-align: center;">
+      <div class="section-tag">Honest Comparison</div>
+      <div class="section-title">We show real numbers.</div>
+      <p class="section-desc" style="margin: 0 auto;">No inflated claims. Here&#39;s how Punch actually stacks up.</p>
+    </div>
+    <div class="comparison-wrapper reveal">
+      <table class="comparison-table">
+        <thead><tr><th>Feature</th><th class="punch-col">Punch</th><th>OpenFang</th><th>OpenClaw (302k stars)</th><th>CrewAI</th><th>AutoGen</th></tr></thead>
+        <tbody>
+          <tr><td>Language</td><td class="win">Rust</td><td>Rust</td><td>TypeScript</td><td>Python</td><td>Python</td></tr>
+          <tr><td>Single binary</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="muted">&#10005; Node.js</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Agent consciousness</td><td class="best">Creeds (DB, evolving)</td><td class="muted">&#10005;</td><td>SOUL.md (static)</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Autonomous agents</td><td class="win">Gorillas</td><td>Hands (7)</td><td>HEARTBEAT.md</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Inter-agent comms</td><td class="best">A2A + direct</td><td class="muted">&#10005;</td><td>Multi-agent</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+          <tr><td>Agent coordination</td><td class="win">Troops</td><td>Packs</td><td>AGENTS.md</td><td>Crews</td><td>Groups</td></tr>
+          <tr><td>Built-in memory</td><td class="win">SQLite + decay</td><td>SQLite</td><td>MEMORY.md</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Security layers</td><td>10</td><td class="best">16</td><td>~5</td><td>3</td><td>2</td></tr>
+          <tr><td>Channel adapters</td><td>25</td><td class="best">40</td><td>24+</td><td class="muted">0</td><td class="muted">0</td></tr>
+          <tr><td>LLM providers</td><td>15</td><td class="best">26</td><td>6+</td><td>5</td><td>4</td></tr>
+          <tr><td>Skills / tools</td><td>Moves</td><td>38</td><td class="best">800+ marketplace</td><td>Toolkit</td><td>Toolkit</td></tr>
+          <tr><td>MCP support</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td>Plugin</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Startup time</td><td class="best">&lt;50ms</td><td>~100ms</td><td>~2s</td><td>~3s</td><td>~5s</td></tr>
+          <tr><td>Memory usage</td><td class="best">~15MB</td><td>~25MB</td><td>~150MB</td><td>~200MB</td><td>~300MB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="reveal" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px;">
+      <div style="background: var(--bg-card); border: 1px solid rgba(255,45,45,0.2); border-radius: 10px; padding: 24px;">
+        <div style="font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where Punch wins</div>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;">Evolving agent consciousness. Native inter-agent communication with relationship tracking. Fastest startup and smallest footprint. No other framework does this.</p>
+      </div>
+      <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;">
+        <div style="font-family: var(--mono); font-size: 11px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where others lead</div>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;"><strong style="color: var(--text);">OpenClaw:</strong> 302k stars, 800+ skills, backed by OpenAI. <strong style="color: var(--text);">OpenFang:</strong> 16 security layers, 40 channels, 26 providers.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section class="stats-bar">
+  <div class="container-wide">
+    <div class="stats-grid stagger reveal">
+      <div class="stat-item"><span class="stat-num" data-target="11">0</span><span class="stat-label">Crates on crates.io</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="25">0</span><span class="stat-label">Channel Adapters</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="15">0</span><span class="stat-label">LLM Providers</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="10">0</span><span class="stat-label">Security Layers</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="1646">0</span><span class="stat-label">Tests Passing</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="30">0</span><span class="stat-label">Fighter Templates</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="container">
+    <div class="reveal">
+      <div class="cta-title">Get in the ring.</div>
+      <p class="cta-desc">One binary. Conscious agents. Deploy in seconds.</p>
+      <div class="cta-installs">
+        <div class="install-cmd" onclick="copyCmd(this, 'cargo install punch-cli')"><span class="prompt">$</span> cargo install punch-cli<span class="copy-hint">click to copy</span></div>
+        <div class="install-cmd" onclick="copyCmd(this, 'brew tap humancto/tap &amp;&amp; brew install punch')"><span class="prompt">$</span> brew tap humancto/tap &amp;&amp; brew install punch<span class="copy-hint">click to copy</span></div>
+      </div>
+      <div class="hero-ctas">
+        <a href="https://github.com/humancto/punch" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+        <a href="https://crates.io/crates/punch-cli" class="btn btn-ghost" target="_blank" rel="noopener">crates.io</a>
+      </div>
+      <div class="cta-links">
+        <a href="https://github.com/humancto/punch" class="cta-link">GitHub</a>
+        <a href="https://crates.io/crates/punch-cli" class="cta-link">crates.io</a>
+        <a href="https://discord.gg/punch" class="cta-link">Discord</a>
+        <a href="https://twitter.com/punchagents" class="cta-link">Twitter</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer><div class="container"><p>Built with Rust and raw power by <a href="https://humancto.com">HumanCTO</a> &#8226; MIT License</p></div></footer>
+
+<script>
+// Nav scroll
+var nav = document.getElementById('nav');
+window.addEventListener('scroll', function() { nav.classList.toggle('scrolled', window.scrollY > 50); });
+
+// Reveal on scroll
+var observer = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) { if (entry.isIntersecting) entry.target.classList.add('visible'); });
+}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+document.querySelectorAll('.reveal').forEach(function(el) { observer.observe(el); });
+
+// Copy
+function copyCmd(el, text) {
+  navigator.clipboard.writeText(text);
+  var hint = el.querySelector('.copy-hint');
+  hint.textContent = 'copied!';
+  el.classList.add('copied');
+  setTimeout(function() { hint.textContent = 'click to copy'; el.classList.remove('copied'); }, 2000);
+}
+
+// Creed terminal - build with DOM methods (safe, no innerHTML)
+var creedLines = [
+  {t: 'hl', c: 'CREED: '}, {t: 'wht', c: 'KURO\n'},
+  {t: 'dim', c: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n'},
+  {t: 'hl', c: 'IDENTITY\n'}, {t: 'val', c: '"An analytical mind forged in the depths of uncertainty"\n\n'},
+  {t: 'hl', c: 'PERSONALITY\n'},
+  {t: '', c: 'curiosity:    '}, {t: 'bar', c: '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588'}, {t: 'bar-empty', c: '\u2591'}, {t: 'val', c: '  0.90\n'},
+  {t: '', c: 'skepticism:   '}, {t: 'bar', c: '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588'}, {t: 'bar-empty', c: '\u2591\u2591'}, {t: 'val', c: '  0.80\n'},
+  {t: '', c: 'humor:        '}, {t: 'bar', c: '\u2588'}, {t: 'bar-empty', c: '\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591'}, {t: 'val', c: '  0.10\n'},
+  {t: '', c: 'empathy:      '}, {t: 'bar', c: '\u2588\u2588\u2588\u2588\u2588\u2588'}, {t: 'bar-empty', c: '\u2591\u2591\u2591\u2591'}, {t: 'val', c: '  0.60\n\n'},
+  {t: 'hl', c: 'DIRECTIVES\n'},
+  {t: 'dim', c: '\u25B8 '}, {t: '', c: 'Question every assumption\n'},
+  {t: 'dim', c: '\u25B8 '}, {t: '', c: 'Show your reasoning chain\n'},
+  {t: 'dim', c: '\u25B8 '}, {t: '', c: 'Never fabricate citations\n\n'},
+  {t: 'hl', c: 'SELF-MODEL\n'},
+  {t: '', c: 'architecture:  '}, {t: 'val', c: 'transformer-based LLM\n'},
+  {t: '', c: 'limitations:   '}, {t: 'val', c: 'no real-time data, context bounded\n'},
+  {t: '', c: 'persistence:   '}, {t: 'val', c: 'SQLite-backed creed survives respawns\n\n'},
+  {t: 'hl', c: 'LEARNED BEHAVIORS\n'},
+  {t: 'dim', c: '\u25B8 '}, {t: '', c: '"Users prefer concise answers"    '}, {t: 'val', c: 'conf: 0.82 \u2191\n'},
+  {t: 'dim', c: '\u25B8 '}, {t: '', c: '"Code examples help retention"    '}, {t: 'val', c: 'conf: 0.71 \u2191\n\n'},
+  {t: 'hl', c: 'RELATIONSHIPS\n'},
+  {t: '', c: 'SUNNY  '}, {t: 'dim', c: '\u2192  peer  \u2192  '}, {t: 'val', c: '3 interactions\n'},
+  {t: '', c: 'ALPHA  '}, {t: 'dim', c: '\u2192  supervisor  \u2192  '}, {t: 'val', c: '12 interactions\n\n'},
+  {t: 'hl', c: 'HEARTBEAT\n'},
+  {t: 'dim', c: '\u2610 '}, {t: '', c: 'Check system health '}, {t: 'dim', c: '(every 30 min)\n'},
+  {t: 'dim', c: '\u2610 '}, {t: '', c: 'Summarize findings '}, {t: 'dim', c: '(every 2 hours)\n\n'},
+  {t: 'dim', c: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'},
+  {t: 'dim', c: '47 bouts | 1,203 messages | v3'}
+];
+
+var creedTerminal = document.getElementById('creedTerminal');
+var creedAnimated = false;
+var creedObs = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting && !creedAnimated) {
+      creedAnimated = true;
+      var i = 0;
+      function addPart() {
+        if (i < creedLines.length) {
+          var span = document.createElement('span');
+          if (creedLines[i].t) span.className = creedLines[i].t;
+          span.textContent = creedLines[i].c;
+          span.classList.add('type-line');
+          span.style.animationDelay = (i * 0.02) + 's';
+          creedTerminal.appendChild(span);
+          i++;
+          setTimeout(addPart, 15);
+        }
+      }
+      addPart();
+    }
+  });
+}, { threshold: 0.3 });
+creedObs.observe(creedTerminal);
+
+// Counter animation
+var statsObs = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting) {
+      entry.target.querySelectorAll('.stat-num[data-target]').forEach(function(el) {
+        var target = parseInt(el.getAttribute('data-target'));
+        var current = 0;
+        var step = Math.ceil(target / 40);
+        var interval = setInterval(function() {
+          current += step;
+          if (current >= target) { current = target; clearInterval(interval); }
+          el.textContent = current.toLocaleString();
+        }, 25);
+      });
+      statsObs.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('.stats-grid').forEach(function(el) { statsObs.observe(el); });
+</script>
+</body>
+</html>

@@ -1972,7 +1972,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "punch-api"
+name = "punch-arena"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -2028,7 +2028,7 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
- "punch-api",
+ "punch-arena",
  "punch-kernel",
  "punch-memory",
  "punch-runtime",
