@@ -22,7 +22,7 @@ edition = "2024"
 authors = ["HumanCTO <team@humancto.com>"]
 license = "MIT"
 repository = "https://github.com/humancto/punch"
-homepage = "https://punch.sh"
+homepage = "https://humancto.github.io/punch/"
 description = "Punch — The Agent Combat System. Deploy autonomous AI agent squads from a single binary."
 
 [workspace.dependencies]

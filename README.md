@@ -13,11 +13,11 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/rust-2024_edition-orange.svg?style=for-the-badge)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/punch-cli.svg?style=for-the-badge&color=red)](https://crates.io/crates/punch-cli)
-[![Tests](https://img.shields.io/badge/tests-1646_passing-brightgreen.svg?style=for-the-badge)](https://github.com/humancto/punch/actions)
+[![Skills](https://img.shields.io/badge/skills-103_bundled-ff6b35.svg?style=for-the-badge)](https://github.com/humancto/punch/tree/main/crates/punch-skills/bundled)
 
 <br/>
 
-[Website](https://punch.sh) &bull; [Documentation](https://punch.sh/docs) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
+[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli)
 
 <br/>
 
@@ -617,7 +617,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 **Built with raw power by [HumanCTO](https://humancto.com)**
 
-[Website](https://punch.sh) &bull; [GitHub](https://github.com/humancto/punch) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
+[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli)
 
 <sub>Fun fact: The name was inspired by [the internet's most iconic primate](https://www.rd.com/article/everyones-talking-about-punch-the-monkey/) — except our monkey punches back. With AI.</sub>
 

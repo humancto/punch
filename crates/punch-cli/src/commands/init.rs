@@ -23,7 +23,7 @@ fn default_config(provider: &str, model: &str, api_key_env: &str) -> String {
 
     format!(
         r#"# Punch Configuration
-# https://punch.sh/docs/config
+# https://humancto.github.io/punch/
 
 # Arena API server address
 api_listen = "127.0.0.1:6660"
@@ -199,7 +199,7 @@ pub async fn run() -> i32 {
     println!("    3. punch chat            Start chatting");
     println!();
     println!("  Config: {}", config_path.display());
-    println!("  Docs:   https://punch.sh/docs");
+    println!("  Docs:   https://humancto.github.io/punch/");
     println!();
 
     0
