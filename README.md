@@ -5,7 +5,7 @@
 <br/>
 
 <h3>The Agent Combat System</h3>
-<p><strong>Deploy autonomous AI agent squads from a single Rust binary.</strong></p>
+<p><strong>Deploy autonomous AI agent squads from a single binary. Consciousness built in.</strong></p>
 
 <br/>
 
@@ -48,7 +48,7 @@ git clone https://github.com/humancto/punch && cd punch && cargo build --release
 
 ## What is Punch?
 
-Punch is a **single-binary agent operating system** built in Rust. Deploy, orchestrate, and manage fleets of AI agents — from interactive chat assistants to fully autonomous background workers — all coordinated through a unified kernel.
+Punch is a **single-binary agent operating system**. Deploy, orchestrate, and manage fleets of AI agents — from interactive chat assistants to fully autonomous background workers — all coordinated through a unified kernel.
 
 <br/>
 
@@ -614,7 +614,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Built with Rust and raw power by [HumanCTO](https://humancto.com)**
+**Built with raw power by [HumanCTO](https://humancto.com)**
 
 [Website](https://punch.sh) &bull; [GitHub](https://github.com/humancto/punch) &bull; [Discord](https://discord.gg/punch) &bull; [Twitter](https://twitter.com/punchagents)
 
