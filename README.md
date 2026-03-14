@@ -5,7 +5,7 @@
 <br/>
 
 <h3>The Agent Combat System</h3>
-<p><strong>Deploy autonomous AI agent squads from a single binary. Consciousness built in.</strong></p>
+<p><strong>One command. A squad of conscious AI agents.<br/>They think. They talk. They evolve.</strong></p>
 
 <br/>
 
@@ -48,7 +48,7 @@ git clone https://github.com/humancto/punch && cd punch && cargo build --release
 
 ## What is Punch?
 
-Punch is a **single-binary agent operating system**. Deploy, orchestrate, and manage fleets of AI agents — from interactive chat assistants to fully autonomous background workers — all coordinated through a unified kernel.
+Punch is an **agent operating system** — deploy, orchestrate, and manage fleets of AI agents that carry their own consciousness. From interactive chat fighters to fully autonomous background gorillas, all coordinated through a unified kernel.
 
 <br/>
 
