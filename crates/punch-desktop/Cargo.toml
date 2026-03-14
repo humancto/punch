@@ -26,7 +26,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 # Internal crates
-punch-types = { path = "../punch-types" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

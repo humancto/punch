@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Channel adapters for messaging platforms in the Punch Agent Combat System"
 
 [dependencies]
-punch-types = { path = "../punch-types" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }

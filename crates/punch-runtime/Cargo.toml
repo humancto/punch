@@ -9,8 +9,8 @@ homepage.workspace = true
 description = "Agent execution engine for the Punch Agent Combat System"
 
 [dependencies]
-punch-types = { path = "../punch-types" }
-punch-memory = { path = "../punch-memory" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
+punch-memory = { version = "0.1.0", path = "../punch-memory" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

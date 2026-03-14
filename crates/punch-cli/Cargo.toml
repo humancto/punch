@@ -13,11 +13,11 @@ name = "punch"
 path = "src/main.rs"
 
 [dependencies]
-punch-types = { path = "../punch-types" }
-punch-memory = { path = "../punch-memory" }
-punch-kernel = { path = "../punch-kernel" }
-punch-runtime = { path = "../punch-runtime" }
-punch-api = { path = "../punch-api" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
+punch-memory = { version = "0.1.0", path = "../punch-memory" }
+punch-kernel = { version = "0.1.0", path = "../punch-kernel" }
+punch-runtime = { version = "0.1.0", path = "../punch-runtime" }
+punch-api = { version = "0.1.0", path = "../punch-api" }
 
 clap = { workspace = true }
 tokio = { workspace = true }

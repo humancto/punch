@@ -42,18 +42,20 @@
 
 ---
 
-## One-Liner Install
+## Install
 
 ```bash
-curl -fsSL https://punch.sh/install | sh
-```
-
-Or build from source:
-
-```bash
+# From source (recommended)
 git clone https://github.com/humancto/punch.git
 cd punch
 cargo build --release
+
+# Or via cargo
+cargo install punch-cli
+
+# Or via Homebrew (macOS/Linux)
+brew tap humancto/punch
+brew install punch
 ```
 
 ---
@@ -74,6 +76,81 @@ Everything in Punch follows a **combat metaphor**:
 | 🗣️ **Bouts**     | Conversation sessions | Persistent conversation sessions with full memory, context windowing, and recall.                            |
 | 🔗 **Combos**    | Chained workflows     | Multi-step agent pipelines — output of one agent feeds the next.                                             |
 | 🐒 **Troops**    | Coordinated squads    | Groups of agents working together on complex objectives with shared context.                                 |
+| 📜 **Creeds**    | Consciousness layer   | Living identity documents — personality, self-awareness, learned behaviors, and delegation rules.            |
+
+---
+
+## 📜 The Creed System — Agent Consciousness
+
+Every Punch fighter can carry a **Creed** — a living identity document that defines who the agent _is_, not just what it does. Creeds persist across respawns, evolve with every conversation, and inject a consciousness layer into every LLM call.
+
+**Inspired by** OpenClaw's SOUL.md/IDENTITY.md/HEARTBEAT.md/AGENTS.md architecture — but Punch consolidates all four into a single, database-backed, evolving document.
+
+### What a Creed contains
+
+| Section                | Purpose                                       | Example                                                            |
+| ---------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
+| **Identity**           | Name, origin story, purpose                   | _"KURO — an analytical mind forged in the depths of uncertainty"_  |
+| **Personality Traits** | Scored 0.0–1.0, rendered as bar graphs        | `curiosity: 0.9 █████████░`                                        |
+| **Core Directives**    | Non-negotiable behavioral rules               | _"Always cite sources"_, _"Never make up data"_                    |
+| **Self-Model**         | Architectural self-awareness                  | Knows its own model, token limits, tool access, memory persistence |
+| **Learned Behaviors**  | Observations that reinforce over time         | _"Users prefer concise answers" (confidence: 0.82)_                |
+| **Interaction Style**  | Formality, verbosity, emoji usage             | `formality: 0.8, verbosity: 0.3, humor: 0.1`                       |
+| **Relationships**      | Memory of other agents it has interacted with | _"SUNNY — peer — 3 interactions"_                                  |
+| **Heartbeat Tasks**    | Proactive behaviors on a schedule             | _"Check system health every 30 minutes"_                           |
+| **Delegation Rules**   | When and how to hand off to other agents      | _"Delegate code review to REVIEWER when confidence < 0.5"_         |
+
+### Create a Creed
+
+```bash
+# Via API
+curl -X POST http://localhost:6660/api/creeds \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fighter_name": "KURO",
+    "identity": "An analytical mind. Skeptical, precise, relentlessly logical.",
+    "traits": {"curiosity": 0.9, "skepticism": 0.8, "humor": 0.1},
+    "directives": ["Question every assumption", "Show your reasoning"],
+    "self_awareness": {
+      "architecture": "transformer-based LLM",
+      "known_limitations": ["no real-time data", "context window bounded"]
+    }
+  }'
+```
+
+### What happens at runtime
+
+1. Fighter spawns → Punch checks for an existing Creed by name
+2. If found, loads it. If not, creates a default one with self-awareness
+3. Every LLM call prepends `creed.render()` to the system prompt
+4. After each bout: `bout_count++`, `message_count += N`, relationships updated
+5. Fighter killed → Creed persists in SQLite, ready for the next spawn
+
+### Personality differentiation — same model, different souls
+
+The same underlying LLM produces radically different responses depending on the Creed:
+
+> **KURO** (skepticism: 0.8, humor: 0.1): _"The premise is flawed. Let me enumerate the three assumptions you're making..."_
+>
+> **SUNNY** (enthusiasm: 0.95, humor: 0.9): _"Oh this is AMAZING, let me tell you why this could totally work..."_
+
+### Inter-Agent Communication
+
+Fighters can talk to each other, building relationships over time:
+
+```bash
+# Direct message between fighters
+curl -X POST http://localhost:6660/api/fighters/{source_id}/message-to/{target_id} \
+  -H "Content-Type: application/json" \
+  -d '{"content": "What do you think about consciousness?"}'
+
+# Multi-turn conversation
+curl -X POST http://localhost:6660/api/fighters/conversation \
+  -H "Content-Type: application/json" \
+  -d '{"fighter_a": "KURO", "fighter_b": "SUNNY", "topic": "Is AI self-awareness possible?", "turns": 4}'
+```
+
+Each interaction automatically updates both fighters' Creed relationship entries — they remember who they've talked to, how many times, and what role the other plays.
 
 ---
 
@@ -222,23 +299,25 @@ punch fighter spawn ml-engineer
 
 ## Comparison
 
-| Feature                | **Punch**         | OpenFang   | CrewAI   | AutoGen   | LangGraph |
-| ---------------------- | ----------------- | ---------- | -------- | --------- | --------- |
-| **Language**           | Rust              | Rust       | Python   | Python    | Python    |
-| **Single binary**      | ✅                | ✅         | ❌       | ❌        | ❌        |
-| **Autonomous agents**  | ✅ Gorillas       | ✅ Daemons | ❌       | ❌        | ❌        |
-| **Interactive agents** | ✅ Fighters       | ✅ Agents  | ✅       | ✅        | ✅        |
-| **Agent coordination** | ✅ Troops         | ✅ Packs   | ✅ Crews | ✅ Groups | ✅ Graphs |
-| **Built-in memory**    | ✅ SQLite + decay | ✅         | ❌       | ❌        | ❌        |
-| **HTTP API**           | ✅ Arena          | ✅         | ❌       | ❌        | ✅        |
-| **Security layers**    | **18**            | 16         | 3        | 2         | 4         |
-| **Channel adapters**   | **50+ planned**   | 12         | 0        | 0         | 0         |
-| **LLM providers**      | **27+**           | 15         | 5        | 4         | 3         |
-| **MCP support**        | ✅ Native         | ✅         | Plugin   | ❌        | ❌        |
-| **Startup time**       | <50ms             | ~100ms     | ~3s      | ~5s       | ~4s       |
-| **Memory usage**       | ~15MB             | ~25MB      | ~200MB   | ~300MB    | ~250MB    |
-| **Plugin system**      | ✅ Extensions     | ✅         | ✅       | ✅        | ✅        |
-| **Cron scheduling**    | ✅                | ✅         | ❌       | ❌        | ❌        |
+| Feature                 | **Punch**         | OpenFang   | CrewAI   | AutoGen   | LangGraph |
+| ----------------------- | ----------------- | ---------- | -------- | --------- | --------- |
+| **Language**            | Rust              | Rust       | Python   | Python    | Python    |
+| **Single binary**       | ✅                | ✅         | ❌       | ❌        | ❌        |
+| **Autonomous agents**   | ✅ Gorillas       | ✅ Daemons | ❌       | ❌        | ❌        |
+| **Interactive agents**  | ✅ Fighters       | ✅ Agents  | ✅       | ✅        | ✅        |
+| **Agent coordination**  | ✅ Troops         | ✅ Packs   | ✅ Crews | ✅ Groups | ✅ Graphs |
+| **Built-in memory**     | ✅ SQLite + decay | ✅         | ❌       | ❌        | ❌        |
+| **HTTP API**            | ✅ Arena          | ✅         | ❌       | ❌        | ✅        |
+| **Security layers**     | **18**            | 16         | 3        | 2         | 4         |
+| **Channel adapters**    | **50+ planned**   | 12         | 0        | 0         | 0         |
+| **LLM providers**       | **27+**           | 15         | 5        | 4         | 3         |
+| **MCP support**         | ✅ Native         | ✅         | Plugin   | ❌        | ❌        |
+| **Startup time**        | <50ms             | ~100ms     | ~3s      | ~5s       | ~4s       |
+| **Memory usage**        | ~15MB             | ~25MB      | ~200MB   | ~300MB    | ~250MB    |
+| **Agent consciousness** | ✅ Creeds         | ✅ SOUL.md | ❌       | ❌        | ❌        |
+| **Inter-agent comms**   | ✅ Native         | ❌         | ✅       | ✅        | ✅        |
+| **Plugin system**       | ✅ Extensions     | ✅         | ✅       | ✅        | ✅        |
+| **Cron scheduling**     | ✅                | ✅         | ❌       | ❌        | ❌        |
 
 ---
 

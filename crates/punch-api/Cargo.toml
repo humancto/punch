@@ -5,10 +5,10 @@ edition.workspace = true
 description = "The Arena — HTTP API server for the Punch Agent Combat System"
 
 [dependencies]
-punch-types = { path = "../punch-types" }
-punch-kernel = { path = "../punch-kernel" }
-punch-memory = { path = "../punch-memory" }
-punch-channels = { path = "../punch-channels" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
+punch-kernel = { version = "0.1.0", path = "../punch-kernel" }
+punch-memory = { version = "0.1.0", path = "../punch-memory" }
+punch-channels = { version = "0.1.0", path = "../punch-channels" }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
@@ -25,7 +25,7 @@ reqwest = { workspace = true }
 tokio-stream = "0.1"
 
 [dev-dependencies]
-punch-runtime = { path = "../punch-runtime" }
+punch-runtime = { version = "0.1.0", path = "../punch-runtime" }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

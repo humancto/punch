@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "The Ring — central kernel and orchestrator for the Punch Agent Combat System"
 
 [dependencies]
-punch-types = { path = "../punch-types" }
-punch-memory = { path = "../punch-memory" }
-punch-runtime = { path = "../punch-runtime" }
+punch-types = { version = "0.1.0", path = "../punch-types" }
+punch-memory = { version = "0.1.0", path = "../punch-memory" }
+punch-runtime = { version = "0.1.0", path = "../punch-runtime" }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
