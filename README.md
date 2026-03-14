@@ -6,6 +6,7 @@
 
 <h3>The Agent Combat System</h3>
 <p><strong>One command. A squad of conscious AI agents.<br/>They think. They talk. They evolve.</strong></p>
+<sub><a href="https://www.rd.com/article/everyones-talking-about-punch-the-monkey/">Yes, that monkey. Except ours punches back — with AI.</a></sub>
 
 <br/>
 
