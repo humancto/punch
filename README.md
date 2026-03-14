@@ -1,12 +1,8 @@
 <div align="center">
 
-```
-                                  ____  __  ___   ________  __
-                                 / __ \/ / / / | / / ____/ / /
-                                / /_/ / / / /  |/ / /     / /_
-                               / ____/ /_/ / /|  / /___  / __ \
-                              /_/    \____/_/ |_/\____/ /_/ /_/
-```
+<img src="docs/assets/punch-hero.jpeg" alt="Punch — The Agent Combat System" width="400">
+
+<br/>
 
 <h3>The Agent Combat System</h3>
 <p><strong>Deploy autonomous AI agent squads from a single Rust binary.</strong></p>

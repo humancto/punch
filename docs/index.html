@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PUNCH — The Agent Combat System</title>
 <meta name="description" content="Deploy autonomous AI agent squads from a single Rust binary. Database-backed agent consciousness, inter-agent communication, 25 channels, 15 LLM providers.">
+<meta property="og:title" content="PUNCH — The Agent Combat System">
+<meta property="og:description" content="Deploy autonomous AI agent squads from a single Rust binary.">
+<meta property="og:image" content="https://humancto.github.io/punch/assets/punch-hero.jpeg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://humancto.github.io/punch/assets/punch-hero.jpeg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
@@ -66,6 +72,7 @@ nav .gh-btn:hover { border-color: var(--red); color: var(--red); }
 /* HERO */
 .hero { min-height: 100vh; display: flex; align-items: center; padding: 120px 0 80px; position: relative; }
 .hero::before { content: ''; position: absolute; top: 20%; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, rgba(255,45,45,0.08) 0%, transparent 70%); pointer-events: none; }
+.hero-mascot { max-width: 320px; width: 100%; margin: 0 auto 40px; display: block; border-radius: 20px; box-shadow: 0 0 80px rgba(255,45,45,0.15), 0 40px 80px rgba(0,0,0,0.5); animation: fadeUp 0.8s 0.1s forwards; opacity: 0; }
 .hero-content { text-align: center; width: 100%; position: relative; }
 .hero-label { font-family: var(--mono); font-size: 12px; letter-spacing: 6px; text-transform: uppercase; color: var(--red); margin-bottom: 32px; opacity: 0; animation: fadeUp 0.8s 0.2s forwards; }
 .hero-title { font-family: var(--mono); font-size: clamp(80px, 15vw, 200px); font-weight: 800; letter-spacing: -2px; line-height: 0.85; color: #fff; margin-bottom: 24px; opacity: 0; animation: fadeUp 0.8s 0.4s forwards; }
@@ -274,6 +281,7 @@ footer a:hover { text-decoration: underline; }
 <!-- HERO -->
 <section class="hero">
   <div class="container hero-content">
+    <img src="assets/punch-hero.jpeg" alt="Punch — The Agent Combat System" class="hero-mascot">
     <div class="hero-label">Agent Operating System</div>
     <h1 class="hero-title"><span class="punch-letter">P</span><span class="punch-letter">U</span><span class="punch-letter">N</span><span class="punch-letter">C</span><span class="punch-letter">H</span></h1>
     <p class="hero-subtitle">Deploy autonomous AI agent squads from a single Rust binary. Consciousness built in.</p>
@@ -511,6 +519,7 @@ curl localhost:6660/.well-known/agent.json</div>
 <section class="cta">
   <div class="container">
     <div class="reveal">
+      <img src="assets/punch-hero.jpeg" alt="Punch" style="width: 180px; border-radius: 16px; margin-bottom: 32px; box-shadow: 0 0 60px rgba(255,45,45,0.15), 0 20px 60px rgba(0,0,0,0.4);">
       <div class="cta-title">Get in the ring.</div>
       <p class="cta-desc">One binary. Conscious agents. Deploy in seconds.</p>
       <div class="cta-installs">
