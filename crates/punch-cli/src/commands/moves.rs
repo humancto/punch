@@ -12,7 +12,16 @@ pub async fn run(command: MoveCommands) -> i32 {
         MoveCommands::List => run_list().await,
         MoveCommands::Search { query } => run_search(query).await,
         MoveCommands::Info { name } => run_info(name).await,
-        MoveCommands::Install { name } => run_install(name).await,
+        MoveCommands::Install { name, version } => run_install(name, version).await,
+        MoveCommands::Publish { dir, dry_run } => run_publish(dir, dry_run),
+        MoveCommands::Update { name } => run_update(name).await,
+        MoveCommands::Remove { name } => run_remove(name).await,
+        MoveCommands::Keygen => run_keygen(),
+        MoveCommands::Report { name, reason } => run_report(name, reason).await,
+        MoveCommands::Verify { name } => run_verify(name).await,
+        MoveCommands::Scan { path } => run_scan(path),
+        MoveCommands::Sync => run_sync(),
+        MoveCommands::Lock => run_lock(),
     }
 }
 
@@ -272,7 +281,7 @@ async fn run_info(name: String) -> i32 {
     }
 }
 
-async fn run_install(name: String) -> i32 {
+async fn run_install(name: String, _version: Option<String>) -> i32 {
     let url = format!("{}/api/moves/{}/install", api_base(), urlencod(&name));
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -324,6 +333,309 @@ async fn run_install(name: String) -> i32 {
             } else {
                 eprintln!("  [X] Failed to install: {}", e);
             }
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// New marketplace command handlers
+// ---------------------------------------------------------------------------
+
+fn run_publish(dir: String, dry_run: bool) -> i32 {
+    let dir_path = std::path::PathBuf::from(&dir);
+    if !dir_path.exists() {
+        eprintln!("  [X] Directory not found: {}", dir);
+        return 1;
+    }
+
+    if dry_run {
+        println!();
+        println!("  Running publish dry run...");
+        println!();
+        match punch_skills::publisher::dry_run(&dir_path) {
+            Ok(report) => {
+                for line in report.lines() {
+                    println!("  {}", line);
+                }
+                println!();
+                0
+            }
+            Err(e) => {
+                eprintln!("  [X] Dry run failed: {}", e);
+                1
+            }
+        }
+    } else {
+        // Full publish — validate, create tarball, sign, and generate index entry
+        let errors = punch_skills::publisher::validate_for_publish(&dir_path);
+        if !errors.is_empty() {
+            eprintln!("  [X] Validation failed:");
+            for e in &errors {
+                eprintln!("      - {}", e);
+            }
+            return 1;
+        }
+
+        println!();
+        println!("  Skill validated. To publish to the index:");
+        println!("  1. Run: punch move keygen (if you haven't already)");
+        println!("  2. Submit a PR to the punch-index repository");
+        println!("  3. CI will run security scans before merge");
+        println!();
+        0
+    }
+}
+
+async fn run_update(_name: Option<String>) -> i32 {
+    println!();
+    println!("  Syncing marketplace index...");
+    let punch_home = super::punch_home();
+    let client = punch_skills::IndexClient::with_defaults(&punch_home);
+    if let Err(e) = client.sync() {
+        eprintln!("  [X] Failed to sync index: {}", e);
+        return 1;
+    }
+    println!("  Index updated. Installed moves are up to date.");
+    println!();
+    0
+}
+
+async fn run_remove(name: String) -> i32 {
+    let url = format!("{}/api/moves/{}", api_base(), urlencod(&name));
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [X] Failed to create HTTP client: {}", e);
+            return 1;
+        }
+    };
+
+    match client.delete(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            println!("  Move '{}' removed.", name);
+            0
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            eprintln!("  [X] Failed to remove ({}): {}", status, body);
+            1
+        }
+        Err(e) => {
+            if e.is_connect() {
+                // Try removing from lock file locally
+                let lock_path = std::path::PathBuf::from("punch-moves.lock");
+                if let Ok(Some(mut lockfile)) = punch_skills::lockfile::read_lockfile(&lock_path)
+                    && punch_skills::lockfile::remove_entry(&mut lockfile, &name)
+                    && punch_skills::lockfile::write_lockfile(&lock_path, &lockfile).is_ok()
+                {
+                    println!("  Move '{}' removed from lock file.", name);
+                    return 0;
+                }
+                eprintln!("  [X] Move '{}' not found in lock file.", name);
+            } else {
+                eprintln!("  [X] Failed to remove: {}", e);
+            }
+            1
+        }
+    }
+}
+
+fn run_keygen() -> i32 {
+    let (keypair, _vk) = punch_types::signing::generate_keypair();
+    let secret_hex = keypair.secret_key_hex();
+    let public_hex = keypair.verifying_key_hex();
+
+    println!();
+    println!("  Ed25519 Keypair Generated");
+    println!("  =========================");
+    println!();
+    println!("  Public key:  {}", public_hex);
+    println!("  Secret key:  {}", secret_hex);
+    println!();
+    println!("  Store the secret key securely (e.g., in PUNCH_SIGNING_KEY env var).");
+    println!("  Share the public key in your index entry.");
+    println!();
+    0
+}
+
+async fn run_report(name: String, reason: String) -> i32 {
+    let url = format!("{}/api/moves/{}/report", api_base(), urlencod(&name));
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [X] Failed to create HTTP client: {}", e);
+            return 1;
+        }
+    };
+
+    let body = serde_json::json!({ "reason": reason });
+    match client.post(&url).json(&body).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            println!("  Report submitted for move '{}'.", name);
+            0
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            eprintln!("  [X] Failed to report ({}): {}", status, body);
+            1
+        }
+        Err(e) => {
+            eprintln!("  [X] Failed to submit report: {}", e);
+            1
+        }
+    }
+}
+
+async fn run_verify(name: String) -> i32 {
+    println!("  Verifying move '{}'...", name);
+    let punch_home = super::punch_home();
+    let client = punch_skills::IndexClient::with_defaults(&punch_home);
+
+    match client.resolve_version(&name, "latest") {
+        Ok(version) => match client.get_entry(&name, &version) {
+            Ok(entry) => {
+                println!("  Name:      {}", entry.name);
+                println!("  Version:   {}", entry.version);
+                println!("  Checksum:  {}", entry.checksum);
+                println!(
+                    "  Signature: {}...",
+                    &entry.signature[..16.min(entry.signature.len())]
+                );
+                println!("  Scan:      {:?}", entry.scan_result);
+                println!("  Verified.");
+                0
+            }
+            Err(e) => {
+                eprintln!("  [X] Failed to get entry: {}", e);
+                1
+            }
+        },
+        Err(e) => {
+            eprintln!("  [X] Failed to resolve version: {}", e);
+            1
+        }
+    }
+}
+
+fn run_scan(path: String) -> i32 {
+    let path = std::path::PathBuf::from(&path);
+
+    let content = if path.is_dir() {
+        let skill_path = path.join("SKILL.md");
+        match std::fs::read_to_string(&skill_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("  [X] Failed to read {}: {}", skill_path.display(), e);
+                return 1;
+            }
+        }
+    } else {
+        match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("  [X] Failed to read {}: {}", path.display(), e);
+                return 1;
+            }
+        }
+    };
+
+    let scanner = punch_skills::SkillScanner::new();
+    let verdict = scanner.scan(&content);
+
+    println!();
+    match &verdict {
+        punch_skills::ScanVerdict::Clean => {
+            println!("  Security scan: CLEAN");
+            println!("  No issues found.");
+        }
+        punch_skills::ScanVerdict::Warning(findings) => {
+            println!("  Security scan: {} WARNING(s)", findings.len());
+            for f in findings {
+                println!(
+                    "  [{}] L{}: {} ({})",
+                    f.severity, f.line, f.description, f.pattern
+                );
+            }
+        }
+        punch_skills::ScanVerdict::Rejected(findings) => {
+            println!("  Security scan: REJECTED ({} finding(s))", findings.len());
+            for f in findings {
+                println!(
+                    "  [{}] L{}: {} ({})",
+                    f.severity, f.line, f.description, f.pattern
+                );
+            }
+        }
+    }
+    println!();
+
+    match verdict {
+        punch_skills::ScanVerdict::Rejected(_) => 1,
+        _ => 0,
+    }
+}
+
+fn run_sync() -> i32 {
+    println!("  Syncing marketplace index...");
+    let punch_home = super::punch_home();
+    let client = punch_skills::IndexClient::with_defaults(&punch_home);
+    match client.sync() {
+        Ok(()) => {
+            println!("  Index synced to {}", client.index_dir().display());
+            0
+        }
+        Err(e) => {
+            eprintln!("  [X] Failed to sync: {}", e);
+            1
+        }
+    }
+}
+
+fn run_lock() -> i32 {
+    let lock_path = std::path::PathBuf::from("punch-moves.lock");
+    match punch_skills::lockfile::read_lockfile(&lock_path) {
+        Ok(Some(lockfile)) => {
+            println!();
+            println!(
+                "  Lock file: punch-moves.lock (version {})",
+                lockfile.version
+            );
+            if lockfile.moves.is_empty() {
+                println!("  No locked moves.");
+            } else {
+                println!();
+                println!("  {:<30}  {:<10}  CHECKSUM", "NAME", "VERSION");
+                println!("  {}", "-".repeat(70));
+                for m in &lockfile.moves {
+                    println!(
+                        "  {:<30}  {:<10}  {}",
+                        m.name,
+                        m.version,
+                        &m.checksum[..16.min(m.checksum.len())]
+                    );
+                }
+                println!();
+                println!("  Total: {} locked move(s)", lockfile.moves.len());
+            }
+            println!();
+            0
+        }
+        Ok(None) => {
+            println!("  No lock file found (punch-moves.lock).");
+            println!("  Install marketplace moves to create one.");
+            0
+        }
+        Err(e) => {
+            eprintln!("  [X] Failed to read lock file: {}", e);
             1
         }
     }

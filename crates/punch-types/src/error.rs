@@ -81,6 +81,10 @@ pub enum PunchError {
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    // --- Marketplace errors ---
+    #[error("marketplace error: {0}")]
+    Marketplace(String),
+
     // --- Catch-all ---
     #[error("internal error: {0}")]
     Internal(String),
@@ -217,6 +221,12 @@ mod tests {
             err.to_string(),
             "mcp error [filesystem]: connection refused"
         );
+    }
+
+    #[test]
+    fn test_marketplace_error_display() {
+        let err = PunchError::Marketplace("skill not found".to_string());
+        assert_eq!(err.to_string(), "marketplace error: skill not found");
     }
 
     #[test]

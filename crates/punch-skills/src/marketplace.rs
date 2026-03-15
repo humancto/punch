@@ -29,6 +29,13 @@ pub enum SkillSource {
     Remote(String),
     /// Provided by a plugin.
     Plugin(Uuid),
+    /// Installed from the skills marketplace index.
+    Marketplace {
+        /// Pinned version.
+        version: String,
+        /// SHA-256 checksum of the installed tarball.
+        checksum: String,
+    },
 }
 
 /// A skill listing in the marketplace — like a fighter's move on the roster card.
@@ -895,6 +902,10 @@ mod tests {
             SkillSource::Local(std::path::PathBuf::from("/tmp/skill")),
             SkillSource::Remote("https://example.com/skill.wasm".to_string()),
             SkillSource::Plugin(Uuid::new_v4()),
+            SkillSource::Marketplace {
+                version: "1.0.0".to_string(),
+                checksum: "abc123def456".to_string(),
+            },
         ];
         for source in &sources {
             let json = serde_json::to_string(source).unwrap();

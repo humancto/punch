@@ -5,8 +5,14 @@
 //! Skills are bundles of tools, requirements, and domain-specific prompts
 //! that can be loaded into a fighter to grant it new capabilities.
 
+pub mod client;
 pub mod loader;
+pub mod lockfile;
 pub mod marketplace;
+pub mod publisher;
+pub mod registry;
+pub mod scanner;
+pub mod verifier;
 
 use std::collections::HashMap;
 
@@ -15,13 +21,18 @@ use tracing::info;
 
 use punch_types::ToolDefinition;
 
+pub use client::IndexClient;
 pub use loader::{
-    load_all_skills, load_skill_from_dir, load_skills_from_dir, parse_skill_md,
-    render_skills_prompt, LoadedSkill, SkillFrontmatter, SkillPrecedence,
+    LoadedSkill, SkillFrontmatter, SkillPrecedence, load_all_skills, load_skill_from_dir,
+    load_skills_from_dir, parse_skill_md, render_skills_prompt,
 };
+pub use lockfile::{LockedMove, MoveLockfile};
 pub use marketplace::{
-    builtin_skills, InstalledSkill, SkillListing, SkillMarketplace, SkillSource,
+    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
 };
+pub use registry::{IndexEntry, IndexMeta, ScanFinding, ScanVerdict};
+pub use scanner::SkillScanner;
+pub use verifier::{verify_and_scan, verify_checksum, verify_signature};
 
 // ---------------------------------------------------------------------------
 // Core types

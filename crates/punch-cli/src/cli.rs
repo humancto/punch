@@ -208,7 +208,7 @@ pub enum MoveCommands {
     /// List installed moves/skills
     List,
 
-    /// Search for moves
+    /// Search for moves (local and marketplace)
     Search {
         /// Search query
         query: String,
@@ -220,11 +220,69 @@ pub enum MoveCommands {
         name: String,
     },
 
-    /// Install a move
+    /// Install a move from the marketplace
     Install {
         /// Move name
         name: String,
+
+        /// Specific version to install (default: latest)
+        #[arg(short, long)]
+        version: Option<String>,
     },
+
+    /// Publish a skill to the marketplace
+    Publish {
+        /// Path to the skill directory
+        #[arg(default_value = ".")]
+        dir: String,
+
+        /// Perform a dry run (validate and scan without publishing)
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Update installed marketplace moves
+    Update {
+        /// Specific move to update (updates all if omitted)
+        name: Option<String>,
+    },
+
+    /// Remove an installed marketplace move
+    Remove {
+        /// Move name
+        name: String,
+    },
+
+    /// Generate an Ed25519 keypair for signing skills
+    Keygen,
+
+    /// Report a skill for abuse or security issues
+    Report {
+        /// Move name
+        name: String,
+
+        /// Reason for the report
+        #[arg(short, long)]
+        reason: String,
+    },
+
+    /// Verify a skill's signature and integrity
+    Verify {
+        /// Move name
+        name: String,
+    },
+
+    /// Run a security scan on a skill
+    Scan {
+        /// Path to a SKILL.md file or skill directory
+        path: String,
+    },
+
+    /// Sync the marketplace index
+    Sync,
+
+    /// Show or update the lock file
+    Lock,
 }
 
 #[derive(Debug, Subcommand)]

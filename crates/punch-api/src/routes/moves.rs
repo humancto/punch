@@ -76,6 +76,7 @@ fn source_type(listing: &SkillListing) -> String {
         punch_skills::SkillSource::Local(_) => "local".to_string(),
         punch_skills::SkillSource::Remote(_) => "remote".to_string(),
         punch_skills::SkillSource::Plugin(_) => "plugin".to_string(),
+        punch_skills::SkillSource::Marketplace { .. } => "marketplace".to_string(),
     }
 }
 
