@@ -897,7 +897,7 @@ mod tests {
             .await
             .expect("body");
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("Punch Arena Dashboard"));
+        assert!(html.contains("PUNCH ARENA"));
         assert!(html.contains("<!DOCTYPE html>"));
     }
 

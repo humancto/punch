@@ -29,6 +29,7 @@ pub fn api_router() -> Router<AppState> {
         .merge(health::router())
         .merge(fighters::router())
         .merge(gorillas::router())
+        .merge(chat::router())
         .merge(openai_compat::router())
         .merge(workflows::router())
         .merge(channels::router())

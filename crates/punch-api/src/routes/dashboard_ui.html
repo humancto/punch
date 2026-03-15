@@ -3,278 +3,555 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Punch Arena Dashboard</title>
+<title>PUNCH ARENA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --yellow: #d29922;
-    --red: #f85149;
-    --purple: #bc8cff;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-    padding: 1.5rem;
-  }
-  h1 {
-    font-size: 1.6rem;
-    margin-bottom: 0.5rem;
-    color: var(--accent);
-  }
-  h2 {
-    font-size: 1.1rem;
-    margin-bottom: 0.75rem;
-    color: var(--text);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.4rem;
-  }
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-  .header-info { color: var(--text-muted); font-size: 0.85rem; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-  }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem;
-  }
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 0.75rem;
-  }
-  .stat {
-    text-align: center;
-    padding: 0.5rem;
-    background: var(--bg);
-    border-radius: 6px;
-  }
-  .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--accent);
-  }
-  .stat-label {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .health-healthy { color: var(--green); }
-  .health-degraded { color: var(--red); }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-  }
-  th {
-    text-align: left;
-    padding: 0.5rem;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-muted);
-    font-weight: 600;
-  }
-  td {
-    padding: 0.5rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .status-idle, .status-caged { color: var(--text-muted); }
-  .status-fighting, .status-unleashed, .status-rampaging { color: var(--green); }
-  .status-resting { color: var(--yellow); }
-  .status-knocked_out, .status-injured { color: var(--red); }
-  .status-training { color: var(--purple); }
-  .audit-entry {
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 0.8rem;
-  }
-  .audit-entry:last-child { border-bottom: none; }
-  .audit-kind {
-    display: inline-block;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    background: var(--bg);
-    color: var(--accent);
-    font-size: 0.7rem;
-    margin-right: 0.5rem;
-    font-weight: 600;
-  }
-  .audit-time { color: var(--text-muted); font-size: 0.7rem; margin-left: 0.5rem; }
-  .empty { color: var(--text-muted); font-style: italic; padding: 1rem 0; }
-  #ws-status {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 0.4rem;
-  }
-  .ws-connected { background: var(--green); }
-  .ws-disconnected { background: var(--red); }
+:root {
+  --void: #050508;
+  --base: #0a0a0f;
+  --surface: #111118;
+  --elevated: #18181f;
+  --border: #252530;
+  --border-bright: #35354a;
+  --text: #e0e0e8;
+  --text-dim: #7a7a90;
+  --text-ghost: #44445a;
+  --red: #ff2d2d;
+  --red-dim: #ff2d2d40;
+  --red-glow: #ff2d2d22;
+  --orange: #ff6b35;
+  --orange-dim: #ff6b3540;
+  --green: #00ff88;
+  --green-dim: #00ff8830;
+  --blue: #4da6ff;
+  --blue-dim: #4da6ff30;
+  --yellow: #ffd23f;
+  --yellow-dim: #ffd23f30;
+  --purple: #b46eff;
+  --purple-dim: #b46eff30;
+  --mono: 'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 14px; }
+
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--mono);
+  line-height: 1.55;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9998;
+}
+
+.arena { max-width: 1440px; margin: 0 auto; padding: 20px 24px 40px; }
+
+/* ─── HEADER ─── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 0 20px; border-bottom: 1px solid var(--border);
+  margin-bottom: 24px; animation: fadeSlideDown 0.6s var(--ease-out-expo) both;
+}
+.header-left { display: flex; align-items: center; gap: 16px; }
+.logo {
+  font-size: 1.6rem; font-weight: 700; letter-spacing: 0.15em; color: var(--red);
+  text-shadow: 0 0 30px var(--red-dim), 0 0 60px var(--red-glow); position: relative;
+}
+.logo::after {
+  content: 'ARENA'; display: block; font-size: 0.55rem; font-weight: 400;
+  letter-spacing: 0.5em; color: var(--text-dim); text-shadow: none; margin-top: -2px;
+}
+.header-status { display: flex; align-items: center; gap: 20px; font-size: 0.78rem; color: var(--text-dim); }
+.health-badge {
+  display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 3px;
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.health-badge.healthy { background: var(--green-dim); color: var(--green); border: 1px solid #00ff8820; }
+.health-badge.degraded { background: var(--red-dim); color: var(--red); border: 1px solid #ff2d2d20; animation: pulse-red 2s ease-in-out infinite; }
+.ws-dot { width: 7px; height: 7px; border-radius: 50%; transition: background 0.3s, box-shadow 0.3s; }
+.ws-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green-dim); }
+.ws-dot.disconnected { background: var(--red); box-shadow: 0 0 8px var(--red-dim); }
+.uptime { font-variant-numeric: tabular-nums; font-weight: 500; color: var(--text); min-width: 80px; }
+
+/* ─── STAT CARDS ─── */
+.stats-row {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px;
+  margin-bottom: 24px; animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.1s both;
+}
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px 14px 14px; position: relative; overflow: hidden;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.stat-card:hover { border-color: var(--border-bright); transform: translateY(-1px); }
+.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+.stat-card:nth-child(1)::before { background: var(--red); }
+.stat-card:nth-child(2)::before { background: var(--orange); }
+.stat-card:nth-child(3)::before { background: var(--green); }
+.stat-card:nth-child(4)::before { background: var(--blue); }
+.stat-card:nth-child(5)::before { background: var(--purple); }
+.stat-card:nth-child(6)::before { background: var(--yellow); }
+.stat-glyph { font-size: 0.85rem; margin-bottom: 8px; opacity: 0.5; }
+.stat-value {
+  font-size: 1.75rem; font-weight: 700; line-height: 1; margin-bottom: 4px;
+  font-variant-numeric: tabular-nums; transition: color 0.3s;
+}
+.stat-card:nth-child(1) .stat-value { color: var(--red); }
+.stat-card:nth-child(2) .stat-value { color: var(--orange); }
+.stat-card:nth-child(3) .stat-value { color: var(--green); }
+.stat-card:nth-child(4) .stat-value { color: var(--blue); }
+.stat-card:nth-child(5) .stat-value { color: var(--purple); }
+.stat-card:nth-child(6) .stat-value { color: var(--yellow); }
+.stat-label { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+
+/* ─── MAIN GRID ─── */
+.main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+/* ─── PANELS ─── */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--elevated);
+}
+.panel-title { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); }
+.panel-count { font-size: 0.68rem; color: var(--text-ghost); font-weight: 400; }
+.panel-body { padding: 12px; }
+
+/* ─── FIGHTER CARDS ─── */
+.fighters-grid { display: flex; flex-direction: column; gap: 8px; }
+.fighter-card {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
+  padding: 10px 12px; background: var(--base); border: 1px solid var(--border); border-radius: 5px;
+  transition: border-color 0.2s, background 0.2s; animation: fadeIn 0.3s var(--ease-out-expo) both;
+}
+.fighter-card:hover { border-color: var(--border-bright); background: var(--elevated); }
+.fighter-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fighter-status-dot.idle { background: var(--text-ghost); }
+.fighter-status-dot.fighting { background: var(--green); box-shadow: 0 0 10px var(--green-dim); animation: pulse-dot 1.5s ease-in-out infinite; }
+.fighter-status-dot.resting { background: var(--yellow); box-shadow: 0 0 6px var(--yellow-dim); }
+.fighter-status-dot.knocked_out { background: var(--red); box-shadow: 0 0 6px var(--red-dim); }
+.fighter-status-dot.training { background: var(--purple); box-shadow: 0 0 6px var(--purple-dim); animation: pulse-dot 2s ease-in-out infinite; }
+.fighter-info { min-width: 0; }
+.fighter-name { font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fighter-meta { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 0.68rem; color: var(--text-dim); }
+.fighter-model { color: var(--text-ghost); }
+.weight-badge { font-size: 0.6rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border-radius: 2px; }
+.weight-badge.featherweight { color: var(--blue); background: var(--blue-dim); }
+.weight-badge.middleweight { color: var(--yellow); background: var(--yellow-dim); }
+.weight-badge.heavyweight { color: var(--orange); background: var(--orange-dim); }
+.weight-badge.champion { color: var(--red); background: var(--red-dim); }
+.fighter-status-label { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+.fighter-status-label.idle { color: var(--text-ghost); }
+.fighter-status-label.fighting { color: var(--green); }
+.fighter-status-label.resting { color: var(--yellow); }
+.fighter-status-label.knocked_out { color: var(--red); }
+.fighter-status-label.training { color: var(--purple); }
+
+/* ─── GORILLA CARDS ─── */
+.gorillas-grid { display: flex; flex-direction: column; gap: 8px; }
+.gorilla-card {
+  padding: 10px 12px; background: var(--base); border: 1px solid var(--border); border-radius: 5px;
+  transition: border-color 0.2s, background 0.2s; animation: fadeIn 0.3s var(--ease-out-expo) both; position: relative;
+}
+.gorilla-card:hover { border-color: var(--border-bright); background: var(--elevated); }
+.gorilla-card.rampaging {
+  border-color: var(--red); background: linear-gradient(135deg, var(--base), #1a0808);
+  animation: fadeIn 0.3s var(--ease-out-expo) both, cage-shake 0.5s ease-in-out infinite;
+}
+.gorilla-card.injured { border-color: #ff6b3560; opacity: 0.7; }
+.gorilla-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.gorilla-name { font-weight: 600; font-size: 0.85rem; color: var(--text); }
+.gorilla-status {
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 2px;
+}
+.gorilla-status.caged { color: var(--text-ghost); background: transparent; border: 1px solid var(--border); }
+.gorilla-status.rampaging { color: var(--red); background: var(--red-dim); border: 1px solid var(--red-dim); animation: pulse-red 1.5s ease-in-out infinite; }
+.gorilla-status.injured { color: var(--orange); background: var(--orange-dim); border: 1px solid var(--orange-dim); }
+.gorilla-meta { display: flex; align-items: center; gap: 12px; font-size: 0.68rem; color: var(--text-dim); }
+.gorilla-schedule { color: var(--text-ghost); }
+.gorilla-desc {
+  font-size: 0.68rem; color: var(--text-ghost); margin-top: 4px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ─── BOTTOM GRID ─── */
+.bottom-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.3s both; }
+
+/* ─── CONFIG PANEL ─── */
+.config-grid { display: flex; flex-direction: column; gap: 1px; }
+.config-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #ffffff06; }
+.config-row:last-child { border-bottom: none; }
+.config-key { font-size: 0.68rem; color: var(--text-dim); font-weight: 400; }
+.config-val {
+  font-size: 0.72rem; color: var(--text); font-weight: 500; text-align: right;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.config-val.active { color: var(--green); }
+.config-val.inactive { color: var(--text-ghost); }
+
+/* ─── AUDIT TRAIL ─── */
+.audit-feed {
+  display: flex; flex-direction: column; gap: 0; max-height: 280px;
+  overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.audit-feed::-webkit-scrollbar { width: 4px; }
+.audit-feed::-webkit-scrollbar-track { background: transparent; }
+.audit-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.audit-entry {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid #ffffff04; font-size: 0.72rem;
+  animation: auditSlideIn 0.3s var(--ease-out-expo) both;
+}
+.audit-entry:last-child { border-bottom: none; }
+.audit-kind {
+  font-size: 0.58rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 2px; white-space: nowrap;
+}
+.audit-kind.fighter_status { color: var(--blue); background: var(--blue-dim); }
+.audit-kind.gorilla_status { color: var(--orange); background: var(--orange-dim); }
+.audit-kind.system_start { color: var(--green); background: var(--green-dim); }
+.audit-kind.system_event { color: var(--purple); background: var(--purple-dim); }
+.audit-summary { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audit-time { font-size: 0.62rem; color: var(--text-ghost); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.empty { color: var(--text-ghost); font-size: 0.75rem; padding: 20px 0; text-align: center; font-style: italic; }
+
+/* ─── ANIMATIONS ─── */
+@keyframes fadeSlideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes auditSlideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+@keyframes cage-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
+@keyframes countUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 1100px) {
+  .stats-row { grid-template-columns: repeat(3, 1fr); }
+  .main-grid { grid-template-columns: 1fr; }
+  .bottom-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  html { font-size: 13px; }
+  .arena { padding: 12px 16px 32px; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+}
 </style>
 </head>
 <body>
-<div class="header">
-  <h1>Punch Arena Dashboard</h1>
-  <div class="header-info">
-    <span id="ws-status" class="ws-disconnected" title="WebSocket status"></span>
-    Auto-refresh: 10s | <span id="last-update">--</span>
-  </div>
-</div>
+<div class="arena">
 
-<div class="grid">
-  <div class="card">
-    <h2>System Status</h2>
-    <div id="status-content" class="stats"><div class="empty">Loading...</div></div>
-  </div>
-  <div class="card">
-    <h2>Metrics</h2>
-    <div id="metrics-content" class="stats"><div class="empty">Loading...</div></div>
-  </div>
-</div>
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">PUNCH</div>
+      <div id="health-badge" class="health-badge healthy">
+        <span id="ws-dot" class="ws-dot disconnected"></span>
+        <span id="health-text">HEALTHY</span>
+      </div>
+    </div>
+    <div class="header-status">
+      <span>UPTIME <span id="uptime" class="uptime">00:00:00</span></span>
+      <span style="color:var(--text-ghost)">|</span>
+      <span id="last-refresh" style="color:var(--text-ghost)">--</span>
+    </div>
+  </header>
 
-<div class="grid">
-  <div class="card">
-    <h2>Fighter Roster</h2>
-    <div id="fighters-content"><div class="empty">Loading...</div></div>
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-glyph">&#9876;</div>
+      <div class="stat-value" id="stat-fighters">0</div>
+      <div class="stat-label">Fighters</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-glyph">&#128037;</div>
+      <div class="stat-value" id="stat-gorillas">0</div>
+      <div class="stat-label">Gorillas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-glyph">&#9889;</div>
+      <div class="stat-value" id="stat-bouts">0</div>
+      <div class="stat-label">Active Bouts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-glyph">&#9993;</div>
+      <div class="stat-value" id="stat-messages">0</div>
+      <div class="stat-label">Messages</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-glyph">&#9883;</div>
+      <div class="stat-value" id="stat-tokens">0</div>
+      <div class="stat-label">Tokens Used</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-glyph">&#36;</div>
+      <div class="stat-value" id="stat-cost">$0.00</div>
+      <div class="stat-label">Total Cost</div>
+    </div>
   </div>
-  <div class="card">
-    <h2>Gorilla Enclosure</h2>
-    <div id="gorillas-content"><div class="empty">Loading...</div></div>
-  </div>
-</div>
 
-<div class="card" style="margin-bottom:1rem;">
-  <h2>Audit Trail</h2>
-  <div id="audit-content"><div class="empty">Loading...</div></div>
+  <div class="main-grid" style="animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.2s both;">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Fighter Roster</span>
+        <span class="panel-count" id="fighter-count">0 fighters</span>
+      </div>
+      <div class="panel-body">
+        <div id="fighters-content" class="fighters-grid">
+          <div class="empty">Waiting for fighters&hellip;</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Gorilla Enclosure</span>
+        <span class="panel-count" id="gorilla-count">0 gorillas</span>
+      </div>
+      <div class="panel-body">
+        <div id="gorillas-content" class="gorillas-grid">
+          <div class="empty">No gorillas registered&hellip;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">System Config</span>
+      </div>
+      <div class="panel-body">
+        <div id="config-content" class="config-grid">
+          <div class="empty">Loading config&hellip;</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Audit Trail</span>
+        <span class="panel-count" id="audit-count">live feed</span>
+      </div>
+      <div class="panel-body">
+        <div id="audit-content" class="audit-feed">
+          <div class="empty">Waiting for events&hellip;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
-// All dynamic content is escaped via esc() (uses textContent) before DOM insertion.
 (function() {
   "use strict";
   var BASE = window.location.origin;
+  var uptimeSecs = 0;
+  var uptimeInterval = null;
 
-  // Escapes HTML entities to prevent XSS when building markup strings.
   function esc(s) {
     var d = document.createElement("div");
-    d.textContent = String(s);
+    d.textContent = String(s == null ? "" : s);
     return d.innerHTML;
   }
 
   function fetchJson(path) {
-    return fetch(BASE + path)
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .catch(function() { return null; });
+    return fetch(BASE + path).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }
 
-  function setSafeHTML(id, html) {
+  function setHTML(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+
+  function fmtNum(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+    return String(n);
+  }
+
+  function fmtUptime(secs) {
+    var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+
+  function fmtCost(usd) {
+    if (usd < 0.01) return "$" + usd.toFixed(4);
+    if (usd < 1) return "$" + usd.toFixed(3);
+    return "$" + usd.toFixed(2);
+  }
+
+  function fmtTime(ts) {
+    try { var d = new Date(ts); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0"); }
+    catch(_) { return "--:--:--"; }
+  }
+
+  function fmtSchedule(cron) {
+    if (!cron) return "manual";
+    if (cron.indexOf("*/5 ") === 0) return "every 5m";
+    if (cron.indexOf("*/10 ") === 0) return "every 10m";
+    if (cron.indexOf("*/15 ") === 0) return "every 15m";
+    if (cron.indexOf("*/30 ") === 0) return "every 30m";
+    var p = cron.split(" ");
+    if (p.length >= 5) {
+      if (p[0] === "0" && p[1].indexOf("*/") === 0) return "every " + p[1].replace("*/","") + "h";
+      if (p[0] === "0" && p[1] === "0" && p[2] === "*") return "daily";
+      if (p[0] === "0" && p[1] === "0" && p[2].indexOf("*/") === 0) return "every " + p[2].replace("*/","") + "d";
+    }
+    return cron;
+  }
+
+  function animateStat(id, value) {
     var el = document.getElementById(id);
-    if (el) { el.innerHTML = html; }
+    if (!el) return;
+    var display = String(value);
+    if (el.textContent !== display) {
+      el.style.animation = "none"; el.offsetHeight;
+      el.style.animation = "countUp 0.3s var(--ease-out-expo) both";
+      el.textContent = display;
+    }
   }
 
   function renderStatus(data) {
-    if (!data) return '<div class="empty">Failed to load status</div>';
-    var hc = data.system_health === "healthy" ? "health-healthy" : "health-degraded";
-    return [
-      '<div class="stat"><div class="stat-value">' + esc(data.uptime_secs) + 's</div><div class="stat-label">Uptime</div></div>',
-      '<div class="stat"><div class="stat-value">' + esc(data.fighter_count) + '</div><div class="stat-label">Fighters</div></div>',
-      '<div class="stat"><div class="stat-value">' + esc(data.gorilla_count) + '</div><div class="stat-label">Gorillas</div></div>',
-      '<div class="stat"><div class="stat-value">' + esc(data.active_bouts) + '</div><div class="stat-label">Active Bouts</div></div>',
-      '<div class="stat"><div class="stat-value">' + esc(data.total_messages) + '</div><div class="stat-label">Messages</div></div>',
-      '<div class="stat"><div class="stat-value ' + hc + '">' + esc(data.system_health) + '</div><div class="stat-label">Health</div></div>'
-    ].join("");
+    if (!data) return;
+    uptimeSecs = data.uptime_secs || 0;
+    document.getElementById("uptime").textContent = fmtUptime(uptimeSecs);
+    var badge = document.getElementById("health-badge"), text = document.getElementById("health-text");
+    if (data.system_health === "healthy") { badge.className = "health-badge healthy"; text.textContent = "HEALTHY"; }
+    else { badge.className = "health-badge degraded"; text.textContent = "DEGRADED"; }
+    animateStat("stat-fighters", data.fighter_count);
+    animateStat("stat-gorillas", data.gorilla_count);
+    animateStat("stat-bouts", data.active_bouts);
+    animateStat("stat-messages", fmtNum(data.total_messages));
   }
 
   function renderMetrics(data) {
-    if (!data) return '<div class="empty">Failed to load metrics</div>';
-    return [
-      '<div class="stat"><div class="stat-value">' + esc(data.total_tokens_used.toLocaleString()) + '</div><div class="stat-label">Tokens Used</div></div>',
-      '<div class="stat"><div class="stat-value">' + esc(data.total_tool_calls) + '</div><div class="stat-label">Tool Calls</div></div>',
-      '<div class="stat"><div class="stat-value">$' + esc(data.total_cost_usd.toFixed(4)) + '</div><div class="stat-label">Total Cost</div></div>'
-    ].join("");
+    if (!data) return;
+    animateStat("stat-tokens", fmtNum(data.total_tokens_used));
+    animateStat("stat-cost", fmtCost(data.total_cost_usd));
   }
 
   function renderFighters(data) {
-    if (!data || data.length === 0) return '<div class="empty">No fighters in the arena</div>';
-    var rows = ["<table><tr><th>Name</th><th>Weight</th><th>Model</th><th>Status</th></tr>"];
+    if (!data || data.length === 0) { setHTML("fighters-content",'<div class="empty">No fighters in the arena</div>'); setHTML("fighter-count","0 fighters"); return; }
+    var html = [];
     for (var i = 0; i < data.length; i++) {
-      var f = data[i];
-      rows.push("<tr><td>" + esc(f.name) + "</td><td>" + esc(f.weight_class) + "</td><td>" + esc(f.model) + '</td><td class="status-' + esc(f.status) + '">' + esc(f.status) + "</td></tr>");
+      var f = data[i], st = f.status || "idle";
+      html.push(
+        '<div class="fighter-card" style="animation-delay:'+i*50+'ms" title="'+esc(f.description)+'">'+
+        '<div class="fighter-status-dot '+esc(st)+'"></div>'+
+        '<div class="fighter-info"><div class="fighter-name">'+esc(f.name)+'</div>'+
+        '<div class="fighter-meta"><span class="weight-badge '+esc(f.weight_class)+'">'+esc(f.weight_class)+'</span>'+
+        '<span class="fighter-model">'+esc(f.model)+'</span></div></div>'+
+        '<div class="fighter-status-label '+esc(st)+'">'+esc(st)+'</div></div>'
+      );
     }
-    rows.push("</table>");
-    return rows.join("");
+    setHTML("fighters-content", html.join(""));
+    setHTML("fighter-count", data.length+" fighter"+(data.length!==1?"s":""));
   }
 
   function renderGorillas(data) {
-    if (!data || data.length === 0) return '<div class="empty">No gorillas registered</div>';
-    var rows = ["<table><tr><th>Name</th><th>Schedule</th><th>Status</th></tr>"];
+    if (!data || data.length === 0) { setHTML("gorillas-content",'<div class="empty">No gorillas registered</div>'); setHTML("gorilla-count","0 gorillas"); return; }
+    var html = [];
     for (var i = 0; i < data.length; i++) {
-      var g = data[i];
-      rows.push("<tr><td>" + esc(g.name) + "</td><td>" + esc(g.schedule) + '</td><td class="status-' + esc(g.status) + '">' + esc(g.status) + "</td></tr>");
+      var g = data[i], st = g.status || "caged";
+      html.push(
+        '<div class="gorilla-card '+esc(st)+'" style="animation-delay:'+i*50+'ms">'+
+        '<div class="gorilla-top"><span class="gorilla-name">'+esc(g.name)+'</span>'+
+        '<span class="gorilla-status '+esc(st)+'">'+esc(st)+'</span></div>'+
+        '<div class="gorilla-meta"><span class="gorilla-schedule">'+esc(fmtSchedule(g.schedule))+'</span></div>'+
+        '<div class="gorilla-desc">'+esc(g.description)+'</div></div>'
+      );
     }
-    rows.push("</table>");
-    return rows.join("");
+    setHTML("gorillas-content", html.join(""));
+    setHTML("gorilla-count", data.length+" gorilla"+(data.length!==1?"s":""));
+  }
+
+  function renderConfig(data) {
+    if (!data) { setHTML("config-content",'<div class="empty">Config unavailable</div>'); return; }
+    var dm = data.default_model || {};
+    var rows = [
+      ["Provider",dm.provider||"\u2014"],["Model",dm.model||"\u2014"],
+      ["Endpoint",dm.base_url||"default"],["Max Tokens",dm.max_tokens||"\u2014"],
+      ["Temperature",dm.temperature||"\u2014"],["Rate Limit",(data.rate_limit_rpm||0)+" rpm"],
+      ["API Listen",data.api_listen||"\u2014"],["Memory DB",data.memory_db_path||"\u2014"],
+      ["Knowledge Graph",data.knowledge_graph_enabled?"enabled":"disabled"],
+      ["Channels",String(data.channel_count||0)],["MCP Servers",String(data.mcp_server_count||0)]
+    ];
+    var html = [];
+    for (var i = 0; i < rows.length; i++) {
+      var vc = ""; if (rows[i][1]==="enabled") vc=" active"; if (rows[i][1]==="disabled"||rows[i][1]==="0") vc=" inactive";
+      html.push('<div class="config-row"><span class="config-key">'+esc(rows[i][0])+'</span><span class="config-val'+vc+'">'+esc(rows[i][1])+'</span></div>');
+    }
+    setHTML("config-content", html.join(""));
   }
 
   function renderAudit(data) {
-    if (!data || data.length === 0) return '<div class="empty">No audit entries</div>';
-    var parts = [];
+    if (!data || data.length === 0) { setHTML("audit-content",'<div class="empty">No events recorded</div>'); return; }
+    var html = [];
     for (var i = 0; i < data.length; i++) {
-      var e = data[i];
-      parts.push('<div class="audit-entry"><span class="audit-kind">' + esc(e.kind) + "</span>" + esc(e.summary) + '<span class="audit-time">#' + esc(e.sequence) + "</span></div>");
+      var e = data[i], kc = esc(e.kind||"system_event");
+      html.push(
+        '<div class="audit-entry" style="animation-delay:'+i*30+'ms">'+
+        '<span class="audit-kind '+kc+'">'+esc(e.kind)+'</span>'+
+        '<span class="audit-summary">'+esc(e.summary)+'</span>'+
+        '<span class="audit-time">'+fmtTime(e.timestamp)+'</span></div>'
+      );
     }
-    return parts.join("");
+    setHTML("audit-content", html.join(""));
+  }
+
+  function startUptimeTicker() {
+    if (uptimeInterval) clearInterval(uptimeInterval);
+    uptimeInterval = setInterval(function() { uptimeSecs++; document.getElementById("uptime").textContent = fmtUptime(uptimeSecs); }, 1000);
   }
 
   function refresh() {
     Promise.all([
-      fetchJson("/api/dashboard/status"),
-      fetchJson("/api/dashboard/fighters"),
-      fetchJson("/api/dashboard/gorillas"),
-      fetchJson("/api/dashboard/audit?limit=20"),
-      fetchJson("/api/dashboard/metrics")
-    ]).then(function(results) {
-      setSafeHTML("status-content", renderStatus(results[0]));
-      setSafeHTML("fighters-content", renderFighters(results[1]));
-      setSafeHTML("gorillas-content", renderGorillas(results[2]));
-      setSafeHTML("audit-content", renderAudit(results[3]));
-      setSafeHTML("metrics-content", renderMetrics(results[4]));
-      document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+      fetchJson("/api/dashboard/status"), fetchJson("/api/dashboard/metrics"),
+      fetchJson("/api/dashboard/fighters"), fetchJson("/api/dashboard/gorillas"),
+      fetchJson("/api/dashboard/config"), fetchJson("/api/dashboard/audit?limit=20")
+    ]).then(function(r) {
+      renderStatus(r[0]); renderMetrics(r[1]); renderFighters(r[2]);
+      renderGorillas(r[3]); renderConfig(r[4]); renderAudit(r[5]);
+      document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
     });
   }
 
-  function connectWebSocket() {
-    var proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    var ws = new WebSocket(proto + "//" + window.location.host + "/api/dashboard/events");
-    var dot = document.getElementById("ws-status");
-
-    ws.onopen = function() { dot.className = "ws-connected"; };
-    ws.onclose = function() { dot.className = "ws-disconnected"; setTimeout(connectWebSocket, 3000); };
+  function connectWS() {
+    var dot = document.getElementById("ws-dot");
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws;
+    try { ws = new WebSocket(proto+"//"+location.host+"/api/dashboard/events"); } catch(_) { dot.className="ws-dot disconnected"; return; }
+    ws.onopen = function() { dot.className = "ws-dot connected"; };
+    ws.onclose = function() { dot.className = "ws-dot disconnected"; setTimeout(connectWS, 3000); };
     ws.onerror = function() { ws.close(); };
     ws.onmessage = function() { refresh(); };
   }
 
   refresh();
+  startUptimeTicker();
   setInterval(refresh, 10000);
-  connectWebSocket();
+  connectWS();
 })();
 </script>
 </body>
