@@ -85,7 +85,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for crate in punch-types punch-memory punch-skills punch-extensions punch-wire punch-runtime punch-kernel punch-api punch-channels punch-gorillas punch-cli; do
+          for crate in punch-types punch-memory punch-skills punch-extensions punch-wire punch-runtime punch-kernel punch-arena punch-channels punch-gorillas punch-cli; do
             echo "Publishing $crate..."
             cargo publish -p "$crate" --allow-dirty || true
             sleep 30
