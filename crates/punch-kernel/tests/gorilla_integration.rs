@@ -153,9 +153,9 @@ async fn gorilla_unleash_and_cage_via_ring() {
 
     // Verify it is in the unleashed state.
     let gorillas = ring.list_gorillas().await;
-    let entry = gorillas.iter().find(|(id, _, _)| *id == gorilla_id);
+    let entry = gorillas.iter().find(|(id, _, _, _)| *id == gorilla_id);
     assert!(entry.is_some(), "gorilla should be listed");
-    let (_, _, status) = entry.unwrap();
+    let (_, _, status, _) = entry.unwrap();
     assert_eq!(*status, GorillaStatus::Unleashed);
 
     // Verify the background executor knows about it.
@@ -178,8 +178,8 @@ async fn gorilla_unleash_and_cage_via_ring() {
     );
 
     let gorillas = ring.list_gorillas().await;
-    let entry = gorillas.iter().find(|(id, _, _)| *id == gorilla_id);
-    let (_, _, status) = entry.unwrap();
+    let entry = gorillas.iter().find(|(id, _, _, _)| *id == gorilla_id);
+    let (_, _, status, _) = entry.unwrap();
     assert_eq!(*status, GorillaStatus::Caged);
 }
 

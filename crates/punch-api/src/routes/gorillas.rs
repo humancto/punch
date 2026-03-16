@@ -65,7 +65,7 @@ async fn list_gorillas(State(state): State<AppState>) -> Json<Vec<GorillaSummary
 
     let summaries = gorillas
         .into_iter()
-        .map(|(id, manifest, status)| GorillaSummary {
+        .map(|(id, manifest, status, _metrics)| GorillaSummary {
             id,
             name: manifest.name,
             description: manifest.description,
@@ -138,9 +138,9 @@ async fn gorilla_status(
     // a single-gorilla lookup with metrics yet.
     let gorillas = state.ring.list_gorillas().await;
 
-    let (_, manifest, status) = gorillas
+    let (_, manifest, status, metrics) = gorillas
         .into_iter()
-        .find(|(gid, _, _)| *gid == gorilla_id)
+        .find(|(gid, _, _, _)| *gid == gorilla_id)
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
@@ -150,17 +150,14 @@ async fn gorilla_status(
             )
         })?;
 
-    // Note: The Ring's list_gorillas doesn't currently return metrics.
-    // For now we return defaults. A future Ring API could expose per-gorilla
-    // metric snapshots.
     Ok(Json(GorillaStatusResponse {
         id: gorilla_id,
         name: manifest.name,
         status,
         metrics: GorillaMetricsResponse {
-            tasks_completed: 0,
-            uptime_secs: 0,
-            last_rampage: None,
+            tasks_completed: metrics.tasks_completed,
+            uptime_secs: metrics.uptime_secs,
+            last_rampage: metrics.last_rampage,
         },
     }))
 }

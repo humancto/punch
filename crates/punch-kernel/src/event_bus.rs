@@ -1,7 +1,12 @@
 //! Event bus for publishing and subscribing to system-wide [`PunchEvent`]s.
 //!
 //! Built on top of [`tokio::sync::broadcast`] so that multiple subscribers can
-//! independently receive every event without blocking the publisher.
+//! independently receive every event without blocking the publisher. Maintains
+//! an in-memory history ring buffer so that the dashboard audit trail can
+//! display recent events even if no WebSocket client was connected at the time.
+
+use std::collections::VecDeque;
+use std::sync::Mutex;
 
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
@@ -11,12 +16,17 @@ use punch_types::{EventPayload, PunchEvent};
 /// Default channel capacity for the broadcast bus.
 const DEFAULT_CAPACITY: usize = 1024;
 
+/// Maximum number of events retained in the history ring buffer.
+const HISTORY_CAPACITY: usize = 500;
+
 /// A broadcast-based event bus for the Punch system.
 ///
 /// Cloning an `EventBus` yields a handle to the **same** underlying channel.
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<EventPayload>,
+    /// Ring buffer of recent events for the audit trail.
+    history: std::sync::Arc<Mutex<VecDeque<EventPayload>>>,
 }
 
 impl EventBus {
@@ -28,14 +38,18 @@ impl EventBus {
     /// Create a new event bus with a specific channel capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            history: std::sync::Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_CAPACITY))),
+        }
     }
 
     /// Publish an event to all active subscribers.
     ///
-    /// If there are no subscribers the event is silently dropped.
+    /// The event is also stored in the history buffer for the audit trail.
     pub fn publish(&self, event: PunchEvent) {
         let payload = EventPayload::new(event);
+        self.store_in_history(&payload);
         match self.sender.send(payload) {
             Ok(receivers) => {
                 debug!(receivers, "event published");
@@ -50,6 +64,7 @@ impl EventBus {
     /// Publish a pre-built [`EventPayload`] (useful when you need a custom
     /// correlation ID or timestamp).
     pub fn publish_payload(&self, payload: EventPayload) {
+        self.store_in_history(&payload);
         match self.sender.send(payload) {
             Ok(receivers) => {
                 debug!(receivers, "event payload published");
@@ -88,6 +103,31 @@ impl EventBus {
     /// Return the current number of active subscribers.
     pub fn subscriber_count(&self) -> usize {
         self.sender.receiver_count()
+    }
+
+    /// Return recent events from the history buffer.
+    ///
+    /// Returns up to `limit` events, optionally filtering to only those with
+    /// a sequence (position) greater than `since`. Events are returned in
+    /// chronological order (oldest first).
+    pub fn recent_events(&self, limit: usize, since: usize) -> Vec<(usize, EventPayload)> {
+        let history = self.history.lock().expect("history lock poisoned");
+        history
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx >= since)
+            .take(limit)
+            .map(|(idx, payload)| (idx + 1, payload.clone()))
+            .collect()
+    }
+
+    /// Store a payload in the history ring buffer.
+    fn store_in_history(&self, payload: &EventPayload) {
+        let mut history = self.history.lock().expect("history lock poisoned");
+        if history.len() >= HISTORY_CAPACITY {
+            history.pop_front();
+        }
+        history.push_back(payload.clone());
     }
 }
 

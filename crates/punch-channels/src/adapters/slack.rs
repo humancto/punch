@@ -8,10 +8,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use punch_types::{PunchError, PunchResult};
+
+type HmacSha256 = Hmac<Sha256>;
 
 use crate::{ChannelAdapter, ChannelPlatform, ChannelStatus, IncomingMessage, split_message};
 
@@ -25,7 +29,6 @@ pub struct SlackAdapter {
     /// Bot token for the Slack Web API (xoxb-...).
     bot_token: String,
     /// Signing secret for verifying Slack requests.
-    #[allow(dead_code)]
     signing_secret: Option<String>,
     /// HTTP client for API calls.
     client: reqwest::Client,
@@ -67,6 +70,38 @@ impl SlackAdapter {
         } else {
             None
         }
+    }
+
+    /// Verify a Slack webhook request signature.
+    ///
+    /// Slack signs every webhook with HMAC-SHA256 using the signing secret.
+    /// The signature is computed over `v0:{timestamp}:{body}` and compared
+    /// in constant time against the `X-Slack-Signature` header value.
+    ///
+    /// Returns `true` if the signature is valid, `false` if verification
+    /// fails or no signing secret is configured.
+    pub fn verify_webhook_signature(
+        &self,
+        timestamp: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> bool {
+        let secret = match &self.signing_secret {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let basestring = format!("v0:{}:{}", timestamp, String::from_utf8_lossy(body));
+
+        let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        mac.update(basestring.as_bytes());
+        let expected = mac.finalize().into_bytes();
+        let expected_hex = format!("v0={}", hex_encode(&expected));
+
+        constant_time_eq(expected_hex.as_bytes(), signature.as_bytes())
     }
 
     /// Parse a Slack Events API payload into an IncomingMessage.
@@ -259,6 +294,22 @@ impl ChannelAdapter for SlackAdapter {
         }
         Ok(())
     }
+}
+
+/// Encode bytes as lowercase hex string.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Constant-time byte comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 #[cfg(test)]
@@ -473,5 +524,87 @@ mod tests {
             "challenge": "abc"
         });
         assert!(adapter.parse_webhook_payload(&payload).await.is_none());
+    }
+
+    // --- Webhook signature verification tests ---
+
+    fn make_slack_signature(secret: &str, timestamp: &str, body: &[u8]) -> String {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let basestring = format!("v0:{}:{}", timestamp, String::from_utf8_lossy(body));
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(basestring.as_bytes());
+        let result = mac.finalize().into_bytes();
+        let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
+        format!("v0={}", hex)
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_valid() {
+        let secret = "test_signing_secret_12345";
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some(secret.to_string()));
+
+        let timestamp = "1700000000";
+        let body = b"{\"type\":\"event_callback\",\"event\":{}}";
+        let signature = make_slack_signature(secret, timestamp, body);
+
+        assert!(adapter.verify_webhook_signature(timestamp, &signature, body));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_invalid() {
+        let secret = "test_signing_secret_12345";
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some(secret.to_string()));
+
+        let timestamp = "1700000000";
+        let body = b"{\"type\":\"event_callback\",\"event\":{}}";
+
+        assert!(!adapter.verify_webhook_signature(timestamp, "v0=deadbeef", body));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_no_secret() {
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), None);
+
+        assert!(!adapter.verify_webhook_signature("1700000000", "v0=abc", b"body"));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_tampered_body() {
+        let secret = "my_secret";
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some(secret.to_string()));
+
+        let timestamp = "1700000000";
+        let original_body = b"original body";
+        let signature = make_slack_signature(secret, timestamp, original_body);
+
+        // Tampered body should fail
+        assert!(!adapter.verify_webhook_signature(timestamp, &signature, b"tampered body"));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_tampered_timestamp() {
+        let secret = "my_secret";
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some(secret.to_string()));
+
+        let body = b"test body";
+        let signature = make_slack_signature(secret, "1700000000", body);
+
+        // Different timestamp should fail
+        assert!(!adapter.verify_webhook_signature("1700000001", &signature, body));
+    }
+
+    #[test]
+    fn test_verify_webhook_signature_empty_body() {
+        let secret = "secret";
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), Some(secret.to_string()));
+
+        let timestamp = "1700000000";
+        let body = b"";
+        let signature = make_slack_signature(secret, timestamp, body);
+
+        assert!(adapter.verify_webhook_signature(timestamp, &signature, body));
     }
 }

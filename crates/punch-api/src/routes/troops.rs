@@ -61,6 +61,15 @@ struct AssignTaskRequest {
 #[derive(Serialize)]
 struct AssignTaskResponse {
     assigned_to: Vec<FighterId>,
+    routing_decision: String,
+    results: Vec<TaskResultEntry>,
+}
+
+#[derive(Serialize)]
+struct TaskResultEntry {
+    fighter_id: FighterId,
+    response: String,
+    success: bool,
 }
 
 #[derive(Deserialize)]
@@ -151,9 +160,10 @@ async fn assign_task(
     Json(body): Json<AssignTaskRequest>,
 ) -> Result<Json<AssignTaskResponse>, (StatusCode, Json<ErrorResponse>)> {
     let troop_id = TroopId(id);
-    let assigned = state
+    let assignment = state
         .ring
-        .assign_troop_task(&troop_id, &body.task)
+        .assign_troop_task_async(&troop_id, &body.task)
+        .await
         .map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -162,8 +172,21 @@ async fn assign_task(
                 }),
             )
         })?;
+
+    let results = assignment
+        .results
+        .into_iter()
+        .map(|(fighter_id, response)| TaskResultEntry {
+            fighter_id,
+            response,
+            success: true,
+        })
+        .collect();
+
     Ok(Json(AssignTaskResponse {
-        assigned_to: assigned,
+        assigned_to: assignment.assigned_to,
+        routing_decision: assignment.routing_decision,
+        results,
     }))
 }
 

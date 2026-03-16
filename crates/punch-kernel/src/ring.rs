@@ -448,20 +448,32 @@ impl Ring {
 
         info!(%id, name, "fighter spawned");
 
-        // --- Creed binding ---
-        // If a creed exists for this fighter name, bind it to the new instance.
-        // This ensures the creed persists across kill/respawn cycles.
+        // --- Creed creation & binding ---
+        // Create a default creed if none exists, then bind it to this instance.
+        // This ensures every fighter has a consciousness layer from birth.
         {
             let memory = Arc::clone(&self.memory);
             let creed_name = name.clone();
             let fid = id;
+            // Clone the manifest for the creed before it's moved into the entry.
+            let manifest_for_creed = self.fighters.get(&id).map(|e| e.value().manifest.clone());
             tokio::spawn(async move {
-                if let Ok(Some(_)) = memory.load_creed_by_name(&creed_name).await {
-                    if let Err(e) = memory.bind_creed_to_fighter(&creed_name, &fid).await {
-                        warn!(error = %e, fighter = %creed_name, "failed to bind creed on spawn");
+                // Ensure a creed exists (create default if not).
+                if let Ok(None) = memory.load_creed_by_name(&creed_name).await
+                    && let Some(manifest) = &manifest_for_creed
+                {
+                    let creed = punch_types::Creed::new(&creed_name).with_self_awareness(manifest);
+                    if let Err(e) = memory.save_creed(&creed).await {
+                        warn!(error = %e, fighter = %creed_name, "failed to create default creed");
                     } else {
-                        info!(fighter = %creed_name, id = %fid, "creed bound to fighter on spawn");
+                        info!(fighter = %creed_name, "default creed created on spawn");
                     }
+                }
+                // Bind the creed to this fighter instance.
+                if let Err(e) = memory.bind_creed_to_fighter(&creed_name, &fid).await {
+                    warn!(error = %e, fighter = %creed_name, "failed to bind creed on spawn");
+                } else {
+                    info!(fighter = %creed_name, id = %fid, "creed bound to fighter on spawn");
                 }
             });
         }
@@ -577,11 +589,20 @@ impl Ring {
             }
         };
 
-        // Mark as fighting.
+        // Mark as fighting and publish status change.
         entry.status = FighterStatus::Fighting;
         let manifest = entry.manifest.clone();
+        let fighter_name = manifest.name.clone();
         let available_tools = tools_for_capabilities(&manifest.capabilities);
         drop(entry); // Release the DashMap guard before the async call.
+
+        // Publish the incoming user message event.
+        self.event_bus.publish(PunchEvent::FighterMessage {
+            fighter_id: *fighter_id,
+            bout_id: bout_id.0,
+            role: "user".to_string(),
+            content_preview: truncate_preview(&message, 120),
+        });
 
         // Run the fighter loop.
         let params = FighterLoopParams {
@@ -634,10 +655,32 @@ impl Ring {
                     {
                         warn!(error = %e, "failed to record metering usage");
                     }
+
+                    // Publish response event.
+                    let preview = truncate_preview(&loop_result.response, 120);
+                    self.event_bus.publish(PunchEvent::FighterMessage {
+                        fighter_id: *fighter_id,
+                        bout_id: bout_id.0,
+                        role: "assistant".to_string(),
+                        content_preview: preview,
+                    });
+
+                    // Publish bout ended.
+                    self.event_bus.publish(PunchEvent::BoutEnded {
+                        bout_id: bout_id.0,
+                        fighter_id: *fighter_id,
+                        messages_exchanged: loop_result.usage.total(),
+                    });
                 }
-                Err(_) => {
+                Err(e) => {
                     entry.status = FighterStatus::KnockedOut;
                     self.metrics.counter_inc(metrics::ERRORS_TOTAL);
+
+                    // Publish error event.
+                    self.event_bus.publish(PunchEvent::Error {
+                        source: fighter_name.clone(),
+                        message: format!("{e}"),
+                    });
                 }
             }
         }
@@ -652,6 +695,12 @@ impl Ring {
             self.scheduler.remove_fighter(fighter_id);
             self.metrics
                 .gauge_set(metrics::ACTIVE_FIGHTERS, self.fighters.len() as i64);
+
+            self.event_bus.publish(PunchEvent::Error {
+                source: "ring".to_string(),
+                message: format!("Fighter '{}' killed", entry.manifest.name),
+            });
+
             info!(name = %entry.manifest.name, "fighter killed");
         } else {
             warn!("attempted to kill unknown fighter");
@@ -781,14 +830,21 @@ impl Ring {
         Ok(())
     }
 
-    /// List all gorillas with their current status.
-    pub async fn list_gorillas(&self) -> Vec<(GorillaId, GorillaManifest, GorillaStatus)> {
+    /// List all gorillas with their current status and metrics.
+    pub async fn list_gorillas(
+        &self,
+    ) -> Vec<(GorillaId, GorillaManifest, GorillaStatus, GorillaMetrics)> {
         let mut result = Vec::new();
 
         for entry in self.gorillas.iter() {
             let id = *entry.key();
             let inner = entry.value().lock().await;
-            result.push((id, inner.manifest.clone(), inner.status));
+            result.push((
+                id,
+                inner.manifest.clone(),
+                inner.status,
+                inner.metrics.clone(),
+            ));
         }
 
         result
@@ -1013,6 +1069,16 @@ impl Ring {
         self.troop_manager.assign_task(troop_id, task_description)
     }
 
+    /// Assign a task to a troop asynchronously, returning full results
+    /// including responses from fighters.
+    pub async fn assign_troop_task_async(
+        &self,
+        troop_id: &TroopId,
+        task: &str,
+    ) -> PunchResult<crate::troop::TaskAssignmentResult> {
+        self.troop_manager.assign_task_async(troop_id, task).await
+    }
+
     /// Get the current status of a troop.
     pub fn get_troop_status(&self, troop_id: &TroopId) -> Option<Troop> {
         self.troop_manager.get_troop(troop_id)
@@ -1110,6 +1176,21 @@ impl Ring {
 // ---------------------------------------------------------------------------
 // Relationship tracking helper
 // ---------------------------------------------------------------------------
+
+/// Truncate a string to a maximum length, respecting UTF-8 char boundaries.
+fn truncate_preview(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    // Find the last char boundary at or before max_len - 3 (room for "...")
+    let end = s
+        .char_indices()
+        .take_while(|(i, _)| *i <= max_len.saturating_sub(3))
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &s[..end])
+}
 
 /// Update or insert a peer relationship in a creed.
 fn update_relationship(creed: &mut punch_types::Creed, peer_name: &str, trust_nudge: Option<f64>) {

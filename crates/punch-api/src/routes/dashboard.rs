@@ -253,13 +253,13 @@ async fn dashboard_gorillas(State(state): State<AppState>) -> Json<Vec<Dashboard
 
     let summaries = gorillas
         .into_iter()
-        .map(|(id, manifest, status)| DashboardGorillaSummary {
+        .map(|(id, manifest, status, metrics)| DashboardGorillaSummary {
             id: id.to_string(),
             name: manifest.name,
             description: manifest.description,
             schedule: manifest.schedule,
             status,
-            last_rampage: None,
+            last_rampage: metrics.last_rampage.map(|t| t.to_rfc3339()),
         })
         .collect();
 
@@ -270,63 +270,124 @@ async fn dashboard_gorillas(State(state): State<AppState>) -> Json<Vec<Dashboard
 ///
 /// Accepts optional query parameters `limit` (default 50) and `since`
 /// (sequence number) to paginate through the event history.
+///
+/// Returns real events from the event bus history buffer.
 #[instrument(skip_all)]
 async fn dashboard_audit(
     State(state): State<AppState>,
     Query(params): Query<AuditQuery>,
 ) -> Json<Vec<AuditEntry>> {
-    // Subscribe momentarily to capture recent events. Since the event bus is
-    // broadcast-based and does not store history, we return what we can gather
-    // from the Ring's current state as a synthetic audit trail.
-    let fighters = state.ring.list_fighters();
-    let gorillas = state.ring.list_gorillas().await;
+    let events = state.ring.event_bus().recent_events(
+        params.limit as usize,
+        params.since as usize,
+    );
 
-    let mut entries = Vec::new();
-    let mut seq: u64 = 1;
+    let mut entries: Vec<AuditEntry> = events
+        .into_iter()
+        .map(|(seq, payload)| {
+            let (kind, summary) = event_to_audit(&payload.event);
+            AuditEntry {
+                sequence: seq as u64,
+                timestamp: payload.timestamp.to_rfc3339(),
+                kind,
+                summary,
+            }
+        })
+        .collect();
 
-    // Generate synthetic audit entries from current fighter state.
-    for (id, manifest, status) in &fighters {
-        if seq > params.since {
-            entries.push(AuditEntry {
-                sequence: seq,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                kind: "fighter_status".to_string(),
-                summary: format!("Fighter '{}' ({}) is {}", manifest.name, id, status),
-            });
-        }
-        seq += 1;
-        if entries.len() as u64 >= params.limit {
-            break;
-        }
-    }
-
-    // Generate synthetic audit entries from current gorilla state.
-    for (id, manifest, status) in &gorillas {
-        if seq > params.since && (entries.len() as u64) < params.limit {
-            entries.push(AuditEntry {
-                sequence: seq,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                kind: "gorilla_status".to_string(),
-                summary: format!("Gorilla '{}' ({}) is {}", manifest.name, id, status),
-            });
-        }
-        seq += 1;
-    }
-
-    // Add a system uptime entry if within limits.
-    if (entries.len() as u64) < params.limit && seq > params.since {
+    // If no events yet, add a system start entry.
+    if entries.is_empty() {
         let uptime = chrono::Utc::now()
             .signed_duration_since(state.started_at)
             .num_seconds();
         entries.push(AuditEntry {
-            sequence: seq,
+            sequence: 0,
             timestamp: state.started_at.to_rfc3339(),
             kind: "system_start".to_string(),
             summary: format!("Arena opened {} seconds ago", uptime),
         });
     }
 
+    // Reverse so newest events are first in the feed.
+    entries.reverse();
+
     Json(entries)
+}
+
+/// Convert a PunchEvent into an audit trail kind + summary.
+fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
+    use punch_types::PunchEvent;
+    match event {
+        PunchEvent::FighterSpawned { name, .. } => (
+            "fighter_spawned".to_string(),
+            format!("Fighter '{}' entered the arena", name),
+        ),
+        PunchEvent::FighterMessage {
+            role,
+            content_preview,
+            ..
+        } => {
+            let kind = if role == "user" {
+                "message_in"
+            } else {
+                "message_out"
+            };
+            (kind.to_string(), content_preview.clone())
+        }
+        PunchEvent::GorillaUnleashed { name, .. } => (
+            "gorilla_unleashed".to_string(),
+            format!("Gorilla '{}' unleashed", name),
+        ),
+        PunchEvent::GorillaPaused { reason, .. } => (
+            "gorilla_paused".to_string(),
+            format!("Gorilla paused: {}", reason),
+        ),
+        PunchEvent::ToolExecuted {
+            tool_name,
+            success,
+            duration_ms,
+            ..
+        } => {
+            let status = if *success { "OK" } else { "FAIL" };
+            (
+                "tool_exec".to_string(),
+                format!("{} [{}] ({}ms)", tool_name, status, duration_ms),
+            )
+        }
+        PunchEvent::BoutStarted { .. } => (
+            "bout_started".to_string(),
+            "New bout started".to_string(),
+        ),
+        PunchEvent::BoutEnded {
+            messages_exchanged, ..
+        } => (
+            "bout_ended".to_string(),
+            format!("Bout ended ({} tokens used)", messages_exchanged),
+        ),
+        PunchEvent::ComboTriggered {
+            combo_name,
+            triggered_by,
+        } => (
+            "combo".to_string(),
+            format!("Combo '{}' by {}", combo_name, triggered_by),
+        ),
+        PunchEvent::TroopFormed {
+            name,
+            member_count,
+            ..
+        } => (
+            "troop_formed".to_string(),
+            format!("Troop '{}' formed ({} members)", name, member_count),
+        ),
+        PunchEvent::TroopDisbanded { name, .. } => (
+            "troop_disbanded".to_string(),
+            format!("Troop '{}' disbanded", name),
+        ),
+        PunchEvent::Error { source, message } => (
+            "error".to_string(),
+            format!("[{}] {}", source, message),
+        ),
+    }
 }
 
 /// GET /api/dashboard/metrics — system-wide metering metrics.
@@ -933,8 +994,13 @@ mod tests {
             .expect("body");
         let json2: Vec<serde_json::Value> =
             serde_json::from_slice(&body2).expect("valid JSON array");
-        // With since=100, all entries should be filtered out (we only have a few).
-        assert!(json2.is_empty());
+        // With since=100, real events are filtered out. Only the fallback
+        // system_start entry may remain if no events matched.
+        assert!(
+            json2.len() <= 1,
+            "expected at most 1 fallback entry, got: {}",
+            json2.len()
+        );
     }
 
     // -- Test 11: Config update with excessive rate limit --

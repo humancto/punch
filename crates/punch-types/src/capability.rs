@@ -45,6 +45,10 @@ pub enum Capability {
     Template,
     /// Cryptographic hash operations.
     Crypto,
+    /// Invoke loaded WASM plugins (imported techniques).
+    PluginInvoke,
+    /// Delegate tasks to remote A2A agents.
+    A2ADelegate,
 }
 
 impl std::fmt::Display for Capability {
@@ -68,6 +72,8 @@ impl std::fmt::Display for Capability {
             Self::Archive => write!(f, "archive"),
             Self::Template => write!(f, "template"),
             Self::Crypto => write!(f, "crypto"),
+            Self::PluginInvoke => write!(f, "plugin_invoke"),
+            Self::A2ADelegate => write!(f, "a2a_delegate"),
         }
     }
 }
@@ -119,6 +125,8 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
         (Capability::Archive, Capability::Archive) => true,
         (Capability::Template, Capability::Template) => true,
         (Capability::Crypto, Capability::Crypto) => true,
+        (Capability::PluginInvoke, Capability::PluginInvoke) => true,
+        (Capability::A2ADelegate, Capability::A2ADelegate) => true,
         _ => false,
     }
 }
@@ -251,6 +259,8 @@ mod tests {
         assert_eq!(Capability::Archive.to_string(), "archive");
         assert_eq!(Capability::Template.to_string(), "template");
         assert_eq!(Capability::Crypto.to_string(), "crypto");
+        assert_eq!(Capability::A2ADelegate.to_string(), "a2a_delegate");
+        assert_eq!(Capability::PluginInvoke.to_string(), "plugin_invoke");
     }
 
     #[test]
@@ -270,6 +280,8 @@ mod tests {
             Capability::Archive,
             Capability::Template,
             Capability::Crypto,
+            Capability::A2ADelegate,
+            Capability::PluginInvoke,
         ];
         for cap in &scopeless {
             assert!(capability_matches(cap, cap), "{} should match itself", cap);

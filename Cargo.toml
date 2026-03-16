@@ -24,6 +24,8 @@ license = "MIT"
 repository = "https://github.com/humancto/punch"
 homepage = "https://humancto.github.io/punch/"
 description = "Punch — The Agent Combat System. Deploy autonomous AI agent squads from a single binary."
+keywords = ["ai", "agent", "llm", "autonomous", "mcp"]
+categories = ["command-line-utilities", "asynchronous"]
 
 [workspace.dependencies]
 # Async runtime
@@ -83,7 +85,7 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 url = "2"
 urlencoding = "2"
 # WASM
-wasmi = "0.40"
+wasmtime = "29"
 wat = "1"
 # Bytes
 bytes = "1"

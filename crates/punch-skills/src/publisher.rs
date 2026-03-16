@@ -128,7 +128,7 @@ pub fn create_tarball(dir: &Path) -> PunchResult<Vec<u8>> {
             && let Some(ext) = path.extension().and_then(|e| e.to_str())
             && matches!(ext, "md" | "txt")
         {
-            let file_name = path.file_name().unwrap().to_str().unwrap_or("file");
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
             debug!(file = file_name, "adding to tarball");
             archive
                 .append_path_with_name(&path, file_name)

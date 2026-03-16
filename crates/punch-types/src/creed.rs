@@ -282,6 +282,49 @@ impl Creed {
         self
     }
 
+    /// Return references to active heartbeat tasks whose cadence has elapsed.
+    ///
+    /// Cadence rules:
+    /// - `"every_bout"` — always due
+    /// - `"on_wake"` — due only if `last_checked` is `None` (first bout)
+    /// - `"hourly"` — due if `last_checked` is `None` or was more than 1 hour ago
+    /// - `"daily"` — due if `last_checked` is `None` or was more than 24 hours ago
+    pub fn due_heartbeat_tasks(&self) -> Vec<&HeartbeatTask> {
+        let now = chrono::Utc::now();
+        self.heartbeat
+            .iter()
+            .filter(|h| {
+                if !h.active {
+                    return false;
+                }
+                match h.cadence.as_str() {
+                    "every_bout" => true,
+                    "on_wake" => h.last_checked.is_none(),
+                    "hourly" => match h.last_checked {
+                        None => true,
+                        Some(t) => (now - t) > chrono::Duration::hours(1),
+                    },
+                    "daily" => match h.last_checked {
+                        None => true,
+                        Some(t) => (now - t) > chrono::Duration::hours(24),
+                    },
+                    _ => false, // unknown cadence — skip
+                }
+            })
+            .collect()
+    }
+
+    /// Mark a heartbeat task as checked: sets `last_checked` to now and
+    /// increments `execution_count`.
+    ///
+    /// Silently does nothing if `task_index` is out of bounds.
+    pub fn mark_heartbeat_checked(&mut self, task_index: usize) {
+        if let Some(task) = self.heartbeat.get_mut(task_index) {
+            task.last_checked = Some(chrono::Utc::now());
+            task.execution_count += 1;
+        }
+    }
+
     /// Record that a bout was completed.
     pub fn record_bout(&mut self) {
         self.bout_count += 1;
@@ -739,6 +782,112 @@ mod tests {
     fn test_creed_id_default() {
         let id = CreedId::default();
         assert_ne!(id.0, Uuid::nil());
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_every_bout_always_due() {
+        let creed = Creed::new("ECHO").with_heartbeat_task("Check build status", "every_bout");
+        let due = creed.due_heartbeat_tasks();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].task, "Check build status");
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_on_wake_only_first_time() {
+        let mut creed = Creed::new("ECHO").with_heartbeat_task("Startup check", "on_wake");
+
+        // First time — should be due (last_checked is None)
+        let due = creed.due_heartbeat_tasks();
+        assert_eq!(due.len(), 1);
+
+        // After marking checked — should no longer be due
+        creed.mark_heartbeat_checked(0);
+        let due = creed.due_heartbeat_tasks();
+        assert_eq!(due.len(), 0);
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_hourly_cadence() {
+        let mut creed = Creed::new("ECHO").with_heartbeat_task("Hourly check", "hourly");
+
+        // Never checked — should be due
+        assert_eq!(creed.due_heartbeat_tasks().len(), 1);
+
+        // Checked recently — should NOT be due
+        creed.heartbeat[0].last_checked = Some(chrono::Utc::now());
+        assert_eq!(creed.due_heartbeat_tasks().len(), 0);
+
+        // Checked 2 hours ago — should be due
+        creed.heartbeat[0].last_checked = Some(chrono::Utc::now() - chrono::Duration::hours(2));
+        assert_eq!(creed.due_heartbeat_tasks().len(), 1);
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_daily_cadence() {
+        let mut creed = Creed::new("ECHO").with_heartbeat_task("Daily check", "daily");
+
+        // Never checked — should be due
+        assert_eq!(creed.due_heartbeat_tasks().len(), 1);
+
+        // Checked recently — should NOT be due
+        creed.heartbeat[0].last_checked = Some(chrono::Utc::now());
+        assert_eq!(creed.due_heartbeat_tasks().len(), 0);
+
+        // Checked 25 hours ago — should be due
+        creed.heartbeat[0].last_checked = Some(chrono::Utc::now() - chrono::Duration::hours(25));
+        assert_eq!(creed.due_heartbeat_tasks().len(), 1);
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_inactive_skipped() {
+        let mut creed = Creed::new("ECHO").with_heartbeat_task("Inactive task", "every_bout");
+        creed.heartbeat[0].active = false;
+        assert_eq!(creed.due_heartbeat_tasks().len(), 0);
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_unknown_cadence_skipped() {
+        let creed = Creed::new("ECHO").with_heartbeat_task("Mystery task", "weekly");
+        assert_eq!(creed.due_heartbeat_tasks().len(), 0);
+    }
+
+    #[test]
+    fn test_mark_heartbeat_checked() {
+        let mut creed = Creed::new("ECHO").with_heartbeat_task("Task A", "every_bout");
+        assert!(creed.heartbeat[0].last_checked.is_none());
+        assert_eq!(creed.heartbeat[0].execution_count, 0);
+
+        creed.mark_heartbeat_checked(0);
+        assert!(creed.heartbeat[0].last_checked.is_some());
+        assert_eq!(creed.heartbeat[0].execution_count, 1);
+
+        creed.mark_heartbeat_checked(0);
+        assert_eq!(creed.heartbeat[0].execution_count, 2);
+    }
+
+    #[test]
+    fn test_mark_heartbeat_checked_out_of_bounds() {
+        let mut creed = Creed::new("ECHO");
+        // Should not panic
+        creed.mark_heartbeat_checked(99);
+    }
+
+    #[test]
+    fn test_due_heartbeat_tasks_mixed_cadences() {
+        let mut creed = Creed::new("ECHO")
+            .with_heartbeat_task("Always", "every_bout")
+            .with_heartbeat_task("Once", "on_wake")
+            .with_heartbeat_task("Hourly", "hourly");
+
+        // Mark "Once" as already checked
+        creed.mark_heartbeat_checked(1);
+        // Mark "Hourly" as recently checked
+        creed.heartbeat[2].last_checked = Some(chrono::Utc::now());
+
+        let due = creed.due_heartbeat_tasks();
+        // Only "Always" should be due
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].task, "Always");
     }
 
     #[test]

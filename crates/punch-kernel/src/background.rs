@@ -151,11 +151,32 @@ impl BackgroundExecutor {
         }
     }
 
-    /// Parse a schedule string like "every 30s", "every 5m", "every 1h", "every 1d"
-    /// into a [`std::time::Duration`].
+    /// Parse a schedule string into a [`std::time::Duration`].
+    ///
+    /// Supported formats:
+    /// - Human-friendly: `"every 30s"`, `"every 5m"`, `"every 1h"`, `"every 1d"`
+    /// - Cron expressions: `"*/30 * * * *"` (every 30 min), `"0 */6 * * *"` (every 6h)
+    /// - Raw seconds: `"60"`
     pub fn parse_schedule(schedule: &str) -> Option<std::time::Duration> {
         let s = schedule.trim().to_lowercase();
-        let s = s.strip_prefix("every ").unwrap_or(&s);
+
+        // Try human-friendly format first: "every Xs/Xm/Xh/Xd"
+        if let Some(duration) = Self::parse_human_schedule(&s) {
+            return Some(duration);
+        }
+
+        // Try cron expression: fields separated by spaces, 5 fields = cron.
+        if let Some(duration) = Self::parse_cron_schedule(&s) {
+            return Some(duration);
+        }
+
+        // Try raw seconds.
+        s.parse::<u64>().ok().map(std::time::Duration::from_secs)
+    }
+
+    /// Parse human-friendly schedule: "every 30s", "every 5m", etc.
+    fn parse_human_schedule(s: &str) -> Option<std::time::Duration> {
+        let s = s.strip_prefix("every ").unwrap_or(s);
         let s = s.trim();
 
         if let Some(num_str) = s.strip_suffix('s') {
@@ -183,9 +204,64 @@ impl BackgroundExecutor {
                 .ok()
                 .map(|d| std::time::Duration::from_secs(d * 86400))
         } else {
-            // Try to parse as raw seconds.
-            s.parse::<u64>().ok().map(std::time::Duration::from_secs)
+            None
         }
+    }
+
+    /// Parse a 5-field cron expression into an approximate interval.
+    ///
+    /// Handles common periodic patterns:
+    /// - `*/N * * * *`   → every N minutes
+    /// - `0 */N * * *`   → every N hours
+    /// - `0 0 */N * *`   → every N days
+    /// - `0 0 * * *`     → daily (24h)
+    fn parse_cron_schedule(s: &str) -> Option<std::time::Duration> {
+        let fields: Vec<&str> = s.split_whitespace().collect();
+        if fields.len() != 5 {
+            return None;
+        }
+
+        let (minute, hour, day, _month, _dow) =
+            (fields[0], fields[1], fields[2], fields[3], fields[4]);
+
+        // `*/N * * * *` — every N minutes
+        if let Some(step) = minute.strip_prefix("*/")
+            && hour == "*"
+            && day == "*"
+            && let Ok(n) = step.parse::<u64>()
+        {
+            return Some(std::time::Duration::from_secs(n * 60));
+        }
+
+        // `0 */N * * *` — every N hours
+        if minute == "0"
+            && let Some(step) = hour.strip_prefix("*/")
+            && day == "*"
+            && let Ok(n) = step.parse::<u64>()
+        {
+            return Some(std::time::Duration::from_secs(n * 3600));
+        }
+
+        // `0 0 */N * *` — every N days
+        if minute == "0"
+            && hour == "0"
+            && let Some(step) = day.strip_prefix("*/")
+            && let Ok(n) = step.parse::<u64>()
+        {
+            return Some(std::time::Duration::from_secs(n * 86400));
+        }
+
+        // `0 0 * * *` — daily
+        if minute == "0" && hour == "0" && day == "*" {
+            return Some(std::time::Duration::from_secs(86400));
+        }
+
+        // `0 N * * *` — once a day at hour N (treat as 24h interval)
+        if minute == "0" && day == "*" && hour.parse::<u64>().is_ok() {
+            return Some(std::time::Duration::from_secs(86400));
+        }
+
+        None
     }
 
     /// Start a gorilla's autonomous background task.
@@ -388,6 +464,62 @@ mod tests {
     #[test]
     fn parse_schedule_invalid() {
         assert_eq!(BackgroundExecutor::parse_schedule("invalid"), None);
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_30_minutes() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("*/30 * * * *"),
+            Some(std::time::Duration::from_secs(1800))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_6_hours() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 */6 * * *"),
+            Some(std::time::Duration::from_secs(21600))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_2_hours() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 */2 * * *"),
+            Some(std::time::Duration::from_secs(7200))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_2_days() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 0 */2 * *"),
+            Some(std::time::Duration::from_secs(172800))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_daily() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 0 * * *"),
+            Some(std::time::Duration::from_secs(86400))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_3_hours() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 */3 * * *"),
+            Some(std::time::Duration::from_secs(10800))
+        );
+    }
+
+    #[test]
+    fn parse_schedule_cron_every_4_hours() {
+        assert_eq!(
+            BackgroundExecutor::parse_schedule("0 */4 * * *"),
+            Some(std::time::Duration::from_secs(14400))
+        );
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -84,6 +85,109 @@ pub struct CompletionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Streaming types
+// ---------------------------------------------------------------------------
+
+/// A chunk from a streaming LLM response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamChunk {
+    /// Incremental text content.
+    pub delta: String,
+    /// Whether this is the final chunk.
+    pub is_final: bool,
+    /// Partial tool call data if any.
+    pub tool_call_delta: Option<ToolCallDelta>,
+}
+
+/// Incremental tool call data in a streaming response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallDelta {
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments_delta: String,
+}
+
+/// Callback invoked for each streaming chunk.
+pub type StreamCallback = Arc<dyn Fn(StreamChunk) + Send + Sync>;
+
+// ---------------------------------------------------------------------------
+// SSE parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a Server-Sent Events stream from raw bytes into discrete events.
+///
+/// Each event is a `(event_type, data)` tuple. Blank lines delimit events.
+fn parse_sse_events(raw: &str) -> Vec<(String, String)> {
+    let mut events = Vec::new();
+    let mut current_event = String::new();
+    let mut current_data = String::new();
+
+    for line in raw.lines() {
+        if line.is_empty() {
+            // Blank line = end of event
+            if !current_data.is_empty() || !current_event.is_empty() {
+                events.push((
+                    if current_event.is_empty() {
+                        "message".to_string()
+                    } else {
+                        current_event.clone()
+                    },
+                    current_data.clone(),
+                ));
+                current_event.clear();
+                current_data.clear();
+            }
+        } else if let Some(val) = line.strip_prefix("event: ") {
+            current_event = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("event:") {
+            current_event = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("data: ") {
+            if !current_data.is_empty() {
+                current_data.push('\n');
+            }
+            current_data.push_str(val);
+        } else if let Some(val) = line.strip_prefix("data:") {
+            if !current_data.is_empty() {
+                current_data.push('\n');
+            }
+            current_data.push_str(val.trim());
+        }
+    }
+
+    // Flush any trailing event without a final blank line
+    if !current_data.is_empty() || !current_event.is_empty() {
+        events.push((
+            if current_event.is_empty() {
+                "message".to_string()
+            } else {
+                current_event
+            },
+            current_data,
+        ));
+    }
+
+    events
+}
+
+/// Read the full response body as a stream of bytes and return as a String.
+async fn read_stream_body(response: reqwest::Response) -> PunchResult<String> {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| PunchError::Provider {
+            provider: "stream".to_string(),
+            message: format!("stream read error: {e}"),
+        })?;
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).map_err(|e| PunchError::Provider {
+        provider: "stream".to_string(),
+        message: format!("invalid UTF-8 in stream: {e}"),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Think-tag stripping
 // ---------------------------------------------------------------------------
 
@@ -139,7 +243,25 @@ pub trait LlmDriver: Send + Sync + 'static {
 
     /// Streaming variant. Default implementation falls back to `complete`.
     async fn stream_complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
-        self.complete(request).await
+        let noop: StreamCallback = Arc::new(|_| {});
+        self.stream_complete_with_callback(request, noop).await
+    }
+
+    /// Streaming completion with per-chunk callback.
+    /// Returns the final assembled `CompletionResponse`.
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        // Default: call complete() and send a single chunk.
+        let response = self.complete(request).await?;
+        callback(StreamChunk {
+            delta: response.message.content.clone(),
+            is_final: true,
+            tool_call_delta: None,
+        });
+        Ok(response)
     }
 }
 
@@ -394,6 +516,212 @@ impl LlmDriver for AnthropicDriver {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let url = format!("{}/v1/messages", self.base_url);
+        let mut body = self.build_request_body(&request);
+        body["stream"] = serde_json::json!(true);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PunchError::Provider {
+                provider: "anthropic".to_string(),
+                message: format!("stream request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(PunchError::RateLimited {
+                provider: "anthropic".to_string(),
+                retry_after_ms: 60_000,
+            });
+        }
+        if !status.is_success() {
+            let err_body: serde_json::Value =
+                response.json().await.unwrap_or(serde_json::json!({}));
+            let msg = err_body["error"]["message"]
+                .as_str()
+                .unwrap_or("unknown error");
+            return Err(PunchError::Provider {
+                provider: "anthropic".to_string(),
+                message: format!("API error ({}): {}", status, msg),
+            });
+        }
+
+        let raw = read_stream_body(response).await?;
+        let events = parse_sse_events(&raw);
+
+        let mut text_content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage = TokenUsage::default();
+        let mut stop_reason = StopReason::EndTurn;
+        // Track current content block index for tool use assembly
+        let mut current_tool_index: Option<usize> = None;
+
+        for (event_type, data) in &events {
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            match event_type.as_str() {
+                "message_start" => {
+                    if let Some(inp) = parsed["message"]["usage"]["input_tokens"].as_u64() {
+                        usage.input_tokens = inp;
+                    }
+                }
+                "content_block_start" => {
+                    let block = &parsed["content_block"];
+                    match block["type"].as_str() {
+                        Some("tool_use") => {
+                            let id = block["id"].as_str().unwrap_or_default().to_string();
+                            let name = block["name"].as_str().unwrap_or_default().to_string();
+                            tool_calls.push(ToolCall {
+                                id: id.clone(),
+                                name: name.clone(),
+                                input: serde_json::json!({}),
+                            });
+                            current_tool_index = Some(tool_calls.len() - 1);
+                            callback(StreamChunk {
+                                delta: String::new(),
+                                is_final: false,
+                                tool_call_delta: Some(ToolCallDelta {
+                                    index: tool_calls.len() - 1,
+                                    id: Some(id),
+                                    name: Some(name),
+                                    arguments_delta: String::new(),
+                                }),
+                            });
+                        }
+                        Some("text") => {
+                            current_tool_index = None;
+                        }
+                        _ => {}
+                    }
+                }
+                "content_block_delta" => {
+                    let delta = &parsed["delta"];
+                    match delta["type"].as_str() {
+                        Some("text_delta") => {
+                            let text = delta["text"].as_str().unwrap_or("");
+                            text_content.push_str(text);
+                            callback(StreamChunk {
+                                delta: text.to_string(),
+                                is_final: false,
+                                tool_call_delta: None,
+                            });
+                        }
+                        Some("input_json_delta") => {
+                            let partial = delta["partial_json"].as_str().unwrap_or("");
+                            if let Some(idx) = current_tool_index {
+                                callback(StreamChunk {
+                                    delta: String::new(),
+                                    is_final: false,
+                                    tool_call_delta: Some(ToolCallDelta {
+                                        index: idx,
+                                        id: None,
+                                        name: None,
+                                        arguments_delta: partial.to_string(),
+                                    }),
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                "message_delta" => {
+                    if let Some(sr) = parsed["delta"]["stop_reason"].as_str() {
+                        stop_reason = match sr {
+                            "end_turn" => StopReason::EndTurn,
+                            "tool_use" => StopReason::ToolUse,
+                            "max_tokens" => StopReason::MaxTokens,
+                            _ => StopReason::Error,
+                        };
+                    }
+                    if let Some(out) = parsed["usage"]["output_tokens"].as_u64() {
+                        usage.output_tokens = out;
+                    }
+                }
+                "message_stop" => {
+                    callback(StreamChunk {
+                        delta: String::new(),
+                        is_final: true,
+                        tool_call_delta: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // Reassemble tool call inputs from the accumulated JSON fragments.
+        // The Anthropic SSE stream sends tool input as `input_json_delta` fragments.
+        // We need to re-parse the full accumulated JSON for each tool call.
+        // Since we only captured deltas via callback, we rebuild from the raw events.
+        let mut tool_json_bufs: Vec<String> = vec![String::new(); tool_calls.len()];
+        let mut tc_idx: Option<usize> = None;
+        for (event_type, data) in &events {
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            match event_type.as_str() {
+                "content_block_start" => {
+                    if parsed["content_block"]["type"].as_str() == Some("tool_use") {
+                        tc_idx = Some(tc_idx.map_or(0, |i| i + 1));
+                    } else {
+                        tc_idx = None;
+                    }
+                }
+                "content_block_delta" => {
+                    if parsed["delta"]["type"].as_str() == Some("input_json_delta")
+                        && let Some(idx) = tc_idx
+                        && let Some(buf) = tool_json_bufs.get_mut(idx)
+                    {
+                        buf.push_str(parsed["delta"]["partial_json"].as_str().unwrap_or(""));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (i, buf) in tool_json_bufs.into_iter().enumerate() {
+            if !buf.is_empty()
+                && let Some(tc) = tool_calls.get_mut(i)
+            {
+                tc.input = serde_json::from_str(&buf).unwrap_or(serde_json::json!({}));
+            }
+        }
+
+        let text_content = strip_thinking_tags(&text_content);
+
+        if !tool_calls.is_empty() && stop_reason != StopReason::ToolUse {
+            stop_reason = StopReason::ToolUse;
+        }
+
+        let message = Message {
+            role: Role::Assistant,
+            content: text_content,
+            tool_calls,
+            tool_results: Vec::new(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        Ok(CompletionResponse {
+            message,
+            usage,
+            stop_reason,
+        })
     }
 }
 
@@ -666,6 +994,188 @@ impl LlmDriver for OpenAiCompatibleDriver {
 
         self.parse_response(&response_body)
     }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let mut body = self.build_request_body(&request);
+        body["stream"] = serde_json::json!(true);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("authorization", format!("Bearer {}", self.api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PunchError::Provider {
+                provider: self.provider_name.clone(),
+                message: format!("stream request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(PunchError::RateLimited {
+                provider: self.provider_name.clone(),
+                retry_after_ms: 60_000,
+            });
+        }
+        if !status.is_success() {
+            let err_body: serde_json::Value =
+                response.json().await.unwrap_or(serde_json::json!({}));
+            let msg = err_body["error"]["message"]
+                .as_str()
+                .unwrap_or("unknown error");
+            return Err(PunchError::Provider {
+                provider: self.provider_name.clone(),
+                message: format!("API error ({}): {}", status, msg),
+            });
+        }
+
+        let raw = read_stream_body(response).await?;
+        let assembled = self.parse_openai_stream(&raw, &callback)?;
+        Ok(assembled)
+    }
+}
+
+impl OpenAiCompatibleDriver {
+    /// Parse an OpenAI-style SSE stream into a `CompletionResponse`, invoking
+    /// the callback for each chunk.
+    pub fn parse_openai_stream(
+        &self,
+        raw: &str,
+        callback: &StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let events = parse_sse_events(raw);
+
+        let mut text_content = String::new();
+        // tool_calls keyed by index
+        let mut tool_map: std::collections::BTreeMap<usize, (String, String, String)> =
+            std::collections::BTreeMap::new();
+        let mut finish_reason = String::new();
+
+        for (_event_type, data) in &events {
+            if data.trim() == "[DONE]" {
+                callback(StreamChunk {
+                    delta: String::new(),
+                    is_final: true,
+                    tool_call_delta: None,
+                });
+                break;
+            }
+
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let choice = match parsed["choices"].get(0) {
+                Some(c) => c,
+                None => continue,
+            };
+
+            if let Some(fr) = choice["finish_reason"].as_str() {
+                finish_reason = fr.to_string();
+            }
+
+            let delta = &choice["delta"];
+
+            // Text content delta
+            if let Some(content) = delta["content"].as_str() {
+                text_content.push_str(content);
+                callback(StreamChunk {
+                    delta: content.to_string(),
+                    is_final: false,
+                    tool_call_delta: None,
+                });
+            }
+
+            // Tool call deltas
+            if let Some(tc_array) = delta["tool_calls"].as_array() {
+                for tc in tc_array {
+                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+                    let entry = tool_map
+                        .entry(idx)
+                        .or_insert_with(|| (String::new(), String::new(), String::new()));
+
+                    let id_delta = tc["id"].as_str().unwrap_or("");
+                    let name_delta = tc["function"]["name"].as_str().unwrap_or("");
+                    let args_delta = tc["function"]["arguments"].as_str().unwrap_or("");
+
+                    if !id_delta.is_empty() {
+                        entry.0.push_str(id_delta);
+                    }
+                    if !name_delta.is_empty() {
+                        entry.1.push_str(name_delta);
+                    }
+                    entry.2.push_str(args_delta);
+
+                    callback(StreamChunk {
+                        delta: String::new(),
+                        is_final: false,
+                        tool_call_delta: Some(ToolCallDelta {
+                            index: idx,
+                            id: if id_delta.is_empty() {
+                                None
+                            } else {
+                                Some(id_delta.to_string())
+                            },
+                            name: if name_delta.is_empty() {
+                                None
+                            } else {
+                                Some(name_delta.to_string())
+                            },
+                            arguments_delta: args_delta.to_string(),
+                        }),
+                    });
+                }
+            }
+        }
+
+        let tool_calls: Vec<ToolCall> = tool_map
+            .into_values()
+            .map(|(id, name, args)| {
+                let input: serde_json::Value =
+                    serde_json::from_str(&args).unwrap_or(serde_json::json!({}));
+                ToolCall { id, name, input }
+            })
+            .collect();
+
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else {
+            match finish_reason.as_str() {
+                "stop" => StopReason::EndTurn,
+                "tool_calls" => StopReason::ToolUse,
+                "length" => StopReason::MaxTokens,
+                _ => StopReason::EndTurn,
+            }
+        };
+
+        let text_content = strip_thinking_tags(&text_content);
+
+        let message = Message {
+            role: Role::Assistant,
+            content: text_content,
+            tool_calls,
+            tool_results: Vec::new(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        // OpenAI streaming does not include usage in most chunks; set to zero.
+        Ok(CompletionResponse {
+            message,
+            usage: TokenUsage::default(),
+            stop_reason,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -823,6 +1333,16 @@ impl GeminiDriver {
         )
     }
 
+    /// Build the URL for Gemini streaming.
+    pub fn build_stream_url(&self, model: &str) -> String {
+        format!(
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+            self.base_url.trim_end_matches('/'),
+            model,
+            self.api_key,
+        )
+    }
+
     /// Parse the Gemini API response.
     pub fn parse_response(&self, body: &serde_json::Value) -> PunchResult<CompletionResponse> {
         let candidate = body["candidates"]
@@ -947,6 +1467,133 @@ impl LlmDriver for GeminiDriver {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let url = self.build_stream_url(&request.model);
+        let body = self.build_request_body(&request);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PunchError::Provider {
+                provider: "gemini".to_string(),
+                message: format!("stream request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_body: serde_json::Value =
+                response.json().await.unwrap_or(serde_json::json!({}));
+            let msg = err_body["error"]["message"]
+                .as_str()
+                .unwrap_or("unknown error");
+            return Err(PunchError::Provider {
+                provider: "gemini".to_string(),
+                message: format!("API error ({}): {}", status, msg),
+            });
+        }
+
+        let raw = read_stream_body(response).await?;
+        let events = parse_sse_events(&raw);
+
+        let mut text_content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage = TokenUsage::default();
+        let mut finish_reason = String::new();
+
+        for (_event_type, data) in &events {
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            // Extract parts from the candidate
+            if let Some(parts) = parsed["candidates"][0]["content"]["parts"].as_array() {
+                for part in parts {
+                    if let Some(text) = part["text"].as_str() {
+                        text_content.push_str(text);
+                        callback(StreamChunk {
+                            delta: text.to_string(),
+                            is_final: false,
+                            tool_call_delta: None,
+                        });
+                    }
+                    if let Some(fc) = part.get("functionCall") {
+                        let name = fc["name"].as_str().unwrap_or_default().to_string();
+                        let args = fc["args"].clone();
+                        let idx = tool_calls.len();
+                        tool_calls.push(ToolCall {
+                            id: format!("gemini-{}", uuid::Uuid::new_v4()),
+                            name: name.clone(),
+                            input: args,
+                        });
+                        callback(StreamChunk {
+                            delta: String::new(),
+                            is_final: false,
+                            tool_call_delta: Some(ToolCallDelta {
+                                index: idx,
+                                id: None,
+                                name: Some(name),
+                                arguments_delta: String::new(),
+                            }),
+                        });
+                    }
+                }
+            }
+
+            if let Some(fr) = parsed["candidates"][0]["finishReason"].as_str() {
+                finish_reason = fr.to_string();
+            }
+
+            // Usage from the last chunk
+            if let Some(inp) = parsed["usageMetadata"]["promptTokenCount"].as_u64() {
+                usage.input_tokens = inp;
+            }
+            if let Some(out) = parsed["usageMetadata"]["candidatesTokenCount"].as_u64() {
+                usage.output_tokens = out;
+            }
+        }
+
+        callback(StreamChunk {
+            delta: String::new(),
+            is_final: true,
+            tool_call_delta: None,
+        });
+
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else {
+            match finish_reason.as_str() {
+                "STOP" => StopReason::EndTurn,
+                "MAX_TOKENS" => StopReason::MaxTokens,
+                _ => StopReason::EndTurn,
+            }
+        };
+
+        let text_content = strip_thinking_tags(&text_content);
+
+        let message = Message {
+            role: Role::Assistant,
+            content: text_content,
+            tool_calls,
+            tool_results: Vec::new(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        Ok(CompletionResponse {
+            message,
+            usage,
+            stop_reason,
+        })
     }
 }
 
@@ -1167,6 +1814,137 @@ impl LlmDriver for OllamaDriver {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
+        let mut body = self.build_request_body(&request);
+        body["stream"] = serde_json::json!(true);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PunchError::Provider {
+                provider: "ollama".to_string(),
+                message: format!("stream request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_body: serde_json::Value =
+                response.json().await.unwrap_or(serde_json::json!({}));
+            let msg = err_body["error"].as_str().unwrap_or("unknown error");
+            return Err(PunchError::Provider {
+                provider: "ollama".to_string(),
+                message: format!("API error ({}): {}", status, msg),
+            });
+        }
+
+        let raw = read_stream_body(response).await?;
+        let assembled = self.parse_ollama_stream(&raw, &callback)?;
+        Ok(assembled)
+    }
+}
+
+impl OllamaDriver {
+    /// Parse Ollama's newline-delimited JSON stream into a `CompletionResponse`,
+    /// invoking the callback for each chunk.
+    pub fn parse_ollama_stream(
+        &self,
+        raw: &str,
+        callback: &StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let mut text_content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage = TokenUsage::default();
+        let mut done = false;
+
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let parsed: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if parsed["done"].as_bool() == Some(true) {
+                done = true;
+                // Final chunk may include stats
+                if let Some(inp) = parsed["prompt_eval_count"].as_u64() {
+                    usage.input_tokens = inp;
+                }
+                if let Some(out) = parsed["eval_count"].as_u64() {
+                    usage.output_tokens = out;
+                }
+                // Final chunk may also have tool calls
+                if let Some(tc_array) = parsed["message"]["tool_calls"].as_array() {
+                    for tc in tc_array {
+                        let name = tc["function"]["name"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string();
+                        let input = tc["function"]["arguments"].clone();
+                        tool_calls.push(ToolCall {
+                            id: format!("ollama-{}", uuid::Uuid::new_v4()),
+                            name,
+                            input,
+                        });
+                    }
+                }
+                callback(StreamChunk {
+                    delta: String::new(),
+                    is_final: true,
+                    tool_call_delta: None,
+                });
+                break;
+            }
+
+            // Streaming chunk with content
+            let content = parsed["message"]["content"].as_str().unwrap_or("");
+            if !content.is_empty() {
+                text_content.push_str(content);
+                callback(StreamChunk {
+                    delta: content.to_string(),
+                    is_final: false,
+                    tool_call_delta: None,
+                });
+            }
+        }
+
+        let text_content = strip_thinking_tags(&text_content);
+
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else if done {
+            StopReason::EndTurn
+        } else {
+            StopReason::MaxTokens
+        };
+
+        let message = Message {
+            role: Role::Assistant,
+            content: text_content,
+            tool_calls,
+            tool_results: Vec::new(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        Ok(CompletionResponse {
+            message,
+            usage,
+            stop_reason,
+        })
     }
 }
 
@@ -1543,6 +2321,22 @@ impl LlmDriver for BedrockDriver {
 
         self.parse_response(&response_body)
     }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        // Bedrock uses a proprietary binary event stream format for streaming.
+        // Fall back to non-streaming and emit the result as a single final chunk.
+        let response = self.complete(request).await?;
+        callback(StreamChunk {
+            delta: response.message.content.clone(),
+            is_final: true,
+            tool_call_delta: None,
+        });
+        Ok(response)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1693,6 +2487,54 @@ impl LlmDriver for AzureOpenAiDriver {
         }
 
         self.inner.parse_response(&response_body)
+    }
+
+    async fn stream_complete_with_callback(
+        &self,
+        request: CompletionRequest,
+        callback: StreamCallback,
+    ) -> PunchResult<CompletionResponse> {
+        let url = self.build_url();
+        let mut body = self.inner.build_request_body(&request);
+        body["stream"] = serde_json::json!(true);
+
+        let response = self
+            .inner
+            .client
+            .post(&url)
+            .header("api-key", &self.inner.api_key)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PunchError::Provider {
+                provider: "azure_openai".to_string(),
+                message: format!("stream request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(PunchError::RateLimited {
+                provider: "azure_openai".to_string(),
+                retry_after_ms: 60_000,
+            });
+        }
+        if !status.is_success() {
+            let err_body: serde_json::Value =
+                response.json().await.unwrap_or(serde_json::json!({}));
+            let msg = err_body["error"]["message"]
+                .as_str()
+                .unwrap_or("unknown error");
+            return Err(PunchError::Provider {
+                provider: "azure_openai".to_string(),
+                message: format!("API error ({}): {}", status, msg),
+            });
+        }
+
+        let raw = read_stream_body(response).await?;
+        // Azure OpenAI uses the same SSE format as OpenAI
+        let assembled = self.inner.parse_openai_stream(&raw, &callback)?;
+        Ok(assembled)
     }
 }
 
@@ -3213,5 +4055,623 @@ mod tests {
 
         let resp = driver.parse_response(&response_body).unwrap();
         assert_eq!(resp.message.content, "Result here.");
+    }
+
+    // -----------------------------------------------------------------------
+    // StreamChunk / ToolCallDelta serialization tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stream_chunk_serialization_roundtrip() {
+        let chunk = StreamChunk {
+            delta: "Hello".to_string(),
+            is_final: false,
+            tool_call_delta: None,
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        let deserialized: StreamChunk = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.delta, "Hello");
+        assert!(!deserialized.is_final);
+        assert!(deserialized.tool_call_delta.is_none());
+    }
+
+    #[test]
+    fn stream_chunk_with_tool_call_delta_serialization() {
+        let chunk = StreamChunk {
+            delta: String::new(),
+            is_final: false,
+            tool_call_delta: Some(ToolCallDelta {
+                index: 0,
+                id: Some("call_123".to_string()),
+                name: Some("get_weather".to_string()),
+                arguments_delta: "{\"city\":".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        let deserialized: StreamChunk = serde_json::from_str(&json).unwrap();
+        let tcd = deserialized.tool_call_delta.unwrap();
+        assert_eq!(tcd.index, 0);
+        assert_eq!(tcd.id.unwrap(), "call_123");
+        assert_eq!(tcd.name.unwrap(), "get_weather");
+        assert_eq!(tcd.arguments_delta, "{\"city\":");
+    }
+
+    #[test]
+    fn stream_chunk_final_serialization() {
+        let chunk = StreamChunk {
+            delta: String::new(),
+            is_final: true,
+            tool_call_delta: None,
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        assert!(json.contains("\"is_final\":true"));
+    }
+
+    #[test]
+    fn tool_call_delta_serialization_roundtrip() {
+        let tcd = ToolCallDelta {
+            index: 2,
+            id: None,
+            name: None,
+            arguments_delta: "\"NYC\"}".to_string(),
+        };
+        let json = serde_json::to_string(&tcd).unwrap();
+        let deserialized: ToolCallDelta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.index, 2);
+        assert!(deserialized.id.is_none());
+        assert!(deserialized.name.is_none());
+        assert_eq!(deserialized.arguments_delta, "\"NYC\"}");
+    }
+
+    // -----------------------------------------------------------------------
+    // SSE parsing tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_sse_events_basic() {
+        let raw = "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: content_block_delta\ndata: {\"delta\":{\"text\":\"Hi\"}}\n\n";
+        let events = parse_sse_events(raw);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "message_start");
+        assert_eq!(events[1].0, "content_block_delta");
+    }
+
+    #[test]
+    fn parse_sse_events_with_done() {
+        let raw = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n";
+        let events = parse_sse_events(raw);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].1, "[DONE]");
+    }
+
+    #[test]
+    fn parse_sse_events_empty_input() {
+        let events = parse_sse_events("");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_sse_events_no_trailing_newline() {
+        let raw = "event: test\ndata: {\"value\":1}";
+        let events = parse_sse_events(raw);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "test");
+    }
+
+    #[test]
+    fn parse_sse_events_multiline_data() {
+        let raw = "data: line1\ndata: line2\n\n";
+        let events = parse_sse_events(raw);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "line1\nline2");
+    }
+
+    #[test]
+    fn parse_sse_events_no_event_field() {
+        let raw = "data: {\"hello\":\"world\"}\n\n";
+        let events = parse_sse_events(raw);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "message"); // default event type
+    }
+
+    // -----------------------------------------------------------------------
+    // Anthropic streaming tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn anthropic_stream_text_only() {
+        let raw = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        let events = parse_sse_events(raw);
+        let chunks: Arc<std::sync::Mutex<Vec<StreamChunk>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let chunks_clone = chunks.clone();
+        let callback: StreamCallback = Arc::new(move |chunk| {
+            chunks_clone.lock().unwrap().push(chunk);
+        });
+
+        // Simulate the Anthropic stream processing
+        let mut text_content = String::new();
+        let mut usage = TokenUsage::default();
+        let mut stop_reason = StopReason::EndTurn;
+
+        for (event_type, data) in &events {
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            match event_type.as_str() {
+                "message_start" => {
+                    if let Some(inp) = parsed["message"]["usage"]["input_tokens"].as_u64() {
+                        usage.input_tokens = inp;
+                    }
+                }
+                "content_block_delta" => {
+                    if let Some(text) = parsed["delta"]["text"].as_str() {
+                        text_content.push_str(text);
+                        callback(StreamChunk {
+                            delta: text.to_string(),
+                            is_final: false,
+                            tool_call_delta: None,
+                        });
+                    }
+                }
+                "message_delta" => {
+                    if let Some(sr) = parsed["delta"]["stop_reason"].as_str() {
+                        stop_reason = match sr {
+                            "end_turn" => StopReason::EndTurn,
+                            "tool_use" => StopReason::ToolUse,
+                            _ => StopReason::Error,
+                        };
+                    }
+                    if let Some(out) = parsed["usage"]["output_tokens"].as_u64() {
+                        usage.output_tokens = out;
+                    }
+                }
+                "message_stop" => {
+                    callback(StreamChunk {
+                        delta: String::new(),
+                        is_final: true,
+                        tool_call_delta: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(text_content, "Hello world");
+        assert_eq!(usage.input_tokens, 25);
+        assert_eq!(usage.output_tokens, 10);
+        assert_eq!(stop_reason, StopReason::EndTurn);
+
+        let received = chunks.lock().unwrap();
+        assert_eq!(received.len(), 3); // "Hello", " world", final
+        assert_eq!(received[0].delta, "Hello");
+        assert_eq!(received[1].delta, " world");
+        assert!(received[2].is_final);
+    }
+
+    #[test]
+    fn anthropic_stream_with_tool_use() {
+        let raw = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":15}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Checking.\"}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"get_weather\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\": \\\"NYC\\\"}\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":20}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        let events = parse_sse_events(raw);
+        // Verify we can parse all events
+        assert!(events.len() >= 7);
+
+        // Verify tool JSON reconstruction
+        let mut tool_json_bufs: Vec<String> = Vec::new();
+        let mut tc_idx: Option<usize> = None;
+
+        for (event_type, data) in &events {
+            let parsed: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            match event_type.as_str() {
+                "content_block_start" => {
+                    if parsed["content_block"]["type"].as_str() == Some("tool_use") {
+                        tool_json_bufs.push(String::new());
+                        tc_idx = Some(tool_json_bufs.len() - 1);
+                    } else {
+                        tc_idx = None;
+                    }
+                }
+                "content_block_delta" => {
+                    if parsed["delta"]["type"].as_str() == Some("input_json_delta")
+                        && let Some(idx) = tc_idx
+                        && let Some(buf) = tool_json_bufs.get_mut(idx)
+                    {
+                        buf.push_str(parsed["delta"]["partial_json"].as_str().unwrap_or(""));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(tool_json_bufs.len(), 1);
+        assert_eq!(tool_json_bufs[0], "{\"city\": \"NYC\"}");
+
+        let parsed_input: serde_json::Value = serde_json::from_str(&tool_json_bufs[0]).unwrap();
+        assert_eq!(parsed_input["city"], "NYC");
+    }
+
+    // -----------------------------------------------------------------------
+    // OpenAI streaming tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn openai_stream_text_only() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let chunks: Arc<std::sync::Mutex<Vec<StreamChunk>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let chunks_clone = chunks.clone();
+        let callback: StreamCallback = Arc::new(move |chunk| {
+            chunks_clone.lock().unwrap().push(chunk);
+        });
+
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "Hello world");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        assert!(resp.message.tool_calls.is_empty());
+
+        let received = chunks.lock().unwrap();
+        // "Hello", " world", final [DONE]
+        assert!(received.len() >= 3);
+        assert_eq!(received[0].delta, "Hello");
+        assert_eq!(received[1].delta, " world");
+        assert!(received.last().unwrap().is_final);
+    }
+
+    #[test]
+    fn openai_stream_with_tool_calls() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"ci\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"ty\\\": \\\"NYC\\\"}\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let chunks: Arc<std::sync::Mutex<Vec<StreamChunk>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let chunks_clone = chunks.clone();
+        let callback: StreamCallback = Arc::new(move |chunk| {
+            chunks_clone.lock().unwrap().push(chunk);
+        });
+
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].id, "call_abc");
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+        assert_eq!(resp.message.tool_calls[0].input["city"], "NYC");
+
+        let received = chunks.lock().unwrap();
+        // Should have tool call delta chunks and a final chunk
+        let tool_chunks: Vec<_> = received
+            .iter()
+            .filter(|c| c.tool_call_delta.is_some())
+            .collect();
+        assert!(tool_chunks.len() >= 3); // id+name, partial args, more args
+        assert!(received.last().unwrap().is_final);
+    }
+
+    #[test]
+    fn openai_stream_with_mixed_content_and_tools() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Sure, \"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"checking.\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "Sure, checking.");
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].name, "search");
+    }
+
+    #[test]
+    fn openai_stream_length_stop_reason() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"truncated\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"length\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens);
+    }
+
+    // -----------------------------------------------------------------------
+    // Ollama streaming tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ollama_stream_text_only() {
+        let driver = OllamaDriver::new(None);
+
+        let raw = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\" world\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"!\"},\"done\":false}\n",
+            "{\"done\":true,\"prompt_eval_count\":15,\"eval_count\":8}\n",
+        );
+
+        let chunks: Arc<std::sync::Mutex<Vec<StreamChunk>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let chunks_clone = chunks.clone();
+        let callback: StreamCallback = Arc::new(move |chunk| {
+            chunks_clone.lock().unwrap().push(chunk);
+        });
+
+        let resp = driver.parse_ollama_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "Hello world!");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        assert_eq!(resp.usage.input_tokens, 15);
+        assert_eq!(resp.usage.output_tokens, 8);
+
+        let received = chunks.lock().unwrap();
+        assert_eq!(received.len(), 4); // 3 content + 1 final
+        assert_eq!(received[0].delta, "Hello");
+        assert_eq!(received[1].delta, " world");
+        assert_eq!(received[2].delta, "!");
+        assert!(received[3].is_final);
+    }
+
+    #[test]
+    fn ollama_stream_with_tool_calls() {
+        let driver = OllamaDriver::new(None);
+
+        let raw = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"Let me check.\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"get_weather\",\"arguments\":{\"city\":\"London\"}}}]},\"done\":true,\"prompt_eval_count\":10,\"eval_count\":5}\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_ollama_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "Let me check.");
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.message.tool_calls.len(), 1);
+        assert_eq!(resp.message.tool_calls[0].name, "get_weather");
+        assert_eq!(resp.usage.input_tokens, 10);
+    }
+
+    #[test]
+    fn ollama_stream_strips_thinking_tags() {
+        let driver = OllamaDriver::new(None);
+
+        let raw = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"<think>hmm</think>\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"Clean answer.\"},\"done\":false}\n",
+            "{\"done\":true,\"prompt_eval_count\":5,\"eval_count\":3}\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_ollama_stream(raw, &callback).unwrap();
+        assert_eq!(resp.message.content, "Clean answer.");
+    }
+
+    // -----------------------------------------------------------------------
+    // Gemini streaming tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gemini_stream_url_construction() {
+        let driver = GeminiDriver::new("my-key".to_string(), None);
+        let url = driver.build_stream_url("gemini-pro");
+        assert!(url.contains("streamGenerateContent"));
+        assert!(url.contains("alt=sse"));
+        assert!(url.contains("key=my-key"));
+        assert!(url.contains("models/gemini-pro"));
+    }
+
+    #[test]
+    fn gemini_stream_custom_base_url() {
+        let driver = GeminiDriver::new(
+            "key".to_string(),
+            Some("https://custom.example.com".to_string()),
+        );
+        let url = driver.build_stream_url("gemini-pro");
+        assert!(url.starts_with("https://custom.example.com/"));
+        assert!(url.contains("streamGenerateContent"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Callback mechanism tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn callback_receives_all_chunks_in_order() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"A\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"B\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"C\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let deltas: Arc<std::sync::Mutex<Vec<String>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let deltas_clone = deltas.clone();
+        let callback: StreamCallback = Arc::new(move |chunk| {
+            if !chunk.delta.is_empty() || chunk.is_final {
+                deltas_clone.lock().unwrap().push(chunk.delta.clone());
+            }
+        });
+
+        let _resp = driver.parse_openai_stream(raw, &callback).unwrap();
+        let received = deltas.lock().unwrap();
+        assert_eq!(received.as_slice(), &["A", "B", "C", ""]);
+    }
+
+    #[test]
+    fn openai_stream_multiple_tool_calls() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tool_a\",\"arguments\":\"{\\\"x\\\":1}\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_2\",\"type\":\"function\",\"function\":{\"name\":\"tool_b\",\"arguments\":\"{\\\"y\\\":2}\"}}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.tool_calls.len(), 2);
+        assert_eq!(resp.message.tool_calls[0].id, "call_1");
+        assert_eq!(resp.message.tool_calls[0].name, "tool_a");
+        assert_eq!(resp.message.tool_calls[0].input["x"], 1);
+        assert_eq!(resp.message.tool_calls[1].id, "call_2");
+        assert_eq!(resp.message.tool_calls[1].name, "tool_b");
+        assert_eq!(resp.message.tool_calls[1].input["y"], 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Default stream_complete_with_callback (trait default) test
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stream_chunk_default_values() {
+        let chunk = StreamChunk {
+            delta: String::new(),
+            is_final: false,
+            tool_call_delta: None,
+        };
+        assert!(chunk.delta.is_empty());
+        assert!(!chunk.is_final);
+        assert!(chunk.tool_call_delta.is_none());
+    }
+
+    #[test]
+    fn openai_stream_empty_input() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = "data: [DONE]\n\n";
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "");
+        assert!(resp.message.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn ollama_stream_empty_input() {
+        let driver = OllamaDriver::new(None);
+        let raw = "";
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_ollama_stream(raw, &callback).unwrap();
+
+        assert_eq!(resp.message.content, "");
+        assert_eq!(resp.stop_reason, StopReason::MaxTokens); // not done
+    }
+
+    #[test]
+    fn openai_stream_strips_thinking_tags() {
+        let driver = OpenAiCompatibleDriver::new(
+            "key".into(),
+            "https://api.openai.com".into(),
+            "openai".into(),
+        );
+
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<think>internal</think>\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Result\"},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let callback: StreamCallback = Arc::new(|_| {});
+        let resp = driver.parse_openai_stream(raw, &callback).unwrap();
+        assert_eq!(resp.message.content, "Result");
     }
 }

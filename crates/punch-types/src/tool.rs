@@ -21,6 +21,7 @@ pub enum ToolCategory {
     Archive,
     Template,
     Crypto,
+    Plugin,
 }
 
 impl std::fmt::Display for ToolCategory {
@@ -43,6 +44,7 @@ impl std::fmt::Display for ToolCategory {
             Self::Archive => write!(f, "archive"),
             Self::Template => write!(f, "template"),
             Self::Crypto => write!(f, "crypto"),
+            Self::Plugin => write!(f, "plugin"),
         }
     }
 }
@@ -96,6 +98,7 @@ mod tests {
         assert_eq!(ToolCategory::Archive.to_string(), "archive");
         assert_eq!(ToolCategory::Template.to_string(), "template");
         assert_eq!(ToolCategory::Crypto.to_string(), "crypto");
+        assert_eq!(ToolCategory::Plugin.to_string(), "plugin");
     }
 
     #[test]
@@ -118,6 +121,7 @@ mod tests {
             ToolCategory::Archive,
             ToolCategory::Template,
             ToolCategory::Crypto,
+            ToolCategory::Plugin,
         ];
         for cat in &categories {
             let json = serde_json::to_string(cat).expect("serialize");

@@ -150,6 +150,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         sandbox: params.sandbox.clone(),
         bleed_detector: Some(Arc::new(ShellBleedDetector::new())),
         browser_pool: None,
+        plugin_registry: None,
     };
 
     // 4. Main loop.
@@ -268,6 +269,36 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     creed.record_messages(guard.iterations() as u64 + 1); // +1 for user msg
                     // Bind to current fighter instance
                     creed.fighter_id = Some(params.fighter_id);
+
+                    // --- HEARTBEAT MARK ---
+                    // Mark due heartbeat tasks as checked now that the bout is complete.
+                    let due_indices: Vec<usize> = creed
+                        .heartbeat
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, h)| {
+                            if !h.active {
+                                return false;
+                            }
+                            let now = chrono::Utc::now();
+                            match h.cadence.as_str() {
+                                "every_bout" => true,
+                                "on_wake" => h.last_checked.is_none(),
+                                "hourly" => h
+                                    .last_checked
+                                    .is_none_or(|t| (now - t) > chrono::Duration::hours(1)),
+                                "daily" => h
+                                    .last_checked
+                                    .is_none_or(|t| (now - t) > chrono::Duration::hours(24)),
+                                _ => false,
+                            }
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    for idx in due_indices {
+                        creed.mark_heartbeat_checked(idx);
+                    }
+
                     if let Err(e) = params.memory.save_creed(&creed).await {
                         warn!(error = %e, "failed to update creed after bout");
                     } else {
@@ -515,6 +546,19 @@ async fn build_system_prompt(
         Ok(Some(creed)) => {
             prompt.push_str("\n\n");
             prompt.push_str(&creed.render());
+
+            // --- HEARTBEAT INJECTION ---
+            // Check for due heartbeat tasks and inject them into the prompt.
+            let due_tasks = creed.due_heartbeat_tasks();
+            if !due_tasks.is_empty() {
+                prompt.push_str("\n\n## HEARTBEAT — Due Tasks\n");
+                prompt.push_str(
+                    "The following proactive tasks are due. Address them briefly before responding to the user:\n",
+                );
+                for task in &due_tasks {
+                    prompt.push_str(&format!("- {}\n", task.task));
+                }
+            }
         }
         Ok(None) => {
             // No creed defined — fighter runs without consciousness layer.

@@ -30,6 +30,7 @@ futures = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
 punch-skills = { version = "0.1.0", path = "../punch-skills" }
+punch-extensions = { version = "0.1.0", path = "../punch-extensions" }
 walkdir = { workspace = true }
 dashmap = { workspace = true }
 glob = { workspace = true }

@@ -28,8 +28,9 @@ pub use circuit_breaker::{CircuitState, CircuitStatus, ProviderCircuitBreaker};
 pub use context_budget::{ContextBudget, TrimAction};
 pub use driver::{
     AnthropicDriver, AzureOpenAiDriver, BedrockDriver, CompletionRequest, CompletionResponse,
-    GeminiDriver, LlmDriver, OllamaDriver, OpenAiCompatibleDriver, StopReason, TokenUsage,
-    create_driver, create_driver_with_client, strip_thinking_tags,
+    GeminiDriver, LlmDriver, OllamaDriver, OpenAiCompatibleDriver, StopReason, StreamCallback,
+    StreamChunk, TokenUsage, ToolCallDelta, create_driver, create_driver_with_client,
+    strip_thinking_tags,
 };
 pub use fighter_loop::{FighterLoopParams, FighterLoopResult, run_fighter_loop};
 pub use guard::{GuardConfig, GuardVerdict, LoopGuard, LoopGuardVerdict};

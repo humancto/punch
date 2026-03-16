@@ -48,8 +48,8 @@ punch-types          (no internal deps — foundational types, errors, config)
   └─► punch-memory   (depends on punch-types — SQLite, memory decay)
   └─► punch-skills   (depends on punch-types — tool registry, MCP)
   └─► punch-extensions (depends on punch-types — plugin system)
-  └─► punch-wire     (depends on punch-types — LLM provider abstraction)
-        └─► punch-runtime (depends on punch-wire, punch-memory, punch-types — fighter loop, LLM driver)
+  └─► punch-wire     (depends on punch-types — P2P protocol, HMAC-SHA256 auth)
+        └─► punch-runtime (depends on punch-wire, punch-memory, punch-extensions, punch-types — fighter loop, LLM driver)
               └─► punch-kernel (depends on punch-runtime, punch-memory, punch-types — The Ring)
                     └─► punch-api (depends on punch-kernel — The Arena, Axum HTTP/WS)
                     └─► punch-channels (depends on punch-kernel — Telegram, Discord, etc.)
@@ -97,6 +97,66 @@ punch-types          (no internal deps — foundational types, errors, config)
 - API payloads use JSON
 - Gorilla manifests are TOML files (`GORILLA.toml`)
 
+## The Creed System
+
+Creeds are database-backed agent identity documents that persist across respawns and evolve with every interaction.
+
+### Lifecycle
+
+1. **Auto-creation on spawn** — `Ring::spawn_fighter()` creates a default Creed with self-awareness (model, provider, weight class) if one doesn't exist. The creed is bound to the fighter automatically.
+2. **Injection** — `creed.render()` is injected into every LLM system prompt during a bout.
+3. **Evolution** — After each bout: `bout_count++`, relationships updated, learned behaviors reinforced or decayed.
+4. **Heartbeat tasks** — Proactive tasks with cadences (`every_bout`, `on_wake`, `hourly`, `daily`) are injected as due items in the system prompt. After a bout completes, due tasks are marked as checked with updated `execution_count`.
+5. **Persistence** — Creeds survive fighter kills and respawns via SQLite storage.
+
+### Key types
+
+- `punch-types::creed::Creed` — Core identity document with traits, directives, relationships, heartbeat tasks
+- `punch-memory` — `save_creed()`, `load_creed_by_name()`, `bind_creed_to_fighter()`
+
+## LLM Streaming
+
+All 6 LLM drivers implement real streaming via `stream_complete_with_callback()`:
+
+- **AnthropicDriver** — SSE with `"stream": true`, parses `message_start`, `content_block_delta`, `message_delta` events
+- **OpenAiCompatibleDriver** — SSE with `"stream": true`, parses `choices[0].delta`, handles `[DONE]`
+- **GeminiDriver** — SSE via `streamGenerateContent?alt=sse` endpoint
+- **OllamaDriver** — Newline-delimited JSON with `"stream": true`, `"done": true` terminator
+- **BedrockDriver** — Falls back to non-streaming (Bedrock uses proprietary binary event framing)
+- **AzureOpenAiDriver** — Delegates to OpenAI-compatible SSE parser with Azure URL/headers
+
+Key types: `StreamChunk`, `ToolCallDelta`, `StreamCallback` (all in `punch-runtime::driver`)
+
+## Tool Capabilities
+
+### WASM Plugin Invocation (`wasm_invoke`)
+
+- Tool: `wasm_invoke` — Invokes a WASM plugin by name with JSON input
+- Capability gate: `Capability::PluginInvoke`
+- Uses `punch-extensions::PluginRegistry` for plugin lookup and execution
+- Runtime: **Wasmtime 29** (JIT compiler) with dual metering: fuel-based instruction limits + epoch-based wall-clock interruption
+- Located in `punch-runtime::tool_executor`
+
+### A2A Outbound Delegation (`a2a_delegate`)
+
+- Tool: `a2a_delegate` — Delegates a task to a remote agent via Google's A2A protocol
+- Capability gate: `Capability::A2ADelegate`
+- Discovers remote agent, sends task, polls for completion with timeout
+- Located in `punch-runtime::tool_executor`
+
+## Troop Coordination
+
+Troops provide multi-agent task coordination with 6 strategies, all with real result collection:
+
+- **LeaderWorker** — Leader decomposes task, fans out subtasks to workers, collects results
+- **RoundRobin** — Routes to next member in rotation, collects response
+- **Broadcast** — Sends to all members concurrently, collects all responses
+- **Pipeline** — Chains stages sequentially — output of stage N becomes input of stage N+1
+- **Consensus** — Sends vote requests to all, tallies responses, returns majority decision
+- **Specialist** — Routes to best capability match based on task keywords
+
+All strategies use `MessageRouter::request()` with configurable timeout (default 60s). API endpoint returns `assigned_to`, `routing_decision`, and full `results` array.
+
 ## Combat Theme Terminology Reference
 
 | Term        | Meaning                              | Code Location                            |
@@ -107,8 +167,10 @@ punch-types          (no internal deps — foundational types, errors, config)
 | The Ring    | Central execution kernel/coordinator | `punch-kernel::ring::Ring`               |
 | The Arena   | HTTP API server                      | `punch-api`                              |
 | Bout        | A conversation session with memory   | `punch-memory::BoutId`                   |
+| Creed       | Database-backed agent identity       | `punch-types::creed::Creed`              |
+| Heartbeat   | Proactive task on a cadence          | `punch-types::creed::HeartbeatTask`      |
 | Combo       | Chained multi-agent workflow         | `punch-runtime` (planned)                |
-| Troop       | Coordinated group of agents          | `punch-kernel` (planned)                 |
+| Troop       | Coordinated group of agents          | `punch-kernel::troop::TroopManager`      |
 | Spawn       | Create a new fighter                 | `Ring::spawn_fighter()`                  |
 | Kill        | Terminate a fighter                  | `Ring::kill_fighter()`                   |
 | Unleash     | Start a gorilla                      | `Ring::unleash_gorilla()`                |
@@ -117,6 +179,7 @@ punch-types          (no internal deps — foundational types, errors, config)
 | KnockedOut  | Fighter that errored out             | `FighterStatus::KnockedOut`              |
 | Resting     | Fighter that's rate-limited          | `FighterStatus::Resting`                 |
 | WeightClass | Fighter capability tier              | `punch-types::fighter::WeightClass`      |
+| A2A         | Agent-to-Agent protocol delegation   | `punch-runtime::tool_executor`           |
 
 ## Testing Requirements
 
@@ -157,21 +220,25 @@ punch/
     ├── punch-types/            # Shared types
     │   └── src/
     │       ├── lib.rs          # Re-exports
-    │       ├── capability.rs
+    │       ├── capability.rs   # Includes PluginInvoke, A2ADelegate
     │       ├── config.rs
+    │       ├── creed.rs        # Creed identity, heartbeat tasks
     │       ├── error.rs
     │       ├── event.rs
     │       ├── fighter.rs
     │       ├── gorilla.rs
     │       ├── message.rs
-    │       └── tool.rs
+    │       └── tool.rs         # Includes Plugin tool category
     ├── punch-memory/           # Memory substrate
     ├── punch-kernel/           # The Ring
     │   └── src/
-    │       ├── ring.rs         # Central coordinator
+    │       ├── ring.rs         # Central coordinator (auto-creed on spawn)
+    │       ├── background.rs   # Gorilla scheduler (cron + human-readable parsing)
+    │       ├── troop.rs        # TroopManager, 6 coordination strategies
+    │       ├── agent_messaging.rs # MessageRouter (direct, broadcast, multicast, request-response)
     │       ├── event_bus.rs
     │       └── scheduler.rs
-    ├── punch-runtime/          # Fighter execution loop
+    ├── punch-runtime/          # Fighter loop, LLM drivers (15 providers, streaming), tool_executor
     ├── punch-api/              # The Arena (HTTP API)
     ├── punch-channels/         # Channel adapters
     ├── punch-skills/           # Moves (tools)
@@ -179,7 +246,7 @@ punch/
     │   └── bundled/
     │       └── alpha/
     │           └── GORILLA.toml
-    ├── punch-extensions/       # Plugin system
-    ├── punch-wire/             # LLM provider abstraction
+    ├── punch-extensions/       # WASM plugin system (Wasmtime 29, dual metering)
+    ├── punch-wire/             # P2P protocol, HMAC-SHA256 auth
     └── xtask/                  # Build automation
 ```

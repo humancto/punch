@@ -7,16 +7,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use chrono::Utc;
 use dashmap::DashMap;
+use futures::future::join_all;
 use tracing::{info, warn};
 
 use crate::agent_messaging::MessageRouter;
 use punch_types::{
-    AgentMessageType, CoordinationStrategy, FighterId, MessagePriority, PunchError, PunchResult,
-    Troop, TroopId, TroopStatus,
+    AgentMessageType, CoordinationStrategy, FighterId, PunchError, PunchResult, Troop, TroopId,
+    TroopStatus,
 };
+
+/// Default timeout for task dispatch operations.
+const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Result of a task assignment to a troop.
 #[derive(Debug, Clone)]
@@ -39,6 +44,8 @@ pub struct TroopManager {
     router: Arc<MessageRouter>,
     /// Fighter capabilities for specialist routing.
     fighter_capabilities: DashMap<FighterId, Vec<String>>,
+    /// Configurable timeout for task dispatch operations.
+    task_timeout: Duration,
 }
 
 impl TroopManager {
@@ -49,6 +56,7 @@ impl TroopManager {
             round_robin_counter: AtomicUsize::new(0),
             router: Arc::new(MessageRouter::new()),
             fighter_capabilities: DashMap::new(),
+            task_timeout: DEFAULT_TASK_TIMEOUT,
         }
     }
 
@@ -59,7 +67,18 @@ impl TroopManager {
             round_robin_counter: AtomicUsize::new(0),
             router,
             fighter_capabilities: DashMap::new(),
+            task_timeout: DEFAULT_TASK_TIMEOUT,
         }
+    }
+
+    /// Set the task dispatch timeout.
+    pub fn set_task_timeout(&mut self, timeout: Duration) {
+        self.task_timeout = timeout;
+    }
+
+    /// Get the current task dispatch timeout.
+    pub fn task_timeout(&self) -> Duration {
+        self.task_timeout
     }
 
     /// Get a reference to the underlying message router.
@@ -389,6 +408,7 @@ impl TroopManager {
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
+        let timeout = self.task_timeout;
         let workers: Vec<FighterId> = troop
             .members
             .iter()
@@ -398,58 +418,104 @@ impl TroopManager {
 
         if workers.is_empty() {
             // Solo leader does the work.
-            let _ = self
+            let response = self
                 .router
-                .send_direct(
+                .request(
                     troop.leader,
                     troop.leader,
                     AgentMessageType::TaskAssignment {
                         task: task.to_string(),
                     },
-                    MessagePriority::High,
+                    timeout,
                 )
                 .await;
+
+            let results = match response {
+                Ok(msg) => vec![(troop.leader, extract_result_content(&msg.content))],
+                Err(e) => {
+                    warn!(leader = %troop.leader, error = %e, "leader_worker: solo leader failed");
+                    vec![]
+                }
+            };
 
             return Ok(TaskAssignmentResult {
                 assigned_to: vec![troop.leader],
                 routing_decision: "leader_worker: solo leader handles task".to_string(),
-                results: vec![],
+                results,
             });
         }
 
-        // Decompose task into subtasks (split by sentences or equal parts).
-        let subtasks = decompose_task(task, workers.len());
-
-        // Send decomposition instruction to leader first.
-        let _ = self
+        // Send decompose command to leader and wait for subtask list.
+        let leader_response = self
             .router
-            .send_direct(
+            .request(
                 troop.leader,
                 troop.leader,
                 AgentMessageType::TaskAssignment {
                     task: format!("DECOMPOSE AND COORDINATE: {}", task),
                 },
-                MessagePriority::High,
+                timeout,
             )
             .await;
 
-        // Send subtasks to workers.
+        // Extract subtasks from leader response or fall back to decompose_task.
+        let subtasks = match &leader_response {
+            Ok(msg) => {
+                let content = extract_result_content(&msg.content);
+                let parsed: Vec<String> = content
+                    .split('\n')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if parsed.len() >= workers.len() {
+                    parsed
+                } else {
+                    decompose_task(task, workers.len())
+                }
+            }
+            Err(_) => decompose_task(task, workers.len()),
+        };
+
+        // Fan out subtasks to workers concurrently via router.request().
+        let mut futures = Vec::new();
         for (i, worker) in workers.iter().enumerate() {
             let subtask = subtasks.get(i).cloned().unwrap_or_else(|| task.to_string());
-            let _ = self
-                .router
-                .send_direct(
-                    troop.leader,
-                    *worker,
-                    AgentMessageType::TaskAssignment { task: subtask },
-                    MessagePriority::Normal,
-                )
-                .await;
+            let router = self.router.clone();
+            let leader = troop.leader;
+            let worker_id = *worker;
+            futures.push(async move {
+                let resp = router
+                    .request(
+                        leader,
+                        worker_id,
+                        AgentMessageType::TaskAssignment { task: subtask },
+                        timeout,
+                    )
+                    .await;
+                (worker_id, resp)
+            });
+        }
+
+        let worker_results = join_all(futures).await;
+
+        let mut results = Vec::new();
+        for (worker_id, resp) in worker_results {
+            match resp {
+                Ok(msg) => results.push((worker_id, extract_result_content(&msg.content))),
+                Err(e) => {
+                    warn!(
+                        worker = %worker_id,
+                        error = %e,
+                        "leader_worker: worker failed to respond"
+                    );
+                }
+            }
         }
 
         info!(
             leader = %troop.leader,
             worker_count = workers.len(),
+            result_count = results.len(),
             "leader_worker: dispatched subtasks to workers"
         );
 
@@ -460,35 +526,49 @@ impl TroopManager {
                 troop.leader,
                 troop.members.len() - 1
             ),
-            results: vec![],
+            results,
         })
     }
 
     /// RoundRobin: Maintains an atomic counter, assigns task to next member
-    /// in rotation.
+    /// in rotation. Waits for response via request-response pattern.
     async fn dispatch_round_robin(
         &self,
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
+        let timeout = self.task_timeout;
         let idx = self.round_robin_counter.fetch_add(1, Ordering::Relaxed) % troop.members.len();
         let assigned = troop.members[idx];
 
-        let _ = self
+        let response = self
             .router
-            .send_direct(
+            .request(
                 troop.leader,
                 assigned,
                 AgentMessageType::TaskAssignment {
                     task: task.to_string(),
                 },
-                MessagePriority::Normal,
+                timeout,
             )
             .await;
+
+        let results = match response {
+            Ok(msg) => vec![(assigned, extract_result_content(&msg.content))],
+            Err(e) => {
+                warn!(
+                    %assigned,
+                    error = %e,
+                    "round_robin: fighter failed to respond"
+                );
+                vec![]
+            }
+        };
 
         info!(
             %assigned,
             index = idx,
+            result_count = results.len(),
             "round_robin: assigned task to fighter"
         );
 
@@ -498,160 +578,215 @@ impl TroopManager {
                 "round_robin: assigned to member at index {} (fighter {})",
                 idx, assigned
             ),
-            results: vec![],
+            results,
         })
     }
 
-    /// Broadcast: Sends task to ALL members simultaneously, collects all results.
+    /// Broadcast: Sends task to ALL members simultaneously via individual
+    /// request-response calls, collects all results concurrently.
     async fn dispatch_broadcast(
         &self,
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
-        let _ = self
-            .router
-            .multicast(
-                troop.leader,
-                troop.members.clone(),
-                AgentMessageType::TaskAssignment {
-                    task: task.to_string(),
-                },
-                MessagePriority::Normal,
-            )
-            .await;
+        let timeout = self.task_timeout;
+
+        // Send task to all members via individual router.request() calls concurrently.
+        let mut futures = Vec::new();
+        for member in &troop.members {
+            let router = self.router.clone();
+            let leader = troop.leader;
+            let member_id = *member;
+            let task_str = task.to_string();
+            futures.push(async move {
+                let resp = router
+                    .request(
+                        leader,
+                        member_id,
+                        AgentMessageType::TaskAssignment { task: task_str },
+                        timeout,
+                    )
+                    .await;
+                (member_id, resp)
+            });
+        }
+
+        let all_results = join_all(futures).await;
+
+        let mut results = Vec::new();
+        for (member_id, resp) in all_results {
+            match resp {
+                Ok(msg) => results.push((member_id, extract_result_content(&msg.content))),
+                Err(e) => {
+                    warn!(
+                        member = %member_id,
+                        error = %e,
+                        "broadcast: member failed to respond"
+                    );
+                }
+            }
+        }
 
         info!(
             member_count = troop.members.len(),
+            result_count = results.len(),
             "broadcast: sent task to all members"
         );
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
             routing_decision: format!("broadcast: sent to all {} members", troop.members.len()),
-            results: vec![],
+            results,
         })
     }
 
-    /// Pipeline: Sends task to first member, output feeds as input to the next.
+    /// Pipeline: Executes stages sequentially. Sends task to stage 1, waits for
+    /// result, passes output as input to stage 2, etc. Each stage uses
+    /// `router.request()` with timeout.
     async fn dispatch_pipeline(
         &self,
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
-        // Send the initial task to the first member in the pipeline.
-        if let Some(first) = troop.members.first() {
-            let _ = self
-                .router
-                .send_direct(
-                    troop.leader,
-                    *first,
-                    AgentMessageType::TaskAssignment {
-                        task: task.to_string(),
-                    },
-                    MessagePriority::Normal,
-                )
-                .await;
-        }
-
-        // For tracking, note the full pipeline order.
-        let pipeline_desc: Vec<String> = troop.members.iter().map(|m| m.to_string()).collect();
-
-        info!(
-            pipeline = ?pipeline_desc,
-            "pipeline: initiated task through pipeline"
-        );
-
-        Ok(TaskAssignmentResult {
-            assigned_to: troop.members.clone(),
-            routing_decision: format!(
-                "pipeline: task flows through {} stages: [{}]",
-                troop.members.len(),
-                pipeline_desc.join(" -> ")
-            ),
-            results: vec![],
-        })
-    }
-
-    /// Pipeline: Execute the full pipeline, passing each stage's output to the next.
-    pub async fn execute_pipeline(
-        &self,
-        troop: &Troop,
-        initial_input: &str,
-    ) -> PunchResult<TaskAssignmentResult> {
-        let mut current_input = initial_input.to_string();
+        let timeout = self.task_timeout;
+        let mut current_input = task.to_string();
         let mut results = Vec::new();
 
         for (i, member) in troop.members.iter().enumerate() {
-            // Send current input to this pipeline stage.
-            let send_result = self
+            let response = self
                 .router
-                .send_direct(
+                .request(
                     troop.leader,
                     *member,
                     AgentMessageType::TaskAssignment {
                         task: current_input.clone(),
                     },
-                    MessagePriority::Normal,
+                    timeout,
                 )
                 .await;
 
-            if let Err(e) = send_result {
-                warn!(
-                    stage = i,
-                    fighter = %member,
-                    error = %e,
-                    "pipeline: stage failed to receive task"
-                );
-                return Err(PunchError::Troop(format!(
-                    "pipeline stage {} failed: {}",
-                    i, e
-                )));
+            match response {
+                Ok(msg) => {
+                    let stage_output = extract_result_content(&msg.content);
+                    results.push((*member, stage_output.clone()));
+                    current_input = stage_output;
+                }
+                Err(e) => {
+                    warn!(
+                        stage = i,
+                        fighter = %member,
+                        error = %e,
+                        "pipeline: stage failed to respond"
+                    );
+                    return Err(PunchError::Troop(format!(
+                        "pipeline stage {} ({}) failed: {}",
+                        i, member, e
+                    )));
+                }
             }
-
-            // In a real system, we would await the response here.
-            // For now, record the stage.
-            let stage_output = format!("[stage-{}-output:{}]", i, current_input);
-            results.push((*member, stage_output.clone()));
-            current_input = stage_output;
         }
+
+        let pipeline_desc: Vec<String> = troop.members.iter().map(|m| m.to_string()).collect();
+
+        info!(
+            pipeline = ?pipeline_desc,
+            stage_count = results.len(),
+            "pipeline: completed all stages"
+        );
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
-            routing_decision: format!("pipeline: completed {} stages", troop.members.len()),
+            routing_decision: format!(
+                "pipeline: completed {} stages: [{}]",
+                troop.members.len(),
+                pipeline_desc.join(" -> ")
+            ),
             results,
         })
     }
 
-    /// Consensus: Sends task to all members, collects responses, uses majority
-    /// vote to pick final answer.
+    /// Consensus: Sends VoteRequest to all members, collects VoteResponses
+    /// with timeout, tallies votes and returns the consensus result.
     async fn dispatch_consensus(
         &self,
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
-        // Send vote request to all members.
-        let _ = self
-            .router
-            .multicast(
-                troop.leader,
-                troop.members.clone(),
-                AgentMessageType::VoteRequest {
-                    proposal: task.to_string(),
-                    options: vec!["approve".to_string(), "reject".to_string()],
-                },
-                MessagePriority::High,
-            )
-            .await;
+        let timeout = self.task_timeout;
+
+        // Send vote request to all members concurrently via router.request().
+        let mut futures = Vec::new();
+        for member in &troop.members {
+            let router = self.router.clone();
+            let leader = troop.leader;
+            let member_id = *member;
+            let proposal = task.to_string();
+            futures.push(async move {
+                let resp = router
+                    .request(
+                        leader,
+                        member_id,
+                        AgentMessageType::VoteRequest {
+                            proposal,
+                            options: vec!["approve".to_string(), "reject".to_string()],
+                        },
+                        timeout,
+                    )
+                    .await;
+                (member_id, resp)
+            });
+        }
+
+        let all_results = join_all(futures).await;
+
+        let mut votes = Vec::new();
+        let mut results = Vec::new();
+        for (member_id, resp) in all_results {
+            match resp {
+                Ok(msg) => {
+                    let vote_str = extract_vote_content(&msg.content);
+                    votes.push((member_id, vote_str.clone()));
+                    results.push((member_id, vote_str));
+                }
+                Err(e) => {
+                    warn!(
+                        member = %member_id,
+                        error = %e,
+                        "consensus: member failed to respond"
+                    );
+                }
+            }
+        }
+
+        // Tally votes to determine the consensus result.
+        let consensus = self.tally_votes(&votes);
+        let decision = match &consensus {
+            Some(winner) => format!(
+                "consensus: {} members voted, result: {} ({}/{} responded)",
+                troop.members.len(),
+                winner,
+                results.len(),
+                troop.members.len()
+            ),
+            None => format!(
+                "consensus: {} members voted, no consensus reached ({}/{} responded)",
+                troop.members.len(),
+                results.len(),
+                troop.members.len()
+            ),
+        };
 
         info!(
             member_count = troop.members.len(),
-            "consensus: sent vote request to all members"
+            vote_count = votes.len(),
+            consensus = ?consensus,
+            "consensus: vote collection complete"
         );
 
         Ok(TaskAssignmentResult {
             assigned_to: troop.members.clone(),
-            routing_decision: format!("consensus: {} members voting on task", troop.members.len()),
-            results: vec![],
+            routing_decision: decision,
+            results,
         })
     }
 
@@ -673,26 +808,39 @@ impl TroopManager {
     }
 
     /// Specialist: Examines task metadata/keywords, routes to the member whose
-    /// capabilities best match.
+    /// capabilities best match. Waits for response via request-response pattern.
     async fn dispatch_specialist(
         &self,
         troop: &Troop,
         task: &str,
     ) -> PunchResult<TaskAssignmentResult> {
+        let timeout = self.task_timeout;
         let assigned = self.assign_specialist(troop, task);
         let target = assigned[0];
 
-        let _ = self
+        let response = self
             .router
-            .send_direct(
+            .request(
                 troop.leader,
                 target,
                 AgentMessageType::TaskAssignment {
                     task: task.to_string(),
                 },
-                MessagePriority::Normal,
+                timeout,
             )
             .await;
+
+        let results = match response {
+            Ok(msg) => vec![(target, extract_result_content(&msg.content))],
+            Err(e) => {
+                warn!(
+                    %target,
+                    error = %e,
+                    "specialist: fighter failed to respond"
+                );
+                vec![]
+            }
+        };
 
         let has_capability_match = self
             .fighter_capabilities
@@ -715,7 +863,7 @@ impl TroopManager {
         Ok(TaskAssignmentResult {
             assigned_to: assigned,
             routing_decision: decision,
-            results: vec![],
+            results,
         })
     }
 
@@ -781,6 +929,28 @@ impl Default for TroopManager {
     }
 }
 
+/// Extract the result string from an `AgentMessageType` response.
+fn extract_result_content(content: &AgentMessageType) -> String {
+    match content {
+        AgentMessageType::TaskResult { result, .. } => result.clone(),
+        AgentMessageType::StatusUpdate { detail, .. } => detail.clone(),
+        AgentMessageType::DataShare { value, .. } => value.to_string(),
+        AgentMessageType::VoteResponse { vote, .. } => vote.clone(),
+        AgentMessageType::TaskAssignment { task } => task.clone(),
+        AgentMessageType::VoteRequest { proposal, .. } => proposal.clone(),
+        AgentMessageType::Escalation { reason, .. } => reason.clone(),
+    }
+}
+
+/// Extract the vote string from an `AgentMessageType` response.
+fn extract_vote_content(content: &AgentMessageType) -> String {
+    match content {
+        AgentMessageType::VoteResponse { vote, .. } => vote.clone(),
+        AgentMessageType::TaskResult { result, .. } => result.clone(),
+        other => extract_result_content(other),
+    }
+}
+
 /// Decompose a task into subtasks by splitting intelligently.
 ///
 /// Tries to split by sentences first, then by equal-length chunks.
@@ -813,6 +983,8 @@ fn decompose_task(task: &str, num_parts: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use punch_types::{AgentMessage, MessageChannel, MessagePriority};
+    use uuid::Uuid;
 
     fn make_manager() -> TroopManager {
         TroopManager::new()
@@ -820,9 +992,101 @@ mod tests {
 
     fn make_manager_with_router() -> (TroopManager, Arc<MessageRouter>) {
         let router = Arc::new(MessageRouter::new());
-        let mgr = TroopManager::with_router(router.clone());
+        let mut mgr = TroopManager::with_router(router.clone());
+        // Use a short timeout for tests.
+        mgr.set_task_timeout(Duration::from_secs(5));
         (mgr, router)
     }
+
+    /// Spawn a responder task that receives messages and replies with a TaskResult.
+    /// The response content is `format!("result-from-{}", fighter_id)`.
+    fn spawn_task_responder(
+        router: &Arc<MessageRouter>,
+        fighter_id: FighterId,
+        mut rx: tokio::sync::mpsc::Receiver<AgentMessage>,
+    ) {
+        let router = router.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                let response = AgentMessage {
+                    id: Uuid::new_v4(),
+                    from: fighter_id,
+                    to: msg.from,
+                    channel: MessageChannel::Direct,
+                    content: AgentMessageType::TaskResult {
+                        result: format!("result-from-{}", fighter_id),
+                        success: true,
+                    },
+                    priority: MessagePriority::Normal,
+                    timestamp: Utc::now(),
+                    delivered: false,
+                };
+                let _ = router.respond(&msg.id, response);
+            }
+        });
+    }
+
+    /// Spawn a vote responder that replies with a VoteResponse.
+    fn spawn_vote_responder(
+        router: &Arc<MessageRouter>,
+        fighter_id: FighterId,
+        mut rx: tokio::sync::mpsc::Receiver<AgentMessage>,
+        vote: String,
+    ) {
+        let router = router.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                let response = AgentMessage {
+                    id: Uuid::new_v4(),
+                    from: fighter_id,
+                    to: msg.from,
+                    channel: MessageChannel::Direct,
+                    content: AgentMessageType::VoteResponse {
+                        proposal: "task".to_string(),
+                        vote: vote.clone(),
+                    },
+                    priority: MessagePriority::Normal,
+                    timestamp: Utc::now(),
+                    delivered: false,
+                };
+                let _ = router.respond(&msg.id, response);
+            }
+        });
+    }
+
+    /// Spawn a pipeline responder that transforms input by appending a stage tag.
+    fn spawn_pipeline_responder(
+        router: &Arc<MessageRouter>,
+        fighter_id: FighterId,
+        mut rx: tokio::sync::mpsc::Receiver<AgentMessage>,
+        stage_tag: String,
+    ) {
+        let router = router.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                let input = extract_result_content(&msg.content);
+                let output = format!("{}+{}", input, stage_tag);
+                let response = AgentMessage {
+                    id: Uuid::new_v4(),
+                    from: fighter_id,
+                    to: msg.from,
+                    channel: MessageChannel::Direct,
+                    content: AgentMessageType::TaskResult {
+                        result: output,
+                        success: true,
+                    },
+                    priority: MessagePriority::Normal,
+                    timestamp: Utc::now(),
+                    delivered: false,
+                };
+                let _ = router.respond(&msg.id, response);
+            }
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Synchronous / structural tests (unchanged)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_form_troop() {
@@ -1310,291 +1574,6 @@ mod tests {
         assert!(!mgr.is_in_troop(&leader));
     }
 
-    // -----------------------------------------------------------------------
-    // New strategy dispatch tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn test_leader_worker_delegates_to_workers() {
-        let (mgr, router) = make_manager_with_router();
-        let leader = FighterId::new();
-        let w1 = FighterId::new();
-        let w2 = FighterId::new();
-
-        // Register mailboxes.
-        let _rx_leader = router.register(leader);
-        let _rx_w1 = router.register(w1);
-        let _rx_w2 = router.register(w2);
-
-        let troop_id = mgr.form_troop(
-            "LW_Dispatch".to_string(),
-            leader,
-            vec![w1, w2],
-            CoordinationStrategy::LeaderWorker,
-        );
-
-        let result = mgr
-            .assign_task_async(&troop_id, "analyze this code")
-            .await
-            .expect("should assign");
-
-        assert!(result.assigned_to.contains(&w1));
-        assert!(result.assigned_to.contains(&w2));
-        assert!(!result.assigned_to.contains(&leader));
-        assert!(result.routing_decision.contains("leader_worker"));
-    }
-
-    #[tokio::test]
-    async fn test_leader_worker_solo_leader() {
-        let (mgr, router) = make_manager_with_router();
-        let leader = FighterId::new();
-        let _rx = router.register(leader);
-
-        let troop_id = mgr.form_troop(
-            "Solo_LW".to_string(),
-            leader,
-            vec![],
-            CoordinationStrategy::LeaderWorker,
-        );
-
-        let result = mgr
-            .assign_task_async(&troop_id, "solo work")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to, vec![leader]);
-        assert!(result.routing_decision.contains("solo"));
-    }
-
-    #[tokio::test]
-    async fn test_round_robin_distributes_evenly() {
-        let (mgr, router) = make_manager_with_router();
-        let m1 = FighterId::new();
-        let m2 = FighterId::new();
-        let m3 = FighterId::new();
-        let _rx1 = router.register(m1);
-        let _rx2 = router.register(m2);
-        let _rx3 = router.register(m3);
-
-        let troop_id = mgr.form_troop(
-            "RR_Dispatch".to_string(),
-            m1,
-            vec![m2, m3],
-            CoordinationStrategy::RoundRobin,
-        );
-
-        let mut assignment_counts: HashMap<FighterId, usize> = HashMap::new();
-
-        // Assign N*3 tasks.
-        for i in 0..9 {
-            let result = mgr
-                .assign_task_async(&troop_id, &format!("task {}", i))
-                .await
-                .expect("should assign");
-            assert_eq!(result.assigned_to.len(), 1);
-            *assignment_counts.entry(result.assigned_to[0]).or_insert(0) += 1;
-        }
-
-        // Each member should get exactly 3 tasks.
-        for count in assignment_counts.values() {
-            assert_eq!(*count, 3);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_broadcast_all_members_receive() {
-        let (mgr, router) = make_manager_with_router();
-        let m1 = FighterId::new();
-        let m2 = FighterId::new();
-        let m3 = FighterId::new();
-        let _rx1 = router.register(m1);
-        let _rx2 = router.register(m2);
-        let _rx3 = router.register(m3);
-
-        let troop_id = mgr.form_troop(
-            "BC_Dispatch".to_string(),
-            m1,
-            vec![m2, m3],
-            CoordinationStrategy::Broadcast,
-        );
-
-        let result = mgr
-            .assign_task_async(&troop_id, "broadcast task")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to.len(), 3);
-        assert!(result.assigned_to.contains(&m1));
-        assert!(result.assigned_to.contains(&m2));
-        assert!(result.assigned_to.contains(&m3));
-    }
-
-    #[tokio::test]
-    async fn test_pipeline_output_feeds_input() {
-        let (mgr, router) = make_manager_with_router();
-        let m1 = FighterId::new();
-        let m2 = FighterId::new();
-        let m3 = FighterId::new();
-        let _rx1 = router.register(m1);
-        let _rx2 = router.register(m2);
-        let _rx3 = router.register(m3);
-
-        let troop = Troop {
-            id: TroopId::new(),
-            name: "PL_Pipeline".to_string(),
-            leader: m1,
-            members: vec![m1, m2, m3],
-            strategy: CoordinationStrategy::Pipeline,
-            status: TroopStatus::Active,
-            created_at: Utc::now(),
-        };
-
-        let result = mgr
-            .execute_pipeline(&troop, "initial input")
-            .await
-            .expect("should execute pipeline");
-
-        // All members should have been involved.
-        assert_eq!(result.assigned_to.len(), 3);
-        // Results should show the chained output.
-        assert_eq!(result.results.len(), 3);
-        // Verify that output of stage N was input to stage N+1.
-        for i in 1..result.results.len() {
-            let prev_output = &result.results[i - 1].1;
-            let curr_input_embedded = &result.results[i].1;
-            // The current stage's output should contain the previous stage's output.
-            assert!(
-                curr_input_embedded.contains(prev_output.as_str())
-                    || curr_input_embedded.contains(&format!("stage-{}", i)),
-                "stage {} output should reference stage {} output",
-                i,
-                i - 1
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_consensus_majority_wins() {
-        let mgr = make_manager();
-
-        let m1 = FighterId::new();
-        let m2 = FighterId::new();
-        let m3 = FighterId::new();
-
-        let votes = vec![
-            (m1, "approve".to_string()),
-            (m2, "approve".to_string()),
-            (m3, "reject".to_string()),
-        ];
-
-        let winner = mgr.tally_votes(&votes);
-        assert_eq!(winner, Some("approve".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_consensus_empty_votes() {
-        let mgr = make_manager();
-        let winner = mgr.tally_votes(&[]);
-        assert!(winner.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_specialist_routes_to_capability_match() {
-        let (mgr, router) = make_manager_with_router();
-        let leader = FighterId::new();
-        let coder = FighterId::new();
-        let reviewer = FighterId::new();
-
-        let _rx1 = router.register(leader);
-        let _rx2 = router.register(coder);
-        let _rx3 = router.register(reviewer);
-
-        mgr.register_capabilities(coder, vec!["code".to_string(), "rust".to_string()]);
-        mgr.register_capabilities(reviewer, vec!["review".to_string(), "testing".to_string()]);
-
-        let troop_id = mgr.form_troop(
-            "SP_Dispatch".to_string(),
-            leader,
-            vec![coder, reviewer],
-            CoordinationStrategy::Specialist,
-        );
-
-        // Task about code should route to coder.
-        let result = mgr
-            .assign_task_async(&troop_id, "write some rust code")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to, vec![coder]);
-        assert!(result.routing_decision.contains("capability match"));
-
-        // Task about review should route to reviewer.
-        let result = mgr
-            .assign_task_async(&troop_id, "please review this PR")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to, vec![reviewer]);
-    }
-
-    #[tokio::test]
-    async fn test_specialist_defaults_to_leader_no_match() {
-        let (mgr, router) = make_manager_with_router();
-        let leader = FighterId::new();
-        let specialist = FighterId::new();
-
-        let _rx1 = router.register(leader);
-        let _rx2 = router.register(specialist);
-
-        mgr.register_capabilities(specialist, vec!["database".to_string()]);
-
-        let troop_id = mgr.form_troop(
-            "SP_Default".to_string(),
-            leader,
-            vec![specialist],
-            CoordinationStrategy::Specialist,
-        );
-
-        let result = mgr
-            .assign_task_async(&troop_id, "fix CSS styling")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to, vec![leader]);
-        assert!(result.routing_decision.contains("defaulted to leader"));
-    }
-
-    #[tokio::test]
-    async fn test_empty_troop_assign_fails() {
-        let mgr = make_manager();
-        let leader = FighterId::new();
-        let troop_id = mgr.form_troop(
-            "EmptyTest".to_string(),
-            leader,
-            vec![],
-            CoordinationStrategy::Broadcast,
-        );
-        mgr.disband_troop(&troop_id).expect("should disband");
-
-        let result = mgr.assign_task_async(&troop_id, "task").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_single_member_leader_worker() {
-        let (mgr, router) = make_manager_with_router();
-        let solo = FighterId::new();
-        let _rx = router.register(solo);
-
-        let troop_id = mgr.form_troop(
-            "SingleLW".to_string(),
-            solo,
-            vec![],
-            CoordinationStrategy::LeaderWorker,
-        );
-
-        let result = mgr
-            .assign_task_async(&troop_id, "single member task")
-            .await
-            .expect("should assign");
-        assert_eq!(result.assigned_to, vec![solo]);
-    }
-
     #[test]
     fn test_decompose_task_by_sentences() {
         let task = "Analyze the code. Fix any bugs. Write tests. Deploy to staging.";
@@ -1636,5 +1615,539 @@ mod tests {
             .get(&fighter)
             .expect("should exist");
         assert_eq!(caps.len(), 2);
+    }
+
+    #[test]
+    fn test_task_timeout_getter_setter() {
+        let mut mgr = TroopManager::new();
+        assert_eq!(mgr.task_timeout(), DEFAULT_TASK_TIMEOUT);
+        mgr.set_task_timeout(Duration::from_secs(30));
+        assert_eq!(mgr.task_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_extract_result_content_variants() {
+        assert_eq!(
+            extract_result_content(&AgentMessageType::TaskResult {
+                result: "done".to_string(),
+                success: true,
+            }),
+            "done"
+        );
+        assert_eq!(
+            extract_result_content(&AgentMessageType::StatusUpdate {
+                progress: 1.0,
+                detail: "finished".to_string(),
+            }),
+            "finished"
+        );
+        assert_eq!(
+            extract_result_content(&AgentMessageType::VoteResponse {
+                proposal: "p".to_string(),
+                vote: "approve".to_string(),
+            }),
+            "approve"
+        );
+        assert_eq!(
+            extract_result_content(&AgentMessageType::TaskAssignment {
+                task: "work".to_string(),
+            }),
+            "work"
+        );
+    }
+
+    #[test]
+    fn test_extract_vote_content_variants() {
+        assert_eq!(
+            extract_vote_content(&AgentMessageType::VoteResponse {
+                proposal: "p".to_string(),
+                vote: "reject".to_string(),
+            }),
+            "reject"
+        );
+        assert_eq!(
+            extract_vote_content(&AgentMessageType::TaskResult {
+                result: "approve".to_string(),
+                success: true,
+            }),
+            "approve"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Async dispatch tests with real result collection
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_round_robin_collects_result() {
+        let (mgr, router) = make_manager_with_router();
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+
+        let rx1 = router.register(m1);
+        let rx2 = router.register(m2);
+        spawn_task_responder(&router, m1, rx1);
+        spawn_task_responder(&router, m2, rx2);
+
+        let troop_id = mgr.form_troop(
+            "RR_Result".to_string(),
+            m1,
+            vec![m2],
+            CoordinationStrategy::RoundRobin,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "do work")
+            .await
+            .expect("should assign");
+
+        assert_eq!(result.assigned_to.len(), 1);
+        assert_eq!(result.results.len(), 1);
+        let (fighter_id, response) = &result.results[0];
+        assert_eq!(*fighter_id, result.assigned_to[0]);
+        assert!(response.starts_with("result-from-"));
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_collects_all_results() {
+        let (mgr, router) = make_manager_with_router();
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+        let m3 = FighterId::new();
+
+        let rx1 = router.register(m1);
+        let rx2 = router.register(m2);
+        let rx3 = router.register(m3);
+        spawn_task_responder(&router, m1, rx1);
+        spawn_task_responder(&router, m2, rx2);
+        spawn_task_responder(&router, m3, rx3);
+
+        let troop_id = mgr.form_troop(
+            "BC_Result".to_string(),
+            m1,
+            vec![m2, m3],
+            CoordinationStrategy::Broadcast,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "broadcast task")
+            .await
+            .expect("should assign");
+
+        assert_eq!(result.assigned_to.len(), 3);
+        assert_eq!(result.results.len(), 3);
+
+        let result_ids: Vec<FighterId> = result.results.iter().map(|(id, _)| *id).collect();
+        assert!(result_ids.contains(&m1));
+        assert!(result_ids.contains(&m2));
+        assert!(result_ids.contains(&m3));
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_chains_output_to_input() {
+        let (mgr, router) = make_manager_with_router();
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+        let m3 = FighterId::new();
+
+        let rx1 = router.register(m1);
+        let rx2 = router.register(m2);
+        let rx3 = router.register(m3);
+        spawn_pipeline_responder(&router, m1, rx1, "stage1".to_string());
+        spawn_pipeline_responder(&router, m2, rx2, "stage2".to_string());
+        spawn_pipeline_responder(&router, m3, rx3, "stage3".to_string());
+
+        let troop_id = mgr.form_troop(
+            "PL_Result".to_string(),
+            m1,
+            vec![m2, m3],
+            CoordinationStrategy::Pipeline,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "initial")
+            .await
+            .expect("should complete pipeline");
+
+        assert_eq!(result.assigned_to.len(), 3);
+        assert_eq!(result.results.len(), 3);
+
+        // Verify chaining: stage1 output feeds into stage2, stage2 into stage3.
+        let (_, r1) = &result.results[0];
+        let (_, r2) = &result.results[1];
+        let (_, r3) = &result.results[2];
+        assert_eq!(r1, "initial+stage1");
+        assert_eq!(r2, "initial+stage1+stage2");
+        assert_eq!(r3, "initial+stage1+stage2+stage3");
+    }
+
+    #[tokio::test]
+    async fn test_consensus_tallies_votes() {
+        let (mgr, router) = make_manager_with_router();
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+        let m3 = FighterId::new();
+
+        let rx1 = router.register(m1);
+        let rx2 = router.register(m2);
+        let rx3 = router.register(m3);
+        spawn_vote_responder(&router, m1, rx1, "approve".to_string());
+        spawn_vote_responder(&router, m2, rx2, "approve".to_string());
+        spawn_vote_responder(&router, m3, rx3, "reject".to_string());
+
+        let troop_id = mgr.form_troop(
+            "CN_Result".to_string(),
+            m1,
+            vec![m2, m3],
+            CoordinationStrategy::Consensus,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "should we merge?")
+            .await
+            .expect("should assign");
+
+        assert_eq!(result.assigned_to.len(), 3);
+        assert_eq!(result.results.len(), 3);
+        assert!(result.routing_decision.contains("approve"));
+
+        let approve_count = result
+            .results
+            .iter()
+            .filter(|(_, v)| v == "approve")
+            .count();
+        let reject_count = result.results.iter().filter(|(_, v)| v == "reject").count();
+        assert_eq!(approve_count, 2);
+        assert_eq!(reject_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_consensus_majority_wins() {
+        let mgr = make_manager();
+
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+        let m3 = FighterId::new();
+
+        let votes = vec![
+            (m1, "approve".to_string()),
+            (m2, "approve".to_string()),
+            (m3, "reject".to_string()),
+        ];
+
+        let winner = mgr.tally_votes(&votes);
+        assert_eq!(winner, Some("approve".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_consensus_empty_votes() {
+        let mgr = make_manager();
+        let winner = mgr.tally_votes(&[]);
+        assert!(winner.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_specialist_routes_and_collects_result() {
+        let (mgr, router) = make_manager_with_router();
+        let leader = FighterId::new();
+        let coder = FighterId::new();
+        let reviewer = FighterId::new();
+
+        let rx_leader = router.register(leader);
+        let rx_coder = router.register(coder);
+        let rx_reviewer = router.register(reviewer);
+        spawn_task_responder(&router, leader, rx_leader);
+        spawn_task_responder(&router, coder, rx_coder);
+        spawn_task_responder(&router, reviewer, rx_reviewer);
+
+        mgr.register_capabilities(coder, vec!["code".to_string(), "rust".to_string()]);
+        mgr.register_capabilities(reviewer, vec!["review".to_string(), "testing".to_string()]);
+
+        let troop_id = mgr.form_troop(
+            "SP_Result".to_string(),
+            leader,
+            vec![coder, reviewer],
+            CoordinationStrategy::Specialist,
+        );
+
+        // Task about code should route to coder and collect result.
+        let result = mgr
+            .assign_task_async(&troop_id, "write some rust code")
+            .await
+            .expect("should assign");
+        assert_eq!(result.assigned_to, vec![coder]);
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].0, coder);
+        assert!(result.routing_decision.contains("capability match"));
+
+        // Task about review should route to reviewer.
+        let result = mgr
+            .assign_task_async(&troop_id, "please review this PR")
+            .await
+            .expect("should assign");
+        assert_eq!(result.assigned_to, vec![reviewer]);
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].0, reviewer);
+    }
+
+    #[tokio::test]
+    async fn test_specialist_defaults_to_leader_no_match() {
+        let (mgr, router) = make_manager_with_router();
+        let leader = FighterId::new();
+        let specialist = FighterId::new();
+
+        let rx1 = router.register(leader);
+        let rx2 = router.register(specialist);
+        spawn_task_responder(&router, leader, rx1);
+        spawn_task_responder(&router, specialist, rx2);
+
+        mgr.register_capabilities(specialist, vec!["database".to_string()]);
+
+        let troop_id = mgr.form_troop(
+            "SP_Default".to_string(),
+            leader,
+            vec![specialist],
+            CoordinationStrategy::Specialist,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "fix CSS styling")
+            .await
+            .expect("should assign");
+        assert_eq!(result.assigned_to, vec![leader]);
+        assert_eq!(result.results.len(), 1);
+        assert!(result.routing_decision.contains("defaulted to leader"));
+    }
+
+    #[tokio::test]
+    async fn test_leader_worker_collects_results() {
+        let (mgr, router) = make_manager_with_router();
+        let leader = FighterId::new();
+        let w1 = FighterId::new();
+        let w2 = FighterId::new();
+
+        let rx_leader = router.register(leader);
+        let rx_w1 = router.register(w1);
+        let rx_w2 = router.register(w2);
+        spawn_task_responder(&router, leader, rx_leader);
+        spawn_task_responder(&router, w1, rx_w1);
+        spawn_task_responder(&router, w2, rx_w2);
+
+        let troop_id = mgr.form_troop(
+            "LW_Result".to_string(),
+            leader,
+            vec![w1, w2],
+            CoordinationStrategy::LeaderWorker,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "analyze this code")
+            .await
+            .expect("should assign");
+
+        assert!(result.assigned_to.contains(&w1));
+        assert!(result.assigned_to.contains(&w2));
+        assert!(!result.assigned_to.contains(&leader));
+        assert_eq!(result.results.len(), 2);
+        assert!(result.routing_decision.contains("leader_worker"));
+
+        let result_ids: Vec<FighterId> = result.results.iter().map(|(id, _)| *id).collect();
+        assert!(result_ids.contains(&w1));
+        assert!(result_ids.contains(&w2));
+    }
+
+    #[tokio::test]
+    async fn test_leader_worker_solo_collects_result() {
+        let (mgr, router) = make_manager_with_router();
+        let leader = FighterId::new();
+        let rx = router.register(leader);
+        spawn_task_responder(&router, leader, rx);
+
+        let troop_id = mgr.form_troop(
+            "Solo_LW_Result".to_string(),
+            leader,
+            vec![],
+            CoordinationStrategy::LeaderWorker,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "solo work")
+            .await
+            .expect("should assign");
+        assert_eq!(result.assigned_to, vec![leader]);
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].0, leader);
+        assert!(result.routing_decision.contains("solo"));
+    }
+
+    #[tokio::test]
+    async fn test_timeout_when_fighter_does_not_respond() {
+        let (mut mgr, router) = make_manager_with_router();
+        mgr.set_task_timeout(Duration::from_millis(100));
+        let m1 = FighterId::new();
+
+        // Register but do NOT spawn a responder.
+        let _rx = router.register(m1);
+
+        let troop_id = mgr.form_troop(
+            "Timeout_Test".to_string(),
+            m1,
+            vec![],
+            CoordinationStrategy::RoundRobin,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "this will timeout")
+            .await
+            .expect("should still return a result, just with empty results");
+
+        // The dispatch succeeds but results are empty because the fighter timed out.
+        assert_eq!(result.assigned_to.len(), 1);
+        assert_eq!(result.results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_timeout_returns_error() {
+        let (mut mgr, router) = make_manager_with_router();
+        mgr.set_task_timeout(Duration::from_millis(100));
+
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+
+        // Only m1 responds, m2 does not.
+        let rx1 = router.register(m1);
+        let _rx2 = router.register(m2);
+        spawn_pipeline_responder(&router, m1, rx1, "stage1".to_string());
+
+        let troop_id = mgr.form_troop(
+            "PL_Timeout".to_string(),
+            m1,
+            vec![m2],
+            CoordinationStrategy::Pipeline,
+        );
+
+        let result = mgr.assign_task_async(&troop_id, "input").await;
+
+        // Pipeline should fail because stage 2 (m2) times out.
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("pipeline stage"));
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_partial_timeout() {
+        let (mut mgr, router) = make_manager_with_router();
+        mgr.set_task_timeout(Duration::from_millis(100));
+
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+
+        let rx1 = router.register(m1);
+        let _rx2 = router.register(m2); // m2 does NOT respond.
+        spawn_task_responder(&router, m1, rx1);
+
+        let troop_id = mgr.form_troop(
+            "BC_Partial".to_string(),
+            m1,
+            vec![m2],
+            CoordinationStrategy::Broadcast,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "broadcast partial")
+            .await
+            .expect("should succeed with partial results");
+
+        assert_eq!(result.assigned_to.len(), 2);
+        // Only m1 responded.
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].0, m1);
+    }
+
+    #[tokio::test]
+    async fn test_round_robin_distributes_evenly() {
+        let (mgr, router) = make_manager_with_router();
+        let m1 = FighterId::new();
+        let m2 = FighterId::new();
+        let m3 = FighterId::new();
+        let rx1 = router.register(m1);
+        let rx2 = router.register(m2);
+        let rx3 = router.register(m3);
+        spawn_task_responder(&router, m1, rx1);
+        spawn_task_responder(&router, m2, rx2);
+        spawn_task_responder(&router, m3, rx3);
+
+        let troop_id = mgr.form_troop(
+            "RR_Dispatch".to_string(),
+            m1,
+            vec![m2, m3],
+            CoordinationStrategy::RoundRobin,
+        );
+
+        let mut assignment_counts: HashMap<FighterId, usize> = HashMap::new();
+
+        for i in 0..9 {
+            let result = mgr
+                .assign_task_async(&troop_id, &format!("task {}", i))
+                .await
+                .expect("should assign");
+            assert_eq!(result.assigned_to.len(), 1);
+            assert_eq!(result.results.len(), 1);
+            *assignment_counts.entry(result.assigned_to[0]).or_insert(0) += 1;
+        }
+
+        for count in assignment_counts.values() {
+            assert_eq!(*count, 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_troop_assign_fails() {
+        let mgr = make_manager();
+        let leader = FighterId::new();
+        let troop_id = mgr.form_troop(
+            "EmptyTest".to_string(),
+            leader,
+            vec![],
+            CoordinationStrategy::Broadcast,
+        );
+        mgr.disband_troop(&troop_id).expect("should disband");
+
+        let result = mgr.assign_task_async(&troop_id, "task").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_leader_worker_decomposition_fan_out() {
+        let (mgr, router) = make_manager_with_router();
+        let leader = FighterId::new();
+        let w1 = FighterId::new();
+        let w2 = FighterId::new();
+        let w3 = FighterId::new();
+
+        let rx_leader = router.register(leader);
+        let rx_w1 = router.register(w1);
+        let rx_w2 = router.register(w2);
+        let rx_w3 = router.register(w3);
+        spawn_task_responder(&router, leader, rx_leader);
+        spawn_task_responder(&router, w1, rx_w1);
+        spawn_task_responder(&router, w2, rx_w2);
+        spawn_task_responder(&router, w3, rx_w3);
+
+        let troop_id = mgr.form_troop(
+            "LW_Fanout".to_string(),
+            leader,
+            vec![w1, w2, w3],
+            CoordinationStrategy::LeaderWorker,
+        );
+
+        let result = mgr
+            .assign_task_async(&troop_id, "Step one. Step two. Step three. Step four.")
+            .await
+            .expect("should assign");
+
+        // All workers should be assigned and all should have results.
+        assert_eq!(result.assigned_to.len(), 3);
+        assert_eq!(result.results.len(), 3);
     }
 }

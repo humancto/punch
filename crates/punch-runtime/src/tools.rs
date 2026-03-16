@@ -103,6 +103,12 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
                 push_unique(&mut tools, hash_compute());
                 push_unique(&mut tools, hash_verify());
             }
+            Capability::A2ADelegate => {
+                push_unique(&mut tools, a2a_delegate());
+            }
+            Capability::PluginInvoke => {
+                push_unique(&mut tools, wasm_invoke());
+            }
             _ => {}
         }
     }
@@ -181,6 +187,10 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         // File (extended)
         file_search(),
         file_info(),
+        // A2A delegation
+        a2a_delegate(),
+        // WASM Plugin
+        wasm_invoke(),
     ]
 }
 
@@ -1489,6 +1499,67 @@ fn file_info() -> ToolDefinition {
     }
 }
 
+fn a2a_delegate() -> ToolDefinition {
+    ToolDefinition {
+        name: "a2a_delegate".into(),
+        description: "Delegate a task to a remote A2A agent. Discovers the agent, sends the task, \
+                      polls for completion, and returns the result."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agent_url": {
+                    "type": "string",
+                    "description": "Base URL of the remote A2A agent (e.g. 'https://agent.example.com')."
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The task description / prompt to send to the remote agent."
+                },
+                "context": {
+                    "type": "object",
+                    "description": "Optional additional context as key-value pairs."
+                },
+                "timeout_secs": {
+                    "type": "integer",
+                    "description": "Maximum time to wait for the task to complete (default: 60)."
+                }
+            },
+            "required": ["agent_url", "prompt"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn wasm_invoke() -> ToolDefinition {
+    ToolDefinition {
+        name: "wasm_invoke".into(),
+        description: "Invoke a function on a loaded WASM plugin (imported technique). \
+                      Executes the named function within the plugin's sandboxed WASM runtime \
+                      and returns the result."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "plugin": {
+                    "type": "string",
+                    "description": "Name of the loaded WASM plugin to invoke."
+                },
+                "function": {
+                    "type": "string",
+                    "description": "Name of the exported function to call within the plugin."
+                },
+                "input": {
+                    "type": "object",
+                    "description": "Input arguments to pass to the plugin function (optional)."
+                }
+            },
+            "required": ["plugin", "function"]
+        }),
+        category: ToolCategory::Plugin,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2201,5 +2272,61 @@ mod tests {
                 tool.name
             );
         }
+    }
+
+    #[test]
+    fn test_a2a_delegate_tool_definition() {
+        let tool = a2a_delegate();
+        assert_eq!(tool.name, "a2a_delegate");
+        assert_eq!(tool.category, ToolCategory::Agent);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "agent_url"));
+        assert!(required.iter().any(|v| v == "prompt"));
+    }
+
+    #[test]
+    fn test_tools_for_a2a_delegate_capability() {
+        let caps = vec![Capability::A2ADelegate];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"a2a_delegate"));
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_all_tools_includes_a2a_delegate() {
+        let tools = all_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"a2a_delegate"));
+    }
+
+    #[test]
+    fn test_wasm_invoke_tool_definition() {
+        let tool = wasm_invoke();
+        assert_eq!(tool.name, "wasm_invoke");
+        assert_eq!(tool.category, ToolCategory::Plugin);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "plugin"));
+        assert!(required.iter().any(|v| v == "function"));
+    }
+
+    #[test]
+    fn test_tools_for_plugin_invoke_capability() {
+        let caps = vec![Capability::PluginInvoke];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"wasm_invoke"));
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_all_tools_includes_wasm_invoke() {
+        let tools = all_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"wasm_invoke"));
     }
 }

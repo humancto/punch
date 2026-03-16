@@ -31,12 +31,14 @@
   --yellow-dim: #ffd23f30;
   --purple: #b46eff;
   --purple-dim: #b46eff30;
+  --cyan: #00d4ff;
+  --cyan-dim: #00d4ff30;
   --mono: 'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-html { font-size: 14px; }
+html { font-size: 13px; }
 
 body {
   background: var(--void);
@@ -56,53 +58,41 @@ body::before {
   z-index: 9999;
 }
 
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  opacity: 0.015;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 9998;
-}
+.arena { max-width: 1600px; margin: 0 auto; padding: 16px 20px 40px; }
 
-.arena { max-width: 1440px; margin: 0 auto; padding: 20px 24px 40px; }
-
-/* ─── HEADER ─── */
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 0 20px; border-bottom: 1px solid var(--border);
-  margin-bottom: 24px; animation: fadeSlideDown 0.6s var(--ease-out-expo) both;
+  padding: 12px 0 16px; border-bottom: 1px solid var(--border);
+  margin-bottom: 16px; animation: fadeSlideDown 0.6s var(--ease-out-expo) both;
 }
 .header-left { display: flex; align-items: center; gap: 16px; }
 .logo {
-  font-size: 1.6rem; font-weight: 700; letter-spacing: 0.15em; color: var(--red);
+  font-size: 1.4rem; font-weight: 700; letter-spacing: 0.15em; color: var(--red);
   text-shadow: 0 0 30px var(--red-dim), 0 0 60px var(--red-glow); position: relative;
 }
 .logo::after {
-  content: 'ARENA'; display: block; font-size: 0.55rem; font-weight: 400;
+  content: 'ARENA'; display: block; font-size: 0.5rem; font-weight: 400;
   letter-spacing: 0.5em; color: var(--text-dim); text-shadow: none; margin-top: -2px;
 }
-.header-status { display: flex; align-items: center; gap: 20px; font-size: 0.78rem; color: var(--text-dim); }
+.header-status { display: flex; align-items: center; gap: 16px; font-size: 0.72rem; color: var(--text-dim); }
 .health-badge {
-  display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 3px;
-  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 3px;
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .health-badge.healthy { background: var(--green-dim); color: var(--green); border: 1px solid #00ff8820; }
 .health-badge.degraded { background: var(--red-dim); color: var(--red); border: 1px solid #ff2d2d20; animation: pulse-red 2s ease-in-out infinite; }
 .ws-dot { width: 7px; height: 7px; border-radius: 50%; transition: background 0.3s, box-shadow 0.3s; }
 .ws-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green-dim); }
 .ws-dot.disconnected { background: var(--red); box-shadow: 0 0 8px var(--red-dim); }
-.uptime { font-variant-numeric: tabular-nums; font-weight: 500; color: var(--text); min-width: 80px; }
+.uptime { font-variant-numeric: tabular-nums; font-weight: 500; color: var(--text); min-width: 70px; }
 
-/* ─── STAT CARDS ─── */
 .stats-row {
-  display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px;
-  margin-bottom: 24px; animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.1s both;
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  margin-bottom: 16px; animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.1s both;
 }
 .stat-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  padding: 16px 14px 14px; position: relative; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 5px;
+  padding: 12px 12px 10px; position: relative; overflow: hidden;
   transition: border-color 0.2s, transform 0.15s;
 }
 .stat-card:hover { border-color: var(--border-bright); transform: translateY(-1px); }
@@ -113,9 +103,8 @@ body::after {
 .stat-card:nth-child(4)::before { background: var(--blue); }
 .stat-card:nth-child(5)::before { background: var(--purple); }
 .stat-card:nth-child(6)::before { background: var(--yellow); }
-.stat-glyph { font-size: 0.85rem; margin-bottom: 8px; opacity: 0.5; }
 .stat-value {
-  font-size: 1.75rem; font-weight: 700; line-height: 1; margin-bottom: 4px;
+  font-size: 1.5rem; font-weight: 700; line-height: 1; margin-bottom: 3px;
   font-variant-numeric: tabular-nums; transition: color 0.3s;
 }
 .stat-card:nth-child(1) .stat-value { color: var(--red); }
@@ -124,29 +113,33 @@ body::after {
 .stat-card:nth-child(4) .stat-value { color: var(--blue); }
 .stat-card:nth-child(5) .stat-value { color: var(--purple); }
 .stat-card:nth-child(6) .stat-value { color: var(--yellow); }
-.stat-label { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+.stat-label { font-size: 0.6rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
 
-/* ─── MAIN GRID ─── */
-.main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.main-layout {
+  display: grid; grid-template-columns: 320px 1fr; gap: 14px;
+  animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.2s both;
+}
 
-/* ─── PANELS ─── */
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--elevated);
+  padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--elevated);
 }
-.panel-title { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); }
-.panel-count { font-size: 0.68rem; color: var(--text-ghost); font-weight: 400; }
-.panel-body { padding: 12px; }
+.panel-title { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); }
+.panel-count { font-size: 0.62rem; color: var(--text-ghost); font-weight: 400; }
+.panel-body { padding: 10px; }
 
-/* ─── FIGHTER CARDS ─── */
-.fighters-grid { display: flex; flex-direction: column; gap: 8px; }
+.sidebar { display: flex; flex-direction: column; gap: 14px; }
+
+.fighters-grid { display: flex; flex-direction: column; gap: 6px; }
 .fighter-card {
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
-  padding: 10px 12px; background: var(--base); border: 1px solid var(--border); border-radius: 5px;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
+  padding: 8px 10px; background: var(--base); border: 1px solid var(--border); border-radius: 4px;
   transition: border-color 0.2s, background 0.2s; animation: fadeIn 0.3s var(--ease-out-expo) both;
 }
 .fighter-card:hover { border-color: var(--border-bright); background: var(--elevated); }
+.fighter-card.fighting { border-color: var(--green); background: linear-gradient(135deg, var(--base), #041a0d); }
+.fighter-card.knocked_out { border-color: var(--red); opacity: 0.7; }
 .fighter-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .fighter-status-dot.idle { background: var(--text-ghost); }
 .fighter-status-dot.fighting { background: var(--green); box-shadow: 0 0 10px var(--green-dim); animation: pulse-dot 1.5s ease-in-out infinite; }
@@ -154,112 +147,137 @@ body::after {
 .fighter-status-dot.knocked_out { background: var(--red); box-shadow: 0 0 6px var(--red-dim); }
 .fighter-status-dot.training { background: var(--purple); box-shadow: 0 0 6px var(--purple-dim); animation: pulse-dot 2s ease-in-out infinite; }
 .fighter-info { min-width: 0; }
-.fighter-name { font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fighter-meta { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 0.68rem; color: var(--text-dim); }
+.fighter-name { font-weight: 600; font-size: 0.8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fighter-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 0.62rem; color: var(--text-dim); }
 .fighter-model { color: var(--text-ghost); }
-.weight-badge { font-size: 0.6rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border-radius: 2px; }
+.weight-badge { font-size: 0.55rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 5px; border-radius: 2px; }
 .weight-badge.featherweight { color: var(--blue); background: var(--blue-dim); }
 .weight-badge.middleweight { color: var(--yellow); background: var(--yellow-dim); }
 .weight-badge.heavyweight { color: var(--orange); background: var(--orange-dim); }
 .weight-badge.champion { color: var(--red); background: var(--red-dim); }
-.fighter-status-label { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+.fighter-status-label { font-size: 0.6rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
 .fighter-status-label.idle { color: var(--text-ghost); }
 .fighter-status-label.fighting { color: var(--green); }
 .fighter-status-label.resting { color: var(--yellow); }
 .fighter-status-label.knocked_out { color: var(--red); }
 .fighter-status-label.training { color: var(--purple); }
 
-/* ─── GORILLA CARDS ─── */
-.gorillas-grid { display: flex; flex-direction: column; gap: 8px; }
+.gorillas-grid { display: flex; flex-direction: column; gap: 6px; }
 .gorilla-card {
-  padding: 10px 12px; background: var(--base); border: 1px solid var(--border); border-radius: 5px;
-  transition: border-color 0.2s, background 0.2s; animation: fadeIn 0.3s var(--ease-out-expo) both; position: relative;
+  padding: 8px 10px; background: var(--base); border: 1px solid var(--border); border-radius: 4px;
+  transition: border-color 0.2s; animation: fadeIn 0.3s var(--ease-out-expo) both;
 }
-.gorilla-card:hover { border-color: var(--border-bright); background: var(--elevated); }
-.gorilla-card.rampaging {
-  border-color: var(--red); background: linear-gradient(135deg, var(--base), #1a0808);
-  animation: fadeIn 0.3s var(--ease-out-expo) both, cage-shake 0.5s ease-in-out infinite;
-}
-.gorilla-card.injured { border-color: #ff6b3560; opacity: 0.7; }
-.gorilla-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.gorilla-name { font-weight: 600; font-size: 0.85rem; color: var(--text); }
-.gorilla-status {
-  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  padding: 2px 8px; border-radius: 2px;
-}
-.gorilla-status.caged { color: var(--text-ghost); background: transparent; border: 1px solid var(--border); }
-.gorilla-status.rampaging { color: var(--red); background: var(--red-dim); border: 1px solid var(--red-dim); animation: pulse-red 1.5s ease-in-out infinite; }
-.gorilla-status.injured { color: var(--orange); background: var(--orange-dim); border: 1px solid var(--orange-dim); }
-.gorilla-meta { display: flex; align-items: center; gap: 12px; font-size: 0.68rem; color: var(--text-dim); }
-.gorilla-schedule { color: var(--text-ghost); }
-.gorilla-desc {
-  font-size: 0.68rem; color: var(--text-ghost); margin-top: 4px; line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
+.gorilla-card.rampaging { border-color: var(--red); animation: fadeIn 0.3s both, cage-shake 0.5s ease-in-out infinite; }
+.gorilla-top { display: flex; align-items: center; justify-content: space-between; }
+.gorilla-name { font-weight: 600; font-size: 0.78rem; }
+.gorilla-status { font-size: 0.55rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; }
+.gorilla-status.caged { color: var(--text-ghost); border: 1px solid var(--border); }
+.gorilla-status.rampaging { color: var(--red); background: var(--red-dim); animation: pulse-red 1.5s ease-in-out infinite; }
+.gorilla-meta { font-size: 0.62rem; color: var(--text-ghost); margin-top: 2px; }
 
-/* ─── BOTTOM GRID ─── */
-.bottom-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.3s both; }
-
-/* ─── CONFIG PANEL ─── */
-.config-grid { display: flex; flex-direction: column; gap: 1px; }
-.config-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #ffffff06; }
+.config-grid { display: flex; flex-direction: column; }
+.config-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #ffffff06; }
 .config-row:last-child { border-bottom: none; }
-.config-key { font-size: 0.68rem; color: var(--text-dim); font-weight: 400; }
-.config-val {
-  font-size: 0.72rem; color: var(--text); font-weight: 500; text-align: right;
-  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+.config-key { font-size: 0.62rem; color: var(--text-dim); }
+.config-val { font-size: 0.65rem; color: var(--text); font-weight: 500; text-align: right; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-val.active { color: var(--green); }
 .config-val.inactive { color: var(--text-ghost); }
 
-/* ─── AUDIT TRAIL ─── */
-.audit-feed {
-  display: flex; flex-direction: column; gap: 0; max-height: 280px;
+.activity-area { display: flex; flex-direction: column; gap: 14px; }
+
+.live-feed {
+  display: flex; flex-direction: column; gap: 0; max-height: calc(100vh - 240px);
   overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
-.audit-feed::-webkit-scrollbar { width: 4px; }
-.audit-feed::-webkit-scrollbar-track { background: transparent; }
-.audit-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.audit-entry {
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
-  padding: 6px 0; border-bottom: 1px solid #ffffff04; font-size: 0.72rem;
-  animation: auditSlideIn 0.3s var(--ease-out-expo) both;
-}
-.audit-entry:last-child { border-bottom: none; }
-.audit-kind {
-  font-size: 0.58rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-  padding: 2px 6px; border-radius: 2px; white-space: nowrap;
-}
-.audit-kind.fighter_status { color: var(--blue); background: var(--blue-dim); }
-.audit-kind.gorilla_status { color: var(--orange); background: var(--orange-dim); }
-.audit-kind.system_start { color: var(--green); background: var(--green-dim); }
-.audit-kind.system_event { color: var(--purple); background: var(--purple-dim); }
-.audit-summary { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.audit-time { font-size: 0.62rem; color: var(--text-ghost); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-feed::-webkit-scrollbar { width: 4px; }
+.live-feed::-webkit-scrollbar-track { background: transparent; }
+.live-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-.empty { color: var(--text-ghost); font-size: 0.75rem; padding: 20px 0; text-align: center; font-style: italic; }
+.feed-item {
+  display: grid; grid-template-columns: 70px auto 1fr 70px; align-items: start; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid #ffffff06;
+  animation: feedSlideIn 0.25s var(--ease-out-expo) both;
+  transition: background 0.15s;
+}
+.feed-item:hover { background: var(--elevated); }
+.feed-item.highlight { background: #00ff8808; border-left: 2px solid var(--green); }
+.feed-item.error-item { background: #ff2d2d08; border-left: 2px solid var(--red); }
+.feed-item.msg-item { background: #4da6ff06; border-left: 2px solid var(--blue); }
 
-/* ─── ANIMATIONS ─── */
+.feed-time {
+  font-size: 0.6rem; color: var(--text-ghost); font-variant-numeric: tabular-nums;
+  padding-top: 2px; white-space: nowrap;
+}
+
+.feed-badge {
+  font-size: 0.52rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 2px; white-space: nowrap; text-align: center;
+  min-width: 50px; display: inline-block;
+}
+.feed-badge.fighter_spawned { color: var(--cyan); background: var(--cyan-dim); }
+.feed-badge.message_in { color: var(--blue); background: var(--blue-dim); }
+.feed-badge.message_out { color: var(--green); background: var(--green-dim); }
+.feed-badge.bout_started { color: var(--purple); background: var(--purple-dim); }
+.feed-badge.bout_ended { color: var(--yellow); background: var(--yellow-dim); }
+.feed-badge.tool_exec { color: var(--orange); background: var(--orange-dim); }
+.feed-badge.gorilla_unleashed { color: var(--red); background: var(--red-dim); }
+.feed-badge.gorilla_paused { color: var(--text-dim); background: #ffffff10; }
+.feed-badge.troop_formed { color: var(--cyan); background: var(--cyan-dim); }
+.feed-badge.troop_disbanded { color: var(--text-dim); background: #ffffff10; }
+.feed-badge.combo { color: var(--purple); background: var(--purple-dim); }
+.feed-badge.error { color: var(--red); background: var(--red-dim); }
+.feed-badge.system_start { color: var(--green); background: var(--green-dim); }
+
+.feed-content {
+  font-size: 0.72rem; color: var(--text-dim); line-height: 1.5;
+  word-break: break-word; min-width: 0;
+}
+.feed-content .msg-text { color: var(--text); display: block; margin-top: 2px; padding: 4px 8px; background: var(--base); border-radius: 3px; border-left: 2px solid var(--border); font-size: 0.68rem; max-height: 80px; overflow: hidden; }
+.feed-content .msg-text.response { border-left-color: var(--green); }
+.feed-content .msg-text.incoming { border-left-color: var(--blue); }
+
+.feed-seq {
+  font-size: 0.55rem; color: var(--text-ghost); font-variant-numeric: tabular-nums;
+  text-align: right; padding-top: 2px;
+}
+
+.live-indicator {
+  display: flex; align-items: center; gap: 6px; font-size: 0.6rem; color: var(--text-ghost);
+}
+.live-pulse {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--red);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.live-pulse.active { background: var(--green); }
+
+.empty { color: var(--text-ghost); font-size: 0.72rem; padding: 20px 0; text-align: center; font-style: italic; }
+
+.event-counters {
+  display: flex; gap: 12px; flex-wrap: wrap; padding: 6px 0;
+  font-size: 0.58rem; color: var(--text-dim);
+}
+.event-counter { display: flex; align-items: center; gap: 4px; }
+.event-counter .dot { width: 5px; height: 5px; border-radius: 50%; }
+.event-counter .count { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+
 @keyframes fadeSlideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes auditSlideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes feedSlideIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 @keyframes cage-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
 @keyframes countUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ─── RESPONSIVE ─── */
 @media (max-width: 1100px) {
   .stats-row { grid-template-columns: repeat(3, 1fr); }
-  .main-grid { grid-template-columns: 1fr; }
-  .bottom-grid { grid-template-columns: 1fr; }
+  .main-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  html { font-size: 13px; }
-  .arena { padding: 12px 16px 32px; }
+  html { font-size: 12px; }
+  .arena { padding: 10px 12px 32px; }
   .stats-row { grid-template-columns: repeat(2, 1fr); }
-  .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+  .header { flex-direction: column; gap: 10px; align-items: flex-start; }
 }
 </style>
 </head>
@@ -282,82 +300,41 @@ body::after {
   </header>
 
   <div class="stats-row">
-    <div class="stat-card">
-      <div class="stat-glyph">&#9876;</div>
-      <div class="stat-value" id="stat-fighters">0</div>
-      <div class="stat-label">Fighters</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-glyph">&#128037;</div>
-      <div class="stat-value" id="stat-gorillas">0</div>
-      <div class="stat-label">Gorillas</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-glyph">&#9889;</div>
-      <div class="stat-value" id="stat-bouts">0</div>
-      <div class="stat-label">Active Bouts</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-glyph">&#9993;</div>
-      <div class="stat-value" id="stat-messages">0</div>
-      <div class="stat-label">Messages</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-glyph">&#9883;</div>
-      <div class="stat-value" id="stat-tokens">0</div>
-      <div class="stat-label">Tokens Used</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-glyph">&#36;</div>
-      <div class="stat-value" id="stat-cost">$0.00</div>
-      <div class="stat-label">Total Cost</div>
-    </div>
+    <div class="stat-card"><div class="stat-value" id="stat-fighters">0</div><div class="stat-label">Fighters</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-gorillas">0</div><div class="stat-label">Gorillas</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-bouts">0</div><div class="stat-label">Active Bouts</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-messages">0</div><div class="stat-label">Messages</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-tokens">0</div><div class="stat-label">Tokens</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-cost">$0.00</div><div class="stat-label">Cost</div></div>
   </div>
 
-  <div class="main-grid" style="animation: fadeSlideUp 0.5s var(--ease-out-expo) 0.2s both;">
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Fighter Roster</span>
-        <span class="panel-count" id="fighter-count">0 fighters</span>
+  <div class="main-layout">
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Fighter Roster</span><span class="panel-count" id="fighter-count">0</span></div>
+        <div class="panel-body"><div id="fighters-content" class="fighters-grid"><div class="empty">No fighters spawned</div></div></div>
       </div>
-      <div class="panel-body">
-        <div id="fighters-content" class="fighters-grid">
-          <div class="empty">Waiting for fighters&hellip;</div>
-        </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Gorillas</span><span class="panel-count" id="gorilla-count">0</span></div>
+        <div class="panel-body"><div id="gorillas-content" class="gorillas-grid"><div class="empty">None registered</div></div></div>
       </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Gorilla Enclosure</span>
-        <span class="panel-count" id="gorilla-count">0 gorillas</span>
-      </div>
-      <div class="panel-body">
-        <div id="gorillas-content" class="gorillas-grid">
-          <div class="empty">No gorillas registered&hellip;</div>
-        </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Config</span></div>
+        <div class="panel-body"><div id="config-content" class="config-grid"><div class="empty">Loading...</div></div></div>
       </div>
     </div>
-  </div>
 
-  <div class="bottom-grid">
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">System Config</span>
-      </div>
-      <div class="panel-body">
-        <div id="config-content" class="config-grid">
-          <div class="empty">Loading config&hellip;</div>
+    <div class="activity-area">
+      <div class="panel" style="flex:1; display:flex; flex-direction:column;">
+        <div class="panel-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span class="panel-title">Live Activity</span>
+            <div class="live-indicator"><div id="live-pulse" class="live-pulse"></div><span id="live-status">connecting...</span></div>
+          </div>
+          <div id="event-counters" class="event-counters"></div>
         </div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Audit Trail</span>
-        <span class="panel-count" id="audit-count">live feed</span>
-      </div>
-      <div class="panel-body">
-        <div id="audit-content" class="audit-feed">
-          <div class="empty">Waiting for events&hellip;</div>
+        <div class="panel-body" style="flex:1; padding:0;">
+          <div id="live-feed" class="live-feed"><div class="empty">Waiting for events...</div></div>
         </div>
       </div>
     </div>
@@ -371,18 +348,19 @@ body::after {
   var BASE = window.location.origin;
   var uptimeSecs = 0;
   var uptimeInterval = null;
+  var eventCounts = {};
+  var maxFeedItems = 200;
 
+  /* XSS-safe text escaping via textContent */
   function esc(s) {
-    var d = document.createElement("div");
+    var d = document.createElement("span");
     d.textContent = String(s == null ? "" : s);
-    return d.innerHTML;
+    return d.textContent;
   }
 
   function fetchJson(path) {
     return fetch(BASE + path).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }
-
-  function setHTML(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
 
   function fmtNum(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
@@ -403,7 +381,7 @@ body::after {
 
   function fmtTime(ts) {
     try { var d = new Date(ts); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0"); }
-    catch(_) { return "--:--:--"; }
+    catch(e) { return "--:--:--"; }
   }
 
   function fmtSchedule(cron) {
@@ -412,12 +390,6 @@ body::after {
     if (cron.indexOf("*/10 ") === 0) return "every 10m";
     if (cron.indexOf("*/15 ") === 0) return "every 15m";
     if (cron.indexOf("*/30 ") === 0) return "every 30m";
-    var p = cron.split(" ");
-    if (p.length >= 5) {
-      if (p[0] === "0" && p[1].indexOf("*/") === 0) return "every " + p[1].replace("*/","") + "h";
-      if (p[0] === "0" && p[1] === "0" && p[2] === "*") return "daily";
-      if (p[0] === "0" && p[1] === "0" && p[2].indexOf("*/") === 0) return "every " + p[2].replace("*/","") + "d";
-    }
     return cron;
   }
 
@@ -426,12 +398,96 @@ body::after {
     if (!el) return;
     var display = String(value);
     if (el.textContent !== display) {
-      el.style.animation = "none"; el.offsetHeight;
+      el.style.animation = "none"; void el.offsetHeight;
       el.style.animation = "countUp 0.3s var(--ease-out-expo) both";
       el.textContent = display;
     }
   }
 
+  var kindLabels = {
+    fighter_spawned: "SPAWN", message_in: "MSG IN", message_out: "MSG OUT",
+    bout_started: "BOUT", bout_ended: "DONE", tool_exec: "TOOL",
+    gorilla_unleashed: "UNLEASH", gorilla_paused: "CAGED",
+    troop_formed: "TROOP", troop_disbanded: "DISBAND",
+    combo: "COMBO", error: "ERROR", system_start: "SYSTEM"
+  };
+
+  /* --- DOM BUILDER HELPERS (XSS-safe, no innerHTML for user data) --- */
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function buildFeedItem(entry) {
+    var kind = entry.kind || "system_event";
+    var label = kindLabels[kind] || kind.toUpperCase();
+    var isError = kind === "error";
+    var isMsg = kind === "message_in" || kind === "message_out";
+
+    var row = el("div", "feed-item" + (isError ? " error-item" : isMsg ? " msg-item" : ""));
+
+    row.appendChild(el("span", "feed-time", fmtTime(entry.timestamp)));
+    row.appendChild(el("span", "feed-badge " + kind, label));
+
+    var content = el("span", "feed-content");
+    if (isMsg) {
+      var msgBox = el("span", "msg-text " + (kind === "message_in" ? "incoming" : "response"), entry.summary);
+      content.appendChild(msgBox);
+    } else {
+      content.textContent = entry.summary;
+    }
+    row.appendChild(content);
+
+    row.appendChild(el("span", "feed-seq", "#" + (entry.sequence || 0)));
+    return row;
+  }
+
+  function buildFighterCard(f, i) {
+    var st = (f.status || "idle").toLowerCase();
+    var card = el("div", "fighter-card " + st);
+    card.style.animationDelay = (i * 40) + "ms";
+    card.title = f.description || "";
+
+    card.appendChild(el("div", "fighter-status-dot " + st));
+
+    var info = el("div", "fighter-info");
+    info.appendChild(el("div", "fighter-name", f.name));
+    var meta = el("div", "fighter-meta");
+    meta.appendChild(el("span", "weight-badge " + (f.weight_class || ""), f.weight_class || ""));
+    meta.appendChild(el("span", "fighter-model", f.model || ""));
+    info.appendChild(meta);
+    card.appendChild(info);
+
+    card.appendChild(el("div", "fighter-status-label " + st, st));
+    return card;
+  }
+
+  function buildGorillaCard(g) {
+    var st = (g.status || "caged").toLowerCase();
+    var card = el("div", "gorilla-card " + st);
+
+    var top = el("div", "gorilla-top");
+    top.appendChild(el("span", "gorilla-name", g.name));
+    top.appendChild(el("span", "gorilla-status " + st, st));
+    card.appendChild(top);
+
+    card.appendChild(el("div", "gorilla-meta", fmtSchedule(g.schedule)));
+    return card;
+  }
+
+  function buildConfigRow(key, val) {
+    var row = el("div", "config-row");
+    row.appendChild(el("span", "config-key", key));
+    var vc = "";
+    if (val === "on") vc = " active";
+    if (val === "off" || val === "0") vc = " inactive";
+    row.appendChild(el("span", "config-val" + vc, val));
+    return row;
+  }
+
+  /* --- RENDER FUNCTIONS --- */
   function renderStatus(data) {
     if (!data) return;
     uptimeSecs = data.uptime_secs || 0;
@@ -452,72 +508,109 @@ body::after {
   }
 
   function renderFighters(data) {
-    if (!data || data.length === 0) { setHTML("fighters-content",'<div class="empty">No fighters in the arena</div>'); setHTML("fighter-count","0 fighters"); return; }
-    var html = [];
-    for (var i = 0; i < data.length; i++) {
-      var f = data[i], st = f.status || "idle";
-      html.push(
-        '<div class="fighter-card" style="animation-delay:'+i*50+'ms" title="'+esc(f.description)+'">'+
-        '<div class="fighter-status-dot '+esc(st)+'"></div>'+
-        '<div class="fighter-info"><div class="fighter-name">'+esc(f.name)+'</div>'+
-        '<div class="fighter-meta"><span class="weight-badge '+esc(f.weight_class)+'">'+esc(f.weight_class)+'</span>'+
-        '<span class="fighter-model">'+esc(f.model)+'</span></div></div>'+
-        '<div class="fighter-status-label '+esc(st)+'">'+esc(st)+'</div></div>'
-      );
-    }
-    setHTML("fighters-content", html.join(""));
-    setHTML("fighter-count", data.length+" fighter"+(data.length!==1?"s":""));
+    var container = document.getElementById("fighters-content");
+    container.replaceChildren();
+    if (!data || data.length === 0) { container.appendChild(el("div", "empty", "No fighters spawned")); document.getElementById("fighter-count").textContent = "0"; return; }
+    for (var i = 0; i < data.length; i++) container.appendChild(buildFighterCard(data[i], i));
+    document.getElementById("fighter-count").textContent = String(data.length);
   }
 
   function renderGorillas(data) {
-    if (!data || data.length === 0) { setHTML("gorillas-content",'<div class="empty">No gorillas registered</div>'); setHTML("gorilla-count","0 gorillas"); return; }
-    var html = [];
-    for (var i = 0; i < data.length; i++) {
-      var g = data[i], st = g.status || "caged";
-      html.push(
-        '<div class="gorilla-card '+esc(st)+'" style="animation-delay:'+i*50+'ms">'+
-        '<div class="gorilla-top"><span class="gorilla-name">'+esc(g.name)+'</span>'+
-        '<span class="gorilla-status '+esc(st)+'">'+esc(st)+'</span></div>'+
-        '<div class="gorilla-meta"><span class="gorilla-schedule">'+esc(fmtSchedule(g.schedule))+'</span></div>'+
-        '<div class="gorilla-desc">'+esc(g.description)+'</div></div>'
-      );
-    }
-    setHTML("gorillas-content", html.join(""));
-    setHTML("gorilla-count", data.length+" gorilla"+(data.length!==1?"s":""));
+    var container = document.getElementById("gorillas-content");
+    container.replaceChildren();
+    if (!data || data.length === 0) { container.appendChild(el("div", "empty", "None registered")); document.getElementById("gorilla-count").textContent = "0"; return; }
+    for (var i = 0; i < data.length; i++) container.appendChild(buildGorillaCard(data[i]));
+    document.getElementById("gorilla-count").textContent = String(data.length);
   }
 
   function renderConfig(data) {
-    if (!data) { setHTML("config-content",'<div class="empty">Config unavailable</div>'); return; }
+    var container = document.getElementById("config-content");
+    container.replaceChildren();
+    if (!data) { container.appendChild(el("div", "empty", "Unavailable")); return; }
     var dm = data.default_model || {};
     var rows = [
-      ["Provider",dm.provider||"\u2014"],["Model",dm.model||"\u2014"],
-      ["Endpoint",dm.base_url||"default"],["Max Tokens",dm.max_tokens||"\u2014"],
-      ["Temperature",dm.temperature||"\u2014"],["Rate Limit",(data.rate_limit_rpm||0)+" rpm"],
-      ["API Listen",data.api_listen||"\u2014"],["Memory DB",data.memory_db_path||"\u2014"],
-      ["Knowledge Graph",data.knowledge_graph_enabled?"enabled":"disabled"],
-      ["Channels",String(data.channel_count||0)],["MCP Servers",String(data.mcp_server_count||0)]
+      ["Provider", dm.provider || "\u2014"], ["Model", dm.model || "\u2014"],
+      ["Endpoint", dm.base_url || "default"], ["Max Tokens", String(dm.max_tokens || "\u2014")],
+      ["Temp", String(dm.temperature || "\u2014")], ["Rate", (data.rate_limit_rpm || 0) + " rpm"],
+      ["Listen", data.api_listen || "\u2014"], ["Memory", data.memory_db_path || "\u2014"],
+      ["KG", data.knowledge_graph_enabled ? "on" : "off"]
     ];
-    var html = [];
-    for (var i = 0; i < rows.length; i++) {
-      var vc = ""; if (rows[i][1]==="enabled") vc=" active"; if (rows[i][1]==="disabled"||rows[i][1]==="0") vc=" inactive";
-      html.push('<div class="config-row"><span class="config-key">'+esc(rows[i][0])+'</span><span class="config-val'+vc+'">'+esc(rows[i][1])+'</span></div>');
-    }
-    setHTML("config-content", html.join(""));
+    for (var i = 0; i < rows.length; i++) container.appendChild(buildConfigRow(rows[i][0], rows[i][1]));
   }
 
-  function renderAudit(data) {
-    if (!data || data.length === 0) { setHTML("audit-content",'<div class="empty">No events recorded</div>'); return; }
-    var html = [];
-    for (var i = 0; i < data.length; i++) {
-      var e = data[i], kc = esc(e.kind||"system_event");
-      html.push(
-        '<div class="audit-entry" style="animation-delay:'+i*30+'ms">'+
-        '<span class="audit-kind '+kc+'">'+esc(e.kind)+'</span>'+
-        '<span class="audit-summary">'+esc(e.summary)+'</span>'+
-        '<span class="audit-time">'+fmtTime(e.timestamp)+'</span></div>'
-      );
+  function renderAuditFeed(data) {
+    var feed = document.getElementById("live-feed");
+    feed.replaceChildren();
+    if (!data || data.length === 0) { feed.appendChild(el("div", "empty", "No events yet \u2014 spawn a fighter and send a message")); return; }
+    for (var i = 0; i < data.length; i++) feed.appendChild(buildFeedItem(data[i]));
+  }
+
+  /* --- WEBSOCKET LIVE EVENTS --- */
+  function wsKindToAuditKind(event) {
+    switch (event.kind) {
+      case "fighter_message": return event.role === "user" ? "message_in" : "message_out";
+      case "tool_executed": return "tool_exec";
+      case "combo_triggered": return "combo";
+      default: return event.kind;
     }
-    setHTML("audit-content", html.join(""));
+  }
+
+  function eventToSummary(event) {
+    switch (event.kind) {
+      case "fighter_spawned": return "Fighter '" + (event.name || "?") + "' entered the arena";
+      case "fighter_message": return event.content_preview || "";
+      case "gorilla_unleashed": return "Gorilla '" + (event.name || "?") + "' unleashed";
+      case "gorilla_paused": return "Gorilla paused: " + (event.reason || "");
+      case "tool_executed": var st = event.success ? "OK" : "FAIL"; return (event.tool_name||"?") + " [" + st + "] (" + (event.duration_ms||0) + "ms)";
+      case "bout_started": return "New bout started";
+      case "bout_ended": return "Bout ended (" + (event.messages_exchanged || 0) + " tokens)";
+      case "combo_triggered": return "Combo '" + (event.combo_name||"?") + "' by " + (event.triggered_by||"?");
+      case "troop_formed": return "Troop '" + (event.name||"?") + "' (" + (event.member_count||0) + " members)";
+      case "troop_disbanded": return "Troop '" + (event.name||"?") + "' disbanded";
+      case "error": return "[" + (event.source || "?") + "] " + (event.message || "");
+      default: return JSON.stringify(event);
+    }
+  }
+
+  function appendLiveEvent(payload) {
+    var event = payload.event;
+    if (!event) return;
+
+    var displayKind = wsKindToAuditKind(event);
+    eventCounts[displayKind] = (eventCounts[displayKind] || 0) + 1;
+    renderEventCounters();
+
+    var entry = { sequence: "ws", timestamp: payload.timestamp, kind: displayKind, summary: eventToSummary(event) };
+
+    var feed = document.getElementById("live-feed");
+    if (!feed) return;
+
+    var emptyEl = feed.querySelector(".empty");
+    if (emptyEl) emptyEl.remove();
+
+    feed.insertBefore(buildFeedItem(entry), feed.firstChild);
+
+    while (feed.children.length > maxFeedItems) feed.removeChild(feed.lastChild);
+  }
+
+  function renderEventCounters() {
+    var container = document.getElementById("event-counters");
+    container.replaceChildren();
+    var order = ["fighter_spawned","message_in","message_out","bout_started","bout_ended","tool_exec","error"];
+    var labels = {fighter_spawned:"spawns",message_in:"in",message_out:"out",bout_started:"bouts",bout_ended:"done",tool_exec:"tools",error:"errors"};
+    var colors = {fighter_spawned:"var(--cyan)",message_in:"var(--blue)",message_out:"var(--green)",bout_started:"var(--purple)",bout_ended:"var(--yellow)",tool_exec:"var(--orange)",error:"var(--red)"};
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i];
+      if (eventCounts[k]) {
+        var span = el("span", "event-counter");
+        var dot = el("span", "dot");
+        dot.style.background = colors[k] || "var(--text-ghost)";
+        span.appendChild(dot);
+        span.appendChild(el("span", "count", String(eventCounts[k])));
+        span.appendChild(document.createTextNode(labels[k] || k));
+        container.appendChild(span);
+      }
+    }
   }
 
   function startUptimeTicker() {
@@ -525,32 +618,49 @@ body::after {
     uptimeInterval = setInterval(function() { uptimeSecs++; document.getElementById("uptime").textContent = fmtUptime(uptimeSecs); }, 1000);
   }
 
-  function refresh() {
+  function refreshPanels() {
     Promise.all([
       fetchJson("/api/dashboard/status"), fetchJson("/api/dashboard/metrics"),
       fetchJson("/api/dashboard/fighters"), fetchJson("/api/dashboard/gorillas"),
-      fetchJson("/api/dashboard/config"), fetchJson("/api/dashboard/audit?limit=20")
+      fetchJson("/api/dashboard/config")
     ]).then(function(r) {
       renderStatus(r[0]); renderMetrics(r[1]); renderFighters(r[2]);
-      renderGorillas(r[3]); renderConfig(r[4]); renderAudit(r[5]);
+      renderGorillas(r[3]); renderConfig(r[4]);
       document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
     });
   }
 
-  function connectWS() {
-    var dot = document.getElementById("ws-dot");
-    var proto = location.protocol === "https:" ? "wss:" : "ws:";
-    var ws;
-    try { ws = new WebSocket(proto+"//"+location.host+"/api/dashboard/events"); } catch(_) { dot.className="ws-dot disconnected"; return; }
-    ws.onopen = function() { dot.className = "ws-dot connected"; };
-    ws.onclose = function() { dot.className = "ws-dot disconnected"; setTimeout(connectWS, 3000); };
-    ws.onerror = function() { ws.close(); };
-    ws.onmessage = function() { refresh(); };
+  function fullRefresh() {
+    refreshPanels();
+    fetchJson("/api/dashboard/audit?limit=50").then(function(data) { renderAuditFeed(data); });
   }
 
-  refresh();
+  function connectWS() {
+    var dot = document.getElementById("ws-dot");
+    var pulse = document.getElementById("live-pulse");
+    var status = document.getElementById("live-status");
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws;
+    try { ws = new WebSocket(proto + "//" + location.host + "/api/dashboard/events"); } catch(e) { dot.className = "ws-dot disconnected"; return; }
+    ws.onopen = function() { dot.className = "ws-dot connected"; pulse.className = "live-pulse active"; status.textContent = "live"; };
+    ws.onclose = function() { dot.className = "ws-dot disconnected"; pulse.className = "live-pulse"; status.textContent = "reconnecting..."; setTimeout(connectWS, 3000); };
+    ws.onerror = function() { ws.close(); };
+    ws.onmessage = function(e) {
+      try {
+        var payload = JSON.parse(e.data);
+        if (payload.event) appendLiveEvent(payload);
+        pulse.style.animation = "none"; void pulse.offsetHeight;
+        pulse.style.animation = "pulse-dot 0.4s ease-out";
+        if (payload.event && (payload.event.kind === "fighter_message" || payload.event.kind === "bout_started" || payload.event.kind === "bout_ended" || payload.event.kind === "fighter_spawned")) {
+          refreshPanels();
+        }
+      } catch(err) { refreshPanels(); }
+    };
+  }
+
+  fullRefresh();
   startUptimeTicker();
-  setInterval(refresh, 10000);
+  setInterval(refreshPanels, 10000);
   connectWS();
 })();
 </script>

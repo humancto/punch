@@ -63,9 +63,11 @@ impl DingTalkAdapter {
     }
 
     /// Verify a DingTalk webhook signature.
+    ///
+    /// Uses constant-time comparison to prevent timing attacks.
     pub fn verify_signature(&self, timestamp_ms: i64, signature: &str) -> bool {
         let expected = self.compute_signature(timestamp_ms);
-        expected == signature
+        constant_time_eq(expected.as_bytes(), signature.as_bytes())
     }
 
     /// Send a text message via the DingTalk Robot API.
@@ -258,6 +260,17 @@ impl ChannelAdapter for DingTalkAdapter {
             last_error: None,
         }
     }
+}
+
+/// Constant-time byte comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 #[cfg(test)]

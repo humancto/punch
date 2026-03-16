@@ -13,6 +13,7 @@ use dashmap::DashMap;
 use tokio::process::Command;
 use tracing::{debug, instrument, warn};
 
+use punch_extensions::plugin::PluginRegistry;
 use punch_memory::MemorySubstrate;
 use punch_types::{
     AgentCoordinator, ApprovalDecision, BrowserPool, Capability, FighterId, PolicyEngine,
@@ -47,6 +48,11 @@ pub struct ToolExecutionContext {
     /// can manage sessions through the pool. The actual CDP driver is plugged in
     /// separately — without it, browser tools report "browser not available".
     pub browser_pool: Option<Arc<BrowserPool>>,
+    /// Optional plugin registry for WASM plugin invocation.
+    /// When present, the `wasm_invoke` tool can dispatch calls to loaded
+    /// WASM plugins (imported techniques). Without it, the tool reports
+    /// "plugin runtime not configured".
+    pub plugin_registry: Option<Arc<PluginRegistry>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -194,6 +200,10 @@ async fn execute_tool_inner(
         // File (extended)
         "file_search" => tool_file_search(input, capabilities, context).await,
         "file_info" => tool_file_info(input, capabilities, context).await,
+        // WASM Plugin
+        "wasm_invoke" => tool_wasm_invoke(input, capabilities, context).await,
+        // A2A delegation
+        "a2a_delegate" => tool_a2a_delegate(input, capabilities).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -3551,6 +3561,278 @@ async fn tool_file_info(
 }
 
 // ---------------------------------------------------------------------------
+// WASM Plugin Invocation
+// ---------------------------------------------------------------------------
+
+/// Invoke a function on a loaded WASM plugin (imported technique).
+///
+/// Requires the `PluginInvoke` capability and a configured plugin registry.
+/// Looks up the plugin by name, then delegates to `PluginRegistry::invoke`.
+async fn tool_wasm_invoke(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::PluginInvoke)?;
+
+    let registry = context
+        .plugin_registry
+        .as_ref()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "wasm_invoke".into(),
+            message: "plugin runtime not configured — no imported techniques available".into(),
+        })?;
+
+    let plugin_name = input["plugin"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "wasm_invoke".into(),
+        message: "missing 'plugin' parameter".into(),
+    })?;
+
+    let function = input["function"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "wasm_invoke".into(),
+        message: "missing 'function' parameter".into(),
+    })?;
+
+    let args = input.get("input").cloned().unwrap_or(serde_json::json!({}));
+
+    // Look up the plugin by name.
+    let plugin_instance = registry
+        .get_by_name(plugin_name)
+        .ok_or_else(|| PunchError::Tool {
+            tool: "wasm_invoke".into(),
+            message: format!("plugin '{}' not found in registry", plugin_name),
+        })?;
+
+    let plugin_input = punch_extensions::plugin::PluginInput {
+        function: function.to_string(),
+        args,
+        context: serde_json::json!({
+            "fighter_id": context.fighter_id.to_string(),
+        }),
+    };
+
+    let output = registry.invoke(&plugin_instance.id, plugin_input).await?;
+
+    debug!(
+        plugin = %plugin_name,
+        function = %function,
+        execution_ms = output.execution_ms,
+        "wasm_invoke: technique executed"
+    );
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "result": output.result,
+            "logs": output.logs,
+            "execution_ms": output.execution_ms,
+            "memory_used_bytes": output.memory_used_bytes,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// A2A Delegation
+// ---------------------------------------------------------------------------
+
+/// Default timeout for A2A delegation polling (60 seconds).
+const A2A_DEFAULT_TIMEOUT_SECS: u64 = 60;
+
+/// Polling interval when waiting for a delegated A2A task to complete.
+const A2A_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Delegate a task to a remote A2A agent.
+///
+/// Discovers the remote agent via its well-known card URL, sends a task using
+/// the A2A protocol, polls for completion (with timeout), and returns the
+/// result. Works standalone — only needs HTTP, no Ring required.
+async fn tool_a2a_delegate(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    use punch_types::a2a::{A2AClient, A2ATask, A2ATaskInput, A2ATaskStatus, HttpA2AClient};
+
+    require_capability(capabilities, &Capability::A2ADelegate)?;
+
+    // --- Parse input arguments ---
+    let agent_url = input["agent_url"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "a2a_delegate".into(),
+            message: "missing 'agent_url' parameter".into(),
+        })?;
+
+    let prompt = input["prompt"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "a2a_delegate".into(),
+        message: "missing 'prompt' parameter".into(),
+    })?;
+
+    let timeout_secs = input["timeout_secs"]
+        .as_u64()
+        .unwrap_or(A2A_DEFAULT_TIMEOUT_SECS);
+
+    let context = input["context"].as_object().cloned().unwrap_or_default();
+
+    // --- Build the client with the configured timeout ---
+    let client = HttpA2AClient::with_timeout(std::time::Duration::from_secs(timeout_secs))
+        .map_err(|e| PunchError::Tool {
+            tool: "a2a_delegate".into(),
+            message: format!("failed to create A2A client: {e}"),
+        })?;
+
+    // --- Discover the remote agent ---
+    let agent_card = client
+        .discover(agent_url)
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "a2a_delegate".into(),
+            message: format!("agent discovery failed for {agent_url}: {e}"),
+        })?;
+
+    debug!(
+        agent = %agent_card.name,
+        url = %agent_url,
+        "a2a_delegate: discovered remote agent"
+    );
+
+    // --- Build and send the task ---
+    let task_input = A2ATaskInput {
+        prompt: prompt.to_string(),
+        context,
+        mode: "text".to_string(),
+    };
+
+    let now = chrono::Utc::now();
+    let task = A2ATask {
+        id: uuid::Uuid::new_v4().to_string(),
+        status: A2ATaskStatus::Pending,
+        input: serde_json::to_value(&task_input).unwrap_or(serde_json::json!({})),
+        output: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let sent_task = client
+        .send_task(&agent_card, task)
+        .await
+        .map_err(|e| PunchError::Tool {
+            tool: "a2a_delegate".into(),
+            message: format!("failed to send task to '{}': {e}", agent_card.name),
+        })?;
+
+    let task_id = sent_task.id.clone();
+
+    debug!(
+        task_id = %task_id,
+        agent = %agent_card.name,
+        "a2a_delegate: task sent"
+    );
+
+    // --- Poll for completion ---
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+
+    // If the task came back already in a terminal state, skip polling.
+    let final_status = match &sent_task.status {
+        A2ATaskStatus::Completed | A2ATaskStatus::Failed(_) | A2ATaskStatus::Cancelled => {
+            sent_task.status.clone()
+        }
+        _ => loop {
+            if tokio::time::Instant::now() >= deadline {
+                // Best-effort cancellation of the timed-out task.
+                let _ = client.cancel_task(&agent_card, &task_id).await;
+                return Ok(ToolResult {
+                    success: false,
+                    output: serde_json::json!({
+                        "agent": agent_card.name,
+                        "task_id": task_id,
+                        "error": format!("task timed out after {timeout_secs}s"),
+                    }),
+                    error: Some(format!(
+                        "A2A delegation to '{}' timed out after {}s",
+                        agent_card.name, timeout_secs
+                    )),
+                    duration_ms: 0,
+                });
+            }
+
+            tokio::time::sleep(A2A_POLL_INTERVAL).await;
+
+            match client.get_task_status(&agent_card, &task_id).await {
+                Ok(
+                    status @ (A2ATaskStatus::Completed
+                    | A2ATaskStatus::Failed(_)
+                    | A2ATaskStatus::Cancelled),
+                ) => break status,
+                Ok(_) => continue,
+                Err(e) => {
+                    warn!(
+                        task_id = %task_id,
+                        agent = %agent_card.name,
+                        error = %e,
+                        "a2a_delegate: status poll failed, retrying"
+                    );
+                    continue;
+                }
+            }
+        },
+    };
+
+    // --- Build the result ---
+    match final_status {
+        A2ATaskStatus::Completed => {
+            let output = sent_task.output.unwrap_or(serde_json::json!(null));
+            Ok(ToolResult {
+                success: true,
+                output: serde_json::json!({
+                    "agent": agent_card.name,
+                    "task_id": task_id,
+                    "status": "completed",
+                    "output": output,
+                }),
+                error: None,
+                duration_ms: 0,
+            })
+        }
+        A2ATaskStatus::Failed(ref msg) => Ok(ToolResult {
+            success: false,
+            output: serde_json::json!({
+                "agent": agent_card.name,
+                "task_id": task_id,
+                "status": "failed",
+                "error": msg,
+            }),
+            error: Some(format!("A2A task on '{}' failed: {}", agent_card.name, msg)),
+            duration_ms: 0,
+        }),
+        A2ATaskStatus::Cancelled => Ok(ToolResult {
+            success: false,
+            output: serde_json::json!({
+                "agent": agent_card.name,
+                "task_id": task_id,
+                "status": "cancelled",
+            }),
+            error: Some(format!("A2A task on '{}' was cancelled", agent_card.name)),
+            duration_ms: 0,
+        }),
+        _ => Ok(ToolResult {
+            success: false,
+            output: serde_json::json!({
+                "agent": agent_card.name,
+                "task_id": task_id,
+                "status": "unknown",
+            }),
+            error: Some(format!(
+                "A2A task on '{}' ended in unexpected state",
+                agent_card.name
+            )),
+            duration_ms: 0,
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -3617,6 +3899,7 @@ mod tests {
             sandbox: None,
             bleed_detector: None,
             browser_pool: None,
+            plugin_registry: None,
         }
     }
 
@@ -5227,5 +5510,320 @@ mod tests {
         assert!(is_sensitive_path("secrets.json"));
         assert!(!is_sensitive_path("/home/user/project/src/main.rs"));
         assert!(!is_sensitive_path("/tmp/output.txt"));
+    }
+
+    // -----------------------------------------------------------------------
+    // wasm_invoke tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_wasm_invoke_no_registry_returns_error() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::PluginInvoke];
+        let input = serde_json::json!({
+            "plugin": "test-plugin",
+            "function": "execute"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("plugin runtime not configured"),
+            "expected plugin runtime error, got: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_missing_capability() {
+        let context = make_test_context(None);
+        // No PluginInvoke capability
+        let caps = vec![Capability::Memory];
+        let input = serde_json::json!({
+            "plugin": "test-plugin",
+            "function": "execute"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context).await;
+        // Should fail with capability denied
+        match result {
+            Ok(tr) => assert!(!tr.success),
+            Err(e) => assert!(
+                e.to_string().contains("capability"),
+                "expected capability error, got: {e}"
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_missing_plugin_param() {
+        use punch_extensions::plugin::{NativePluginRuntime, PluginRegistry};
+        let runtime = Arc::new(NativePluginRuntime::new());
+        let registry = Arc::new(PluginRegistry::with_runtime(runtime));
+
+        let mut context = make_test_context(None);
+        context.plugin_registry = Some(registry);
+
+        let caps = vec![Capability::PluginInvoke];
+        let input = serde_json::json!({
+            "function": "execute"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap().contains("plugin"),
+            "expected missing plugin param error, got: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_missing_function_param() {
+        use punch_extensions::plugin::{NativePluginRuntime, PluginRegistry};
+        let runtime = Arc::new(NativePluginRuntime::new());
+        let registry = Arc::new(PluginRegistry::with_runtime(runtime));
+
+        let mut context = make_test_context(None);
+        context.plugin_registry = Some(registry);
+
+        let caps = vec![Capability::PluginInvoke];
+        let input = serde_json::json!({
+            "plugin": "test-plugin"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap().contains("function"),
+            "expected missing function param error, got: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_plugin_not_found() {
+        use punch_extensions::plugin::{NativePluginRuntime, PluginRegistry};
+        let runtime = Arc::new(NativePluginRuntime::new());
+        let registry = Arc::new(PluginRegistry::with_runtime(runtime));
+
+        let mut context = make_test_context(None);
+        context.plugin_registry = Some(registry);
+
+        let caps = vec![Capability::PluginInvoke];
+        let input = serde_json::json!({
+            "plugin": "nonexistent-plugin",
+            "function": "execute"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap().contains("not found"),
+            "expected plugin not found error, got: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_success_with_native_runtime() {
+        use punch_extensions::plugin::{
+            NativePluginRuntime, PluginManifest, PluginOutput, PluginPermissions, PluginRegistry,
+        };
+
+        let runtime = Arc::new(NativePluginRuntime::new());
+        let registry = Arc::new(PluginRegistry::with_runtime(runtime.clone()));
+
+        let manifest = PluginManifest {
+            name: "echo-technique".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Echoes input back".to_string(),
+            author: "Test".to_string(),
+            entry_point: "execute".to_string(),
+            capabilities: vec![],
+            max_memory_bytes: 64 * 1024 * 1024,
+            max_execution_ms: 30_000,
+            permissions: PluginPermissions::default(),
+        };
+
+        let id = registry.register(manifest, b"native").await.unwrap();
+        runtime.register_function(id, |input| {
+            Ok(PluginOutput {
+                result: input.args.clone(),
+                logs: vec!["technique executed".to_string()],
+                execution_ms: 0,
+                memory_used_bytes: 512,
+            })
+        });
+
+        let mut context = make_test_context(None);
+        context.plugin_registry = Some(registry);
+
+        let caps = vec![Capability::PluginInvoke];
+        let input = serde_json::json!({
+            "plugin": "echo-technique",
+            "function": "execute",
+            "input": {"strike": "roundhouse"}
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(
+            result.success,
+            "wasm_invoke should succeed: {:?}",
+            result.error
+        );
+        assert_eq!(result.output["result"]["strike"], "roundhouse");
+        assert!(!result.output["logs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_wasm_invoke_default_input() {
+        use punch_extensions::plugin::{
+            NativePluginRuntime, PluginManifest, PluginOutput, PluginPermissions, PluginRegistry,
+        };
+
+        let runtime = Arc::new(NativePluginRuntime::new());
+        let registry = Arc::new(PluginRegistry::with_runtime(runtime.clone()));
+
+        let manifest = PluginManifest {
+            name: "noop-technique".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Does nothing".to_string(),
+            author: "Test".to_string(),
+            entry_point: "execute".to_string(),
+            capabilities: vec![],
+            max_memory_bytes: 64 * 1024 * 1024,
+            max_execution_ms: 30_000,
+            permissions: PluginPermissions::default(),
+        };
+
+        let id = registry.register(manifest, b"native").await.unwrap();
+        runtime.register_function(id, |input| {
+            // Verify args default to empty object when "input" is omitted
+            assert_eq!(input.args, serde_json::json!({}));
+            Ok(PluginOutput {
+                result: serde_json::json!("ok"),
+                logs: vec![],
+                execution_ms: 0,
+                memory_used_bytes: 0,
+            })
+        });
+
+        let mut context = make_test_context(None);
+        context.plugin_registry = Some(registry);
+
+        let caps = vec![Capability::PluginInvoke];
+        // Omit "input" field — should default to {}
+        let input = serde_json::json!({
+            "plugin": "noop-technique",
+            "function": "execute"
+        });
+
+        let result = execute_tool("wasm_invoke", &input, &caps, &context)
+            .await
+            .unwrap();
+
+        assert!(
+            result.success,
+            "wasm_invoke should succeed: {:?}",
+            result.error
+        );
+        assert_eq!(result.output["result"], "ok");
+    }
+
+    // -----------------------------------------------------------------------
+    // A2A delegation tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_a2a_delegate_missing_agent_url() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::A2ADelegate];
+        let input = serde_json::json!({"prompt": "hello"});
+
+        let result = execute_tool("a2a_delegate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap_or("").contains("agent_url"),
+            "error should mention agent_url: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a2a_delegate_missing_prompt() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::A2ADelegate];
+        let input = serde_json::json!({"agent_url": "http://localhost:9999"});
+
+        let result = execute_tool("a2a_delegate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap_or("").contains("prompt"),
+            "error should mention prompt: {:?}",
+            result.error
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a2a_delegate_capability_denied() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory]; // no A2ADelegate
+        let input = serde_json::json!({
+            "agent_url": "http://localhost:9999",
+            "prompt": "hello"
+        });
+
+        let result = execute_tool("a2a_delegate", &input, &caps, &context).await;
+        // Should fail with CapabilityDenied error
+        assert!(result.is_err() || !result.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_a2a_delegate_unreachable_agent() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::A2ADelegate];
+        let input = serde_json::json!({
+            "agent_url": "http://127.0.0.1:19999",
+            "prompt": "hello",
+            "timeout_secs": 2
+        });
+
+        let result = execute_tool("a2a_delegate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("discovery failed"),
+            "error should mention discovery failure: {:?}",
+            result.error
+        );
     }
 }

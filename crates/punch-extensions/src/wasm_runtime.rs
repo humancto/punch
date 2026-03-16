@@ -1,8 +1,17 @@
-//! # WASM Plugin Runtime (wasmi)
+//! # WASM Plugin Runtime (Wasmtime)
 //!
-//! A real WebAssembly plugin runtime backed by the `wasmi` interpreter.
-//! Plugins are compiled from WASM bytecode, sandboxed with fuel metering
-//! and memory limits, and executed through the [`PluginRuntime`] trait.
+//! A real WebAssembly plugin runtime backed by the `wasmtime` JIT compiler.
+//! Plugins are compiled from WASM bytecode, sandboxed with dual metering
+//! (fuel-based instruction counting AND epoch-based wall-clock interruption),
+//! and executed through the [`PluginRuntime`] trait.
+//!
+//! ## Dual Metering
+//!
+//! - **Fuel metering** prevents infinite computation by limiting the number of
+//!   WASM instructions a plugin can execute per invocation.
+//! - **Epoch metering** prevents wall-clock abuse (e.g., IO-heavy plugins that
+//!   don't burn fuel) by interrupting execution when a deadline expires. A
+//!   background thread increments the engine epoch every 1 ms.
 //!
 //! ## Host Functions
 //!
@@ -17,9 +26,8 @@ use chrono::Utc;
 use dashmap::DashMap;
 use tracing::{debug, info};
 use uuid::Uuid;
-use wasmi::{
-    Caller, Config, Engine, Extern, Func, Linker, Memory, MemoryType, Module, Store,
-    StoreLimitsBuilder,
+use wasmtime::{
+    Caller, Engine, Linker, Memory, MemoryType, Module, Store, StoreLimits, StoreLimitsBuilder,
 };
 
 use punch_types::{PunchError, PunchResult};
@@ -39,6 +47,9 @@ pub struct WasmRuntimeConfig {
     pub fuel_limit: u64,
     /// Maximum memory per instance in bytes (default: 16 MB).
     pub max_memory_bytes: usize,
+    /// Maximum wall-clock execution time in milliseconds (default: 30_000).
+    /// Enforced via epoch-based interruption.
+    pub max_execution_ms: u64,
 }
 
 impl Default for WasmRuntimeConfig {
@@ -46,6 +57,7 @@ impl Default for WasmRuntimeConfig {
         Self {
             fuel_limit: 1_000_000,
             max_memory_bytes: 16 * 1024 * 1024, // 16 MB
+            max_execution_ms: 30_000,
         }
     }
 }
@@ -54,7 +66,7 @@ impl Default for WasmRuntimeConfig {
 // Host State — data shared between host and guest during execution
 // ---------------------------------------------------------------------------
 
-/// State stored inside each wasmi `Store`, accessible from host functions.
+/// State stored inside each wasmtime `Store`, accessible from host functions.
 struct HostState {
     /// JSON input to pass to the guest.
     input_json: Vec<u8>,
@@ -63,21 +75,24 @@ struct HostState {
     /// Log lines collected from guest `host_log` calls.
     logs: Vec<String>,
     /// Store limits for memory enforcement.
-    limits: wasmi::StoreLimits,
+    limits: StoreLimits,
 }
 
 // ---------------------------------------------------------------------------
 // WasmPluginRuntime
 // ---------------------------------------------------------------------------
 
-/// A WebAssembly plugin runtime backed by the `wasmi` interpreter.
+/// A WebAssembly plugin runtime backed by the `wasmtime` JIT compiler.
 ///
-/// Each plugin is compiled into a [`wasmi::Module`] and stored in a concurrent
+/// Each plugin is compiled into a [`wasmtime::Module`] and stored in a concurrent
 /// map. When a function is called, a fresh [`Store`] is created with fuel
-/// metering and memory limits, the module is instantiated, and the requested
-/// export is invoked.
+/// metering, epoch-based interruption, and memory limits. The module is
+/// instantiated and the requested export is invoked.
+///
+/// A background thread increments the engine epoch every 1 ms to support
+/// wall-clock deadline enforcement.
 pub struct WasmPluginRuntime {
-    /// The wasmi execution engine (shared across all modules).
+    /// The wasmtime execution engine (shared across all modules).
     engine: Engine,
     /// Compiled modules keyed by plugin UUID.
     modules: DashMap<Uuid, Module>,
@@ -85,6 +100,18 @@ pub struct WasmPluginRuntime {
     instances: DashMap<Uuid, PluginInstance>,
     /// Runtime configuration.
     config: WasmRuntimeConfig,
+    /// Handle to the epoch-incrementing background thread. Dropped when the
+    /// runtime is dropped, which signals the thread to stop.
+    _epoch_thread: Option<std::thread::JoinHandle<()>>,
+    /// Signal for the epoch thread to stop.
+    epoch_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for WasmPluginRuntime {
+    fn drop(&mut self) {
+        self.epoch_stop
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl WasmPluginRuntime {
@@ -95,16 +122,32 @@ impl WasmPluginRuntime {
 
     /// Create a new WASM plugin runtime with custom configuration.
     pub fn with_config(config: WasmRuntimeConfig) -> PunchResult<Self> {
-        let mut engine_config = Config::default();
+        let mut engine_config = wasmtime::Config::new();
         engine_config.consume_fuel(true);
+        engine_config.epoch_interruption(true);
 
-        let engine = Engine::new(&engine_config);
+        let engine = Engine::new(&engine_config)
+            .map_err(|e| PunchError::Internal(format!("failed to create wasmtime engine: {e}")))?;
+
+        // Spawn a background thread that increments the engine epoch every 1 ms.
+        let epoch_engine = engine.clone();
+        let epoch_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_flag = epoch_stop.clone();
+
+        let epoch_thread = std::thread::spawn(move || {
+            while !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                epoch_engine.increment_epoch();
+            }
+        });
 
         Ok(Self {
             engine,
             modules: DashMap::new(),
             instances: DashMap::new(),
             config,
+            _epoch_thread: Some(epoch_thread),
+            epoch_stop,
         })
     }
 
@@ -135,7 +178,7 @@ impl WasmPluginRuntime {
             .collect()
     }
 
-    /// Create a [`Store`] with fuel and memory limits applied.
+    /// Create a [`Store`] with fuel, epoch deadline, and memory limits applied.
     fn create_store(&self, input_json: Vec<u8>) -> Store<HostState> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.config.max_memory_bytes)
@@ -156,87 +199,98 @@ impl WasmPluginRuntime {
             .set_fuel(self.config.fuel_limit)
             .expect("fuel metering is enabled");
 
+        // Set epoch deadline. The epoch increments every 1 ms, so the deadline
+        // ticks = max_execution_ms. When the deadline is reached, wasmtime
+        // will trap with an "epoch deadline has elapsed" error by default
+        // (no callback needed — the default behavior is to trap).
+        let deadline_ticks = self.config.max_execution_ms;
+        store.set_epoch_deadline(deadline_ticks);
+
         store
     }
 
     /// Build a linker with host functions and a shared memory export.
     fn build_linker(&self, store: &mut Store<HostState>) -> PunchResult<Linker<HostState>> {
-        let mut linker = <Linker<HostState>>::new(&self.engine);
+        let mut linker = Linker::new(&self.engine);
+
+        // Allow shadowing so we can define "env" "memory" and the guest can
+        // also export its own "memory".
+        linker.allow_shadowing(true);
 
         // Provide a default memory if the guest module imports one.
         // 1 page = 64 KiB. Max pages based on config.
         let max_pages = (self.config.max_memory_bytes / 65536) as u32;
-        let memory_type = MemoryType::new(1, Some(max_pages))
-            .map_err(|e| PunchError::Internal(format!("failed to create memory type: {e}")))?;
+        let memory_type = MemoryType::new(1, Some(max_pages));
         let memory = Memory::new(&mut *store, memory_type)
             .map_err(|e| PunchError::Internal(format!("failed to create memory: {e}")))?;
         linker
-            .define("env", "memory", memory)
+            .define(&store, "env", "memory", memory)
             .map_err(|e| PunchError::Internal(format!("failed to define memory: {e}")))?;
 
         // host_log(ptr: i32, len: i32)
-        let host_log = Func::wrap(
-            &mut *store,
-            |mut caller: Caller<'_, HostState>, ptr: i32, len: i32| {
-                let mem = caller.get_export("memory").and_then(Extern::into_memory);
-                if let Some(mem) = mem {
-                    let start = ptr as usize;
-                    let end = start + len as usize;
-                    let data = mem.data(&caller);
-                    if end <= data.len() {
-                        let msg = String::from_utf8_lossy(&data[start..end]).to_string();
-                        debug!(%msg, "guest log");
-                        caller.data_mut().logs.push(msg);
-                    }
-                }
-            },
-        );
         linker
-            .define("env", "host_log", host_log)
+            .func_wrap(
+                "env",
+                "host_log",
+                |mut caller: Caller<'_, HostState>, ptr: i32, len: i32| {
+                    let mem = caller.get_export("memory").and_then(|e| e.into_memory());
+                    if let Some(mem) = mem {
+                        let start = ptr as usize;
+                        let end = start + len as usize;
+                        let data = mem.data(&caller);
+                        if end <= data.len() {
+                            let msg = String::from_utf8_lossy(&data[start..end]).to_string();
+                            debug!(%msg, "guest log");
+                            caller.data_mut().logs.push(msg);
+                        }
+                    }
+                },
+            )
             .map_err(|e| PunchError::Internal(format!("failed to define host_log: {e}")))?;
 
         // host_read_input(ptr: i32) -> i32 (returns length written)
-        let host_read_input = Func::wrap(
-            &mut *store,
-            |mut caller: Caller<'_, HostState>, ptr: i32| -> i32 {
-                let input_copy = caller.data().input_json.clone();
-                let mem = caller.get_export("memory").and_then(Extern::into_memory);
-                if let Some(mem) = mem {
-                    let start = ptr as usize;
-                    let len = input_copy.len();
-                    if mem.data(&caller).len() >= start + len {
-                        mem.data_mut(&mut caller)[start..start + len].copy_from_slice(&input_copy);
-                        len as i32
-                    } else {
-                        -1 // not enough memory
-                    }
-                } else {
-                    -1
-                }
-            },
-        );
         linker
-            .define("env", "host_read_input", host_read_input)
+            .func_wrap(
+                "env",
+                "host_read_input",
+                |mut caller: Caller<'_, HostState>, ptr: i32| -> i32 {
+                    let input_copy = caller.data().input_json.clone();
+                    let mem = caller.get_export("memory").and_then(|e| e.into_memory());
+                    if let Some(mem) = mem {
+                        let start = ptr as usize;
+                        let len = input_copy.len();
+                        if mem.data(&caller).len() >= start + len {
+                            mem.data_mut(&mut caller)[start..start + len]
+                                .copy_from_slice(&input_copy);
+                            len as i32
+                        } else {
+                            -1 // not enough memory
+                        }
+                    } else {
+                        -1
+                    }
+                },
+            )
             .map_err(|e| PunchError::Internal(format!("failed to define host_read_input: {e}")))?;
 
         // host_write_output(ptr: i32, len: i32)
-        let host_write_output = Func::wrap(
-            &mut *store,
-            |mut caller: Caller<'_, HostState>, ptr: i32, len: i32| {
-                let mem = caller.get_export("memory").and_then(Extern::into_memory);
-                if let Some(mem) = mem {
-                    let start = ptr as usize;
-                    let end = start + len as usize;
-                    let data = mem.data(&caller);
-                    if end <= data.len() {
-                        let output = data[start..end].to_vec();
-                        caller.data_mut().output_json = output;
-                    }
-                }
-            },
-        );
         linker
-            .define("env", "host_write_output", host_write_output)
+            .func_wrap(
+                "env",
+                "host_write_output",
+                |mut caller: Caller<'_, HostState>, ptr: i32, len: i32| {
+                    let mem = caller.get_export("memory").and_then(|e| e.into_memory());
+                    if let Some(mem) = mem {
+                        let start = ptr as usize;
+                        let end = start + len as usize;
+                        let data = mem.data(&caller);
+                        if end <= data.len() {
+                            let output = data[start..end].to_vec();
+                            caller.data_mut().output_json = output;
+                        }
+                    }
+                },
+            )
             .map_err(|e| {
                 PunchError::Internal(format!("failed to define host_write_output: {e}"))
             })?;
@@ -299,39 +353,51 @@ impl PluginRuntime for WasmPluginRuntime {
         let mut store = self.create_store(input_json);
         let linker = self.build_linker(&mut store)?;
 
-        // Instantiate and start the module.
+        // Instantiate the module.
         let instance = linker
             .instantiate(&mut store, &module)
-            .map_err(|e| PunchError::Internal(format!("WASM instantiation failed: {e}")))?
-            .start(&mut store)
-            .map_err(|e| PunchError::Internal(format!("WASM start failed: {e}")))?;
+            .map_err(|e| PunchError::Internal(format!("WASM instantiation failed: {e}")))?;
 
         // Look up the requested export.
-        let func = instance.get_func(&store, &input.function).ok_or_else(|| {
-            PunchError::Internal(format!(
-                "export '{}' not found in plugin {}",
-                input.function, plugin_id
-            ))
-        })?;
+        let func = instance
+            .get_func(&mut store, &input.function)
+            .ok_or_else(|| {
+                PunchError::Internal(format!(
+                    "export '{}' not found in plugin {}",
+                    input.function, plugin_id
+                ))
+            })?;
 
         // Determine the number of return values from the function type.
         let func_type = func.ty(&store);
         let num_results = func_type.results().len();
-        let mut results: Vec<wasmi::Val> = vec![wasmi::Val::I32(0); num_results];
+        let mut results: Vec<wasmtime::Val> = vec![wasmtime::Val::I32(0); num_results];
 
         let call_result = func.call(&mut store, &[], &mut results);
 
         let execution_ms = start.elapsed().as_millis() as u64;
 
-        // Check for errors, distinguishing fuel exhaustion.
+        // Check for errors, distinguishing fuel exhaustion and epoch interruption.
         if let Err(ref e) = call_result {
-            let err_str = e.to_string();
-            if err_str.contains("fuel") {
-                return Err(PunchError::Internal(format!(
-                    "WASM execution exceeded fuel limit ({} units): {err_str}",
-                    self.config.fuel_limit
-                )));
+            // Try to downcast to a wasmtime::Trap to identify the specific trap.
+            if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+                match trap {
+                    wasmtime::Trap::OutOfFuel => {
+                        return Err(PunchError::Internal(format!(
+                            "WASM execution exceeded fuel limit ({} units): {e}",
+                            self.config.fuel_limit
+                        )));
+                    }
+                    wasmtime::Trap::Interrupt => {
+                        return Err(PunchError::Internal(format!(
+                            "WASM execution exceeded wall-clock limit ({} ms): {e}",
+                            self.config.max_execution_ms
+                        )));
+                    }
+                    _ => {}
+                }
             }
+            let err_str = e.to_string();
             return Err(PunchError::Internal(format!(
                 "WASM function call failed: {err_str}"
             )));
@@ -349,8 +415,8 @@ impl PluginRuntime for WasmPluginRuntime {
             serde_json::Value::Null
         } else {
             match results[0] {
-                wasmi::Val::I32(v) => serde_json::Value::Number(serde_json::Number::from(v)),
-                wasmi::Val::I64(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                wasmtime::Val::I32(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                wasmtime::Val::I64(v) => serde_json::Value::Number(serde_json::Number::from(v)),
                 _ => serde_json::Value::Null,
             }
         };
@@ -366,7 +432,7 @@ impl PluginRuntime for WasmPluginRuntime {
             result,
             logs,
             execution_ms,
-            memory_used_bytes: 0, // wasmi does not expose precise memory tracking
+            memory_used_bytes: 0, // wasmtime does not expose precise per-instance memory tracking here
         })
     }
 
@@ -426,6 +492,7 @@ mod tests {
         let config = WasmRuntimeConfig {
             fuel_limit: 500_000,
             max_memory_bytes: 8 * 1024 * 1024,
+            max_execution_ms: 10_000,
         };
         let runtime = WasmPluginRuntime::with_config(config);
         assert!(runtime.is_ok());
@@ -482,6 +549,7 @@ mod tests {
         let config = WasmRuntimeConfig {
             fuel_limit: 100, // very low fuel
             max_memory_bytes: 16 * 1024 * 1024,
+            max_execution_ms: 30_000,
         };
         let runtime = WasmPluginRuntime::with_config(config).unwrap();
 
@@ -510,7 +578,7 @@ mod tests {
         );
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("fuel"),
+            err_msg.contains("fuel limit") || err_msg.contains("fuel consumed"),
             "error should mention fuel: {err_msg}"
         );
     }
@@ -598,6 +666,7 @@ mod tests {
             fuel_limit: 10_000_000,
             // Allow only 1 page (64 KiB) of memory.
             max_memory_bytes: 65536,
+            max_execution_ms: 30_000,
         };
         let runtime = WasmPluginRuntime::with_config(config).unwrap();
 
@@ -790,5 +859,123 @@ mod tests {
 
         let output = runtime.invoke(&id, input).await.unwrap();
         assert_eq!(output.result, serde_json::json!(9_999_999_999_i64));
+    }
+
+    // --- Test 15: JIT compilation success ---
+
+    #[test]
+    fn test_jit_compilation_success() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+
+        // A more complex module to exercise JIT compilation.
+        let wasm = wat_to_wasm(
+            r#"(module
+                (func $fib (export "fib") (param i32) (result i32)
+                    (if (result i32) (i32.le_s (local.get 0) (i32.const 1))
+                        (then (local.get 0))
+                        (else
+                            (i32.add
+                                (call $fib (i32.sub (local.get 0) (i32.const 1)))
+                                (call $fib (i32.sub (local.get 0) (i32.const 2)))))))
+            )"#,
+        );
+
+        let module = runtime.compile(&wasm);
+        assert!(
+            module.is_ok(),
+            "JIT compilation should succeed for recursive module: {module:?}"
+        );
+    }
+
+    // --- Test 16: Dual metering config ---
+
+    #[test]
+    fn test_dual_metering_config() {
+        let config = WasmRuntimeConfig {
+            fuel_limit: 500_000,
+            max_memory_bytes: 4 * 1024 * 1024,
+            max_execution_ms: 5_000,
+        };
+        let runtime = WasmPluginRuntime::with_config(config.clone()).unwrap();
+        assert_eq!(runtime.config.fuel_limit, 500_000);
+        assert_eq!(runtime.config.max_execution_ms, 5_000);
+        assert_eq!(runtime.config.max_memory_bytes, 4 * 1024 * 1024);
+    }
+
+    // --- Test 17: Epoch-based timeout ---
+
+    #[tokio::test]
+    async fn test_epoch_timeout() {
+        let config = WasmRuntimeConfig {
+            fuel_limit: u64::MAX, // effectively unlimited fuel
+            max_memory_bytes: 16 * 1024 * 1024,
+            max_execution_ms: 50, // very short wall-clock deadline (50 ms)
+        };
+        let runtime = WasmPluginRuntime::with_config(config).unwrap();
+
+        // An infinite loop module — will be interrupted by epoch deadline
+        // even though fuel is essentially unlimited.
+        let wasm = wat_to_wasm(
+            r#"(module
+                (func (export "spin")
+                    (loop $inf
+                        br $inf))
+            )"#,
+        );
+
+        let manifest = test_manifest("epoch-test");
+        let id = runtime.load(&manifest, &wasm).await.unwrap();
+
+        let input = PluginInput {
+            function: "spin".to_string(),
+            args: serde_json::json!({}),
+            context: serde_json::json!({}),
+        };
+
+        let result = runtime.invoke(&id, input).await;
+        assert!(
+            result.is_err(),
+            "should fail due to epoch interruption: {result:?}"
+        );
+    }
+
+    // --- Test 18: Memory limit via StoreLimits ---
+
+    #[tokio::test]
+    async fn test_store_limits_memory() {
+        let config = WasmRuntimeConfig {
+            fuel_limit: 10_000_000,
+            max_memory_bytes: 65536, // 1 page
+            max_execution_ms: 30_000,
+        };
+        let runtime = WasmPluginRuntime::with_config(config).unwrap();
+
+        // Module that tries to grow memory beyond the limit.
+        let wasm = wat_to_wasm(
+            r#"(module
+                (memory (export "memory") 1)
+                (func (export "grow_memory") (result i32)
+                    ;; Try to grow by 10 pages (640 KiB) — should fail
+                    i32.const 10
+                    memory.grow)
+            )"#,
+        );
+
+        let manifest = test_manifest("grow-test");
+        let id = runtime.load(&manifest, &wasm).await.unwrap();
+
+        let input = PluginInput {
+            function: "grow_memory".to_string(),
+            args: serde_json::json!({}),
+            context: serde_json::json!({}),
+        };
+
+        let output = runtime.invoke(&id, input).await.unwrap();
+        // memory.grow returns -1 on failure
+        assert_eq!(
+            output.result,
+            serde_json::json!(-1),
+            "memory.grow should fail and return -1"
+        );
     }
 }
