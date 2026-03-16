@@ -567,16 +567,16 @@ punch fighter spawn ml-engineer
 | Crate                                                           | Role                                          | Install                      |
 | --------------------------------------------------------------- | --------------------------------------------- | ---------------------------- |
 | [`punch-cli`](https://crates.io/crates/punch-cli)               | Binary entry point                            | `cargo install punch-cli`    |
-| [`punch-types`](https://crates.io/crates/punch-types)           | Shared types, errors, config                  | `punch-types = "0.1.0"`      |
-| [`punch-memory`](https://crates.io/crates/punch-memory)         | SQLite persistence, memory decay, creeds      | `punch-memory = "0.1.0"`     |
-| [`punch-kernel`](https://crates.io/crates/punch-kernel)         | **The Ring** — coordinator, event bus, troops | `punch-kernel = "0.1.0"`     |
-| [`punch-runtime`](https://crates.io/crates/punch-runtime)       | Fighter loop, LLM driver, MCP client          | `punch-runtime = "0.1.0"`    |
-| [`punch-arena`](https://crates.io/crates/punch-arena)           | **The Arena** — Axum HTTP/WS API              | `punch-arena = "0.1.0"`      |
-| [`punch-channels`](https://crates.io/crates/punch-channels)     | 25 channel adapters                           | `punch-channels = "0.1.0"`   |
-| [`punch-skills`](https://crates.io/crates/punch-skills)         | **Moves** — tool registry                     | `punch-skills = "0.1.0"`     |
-| [`punch-gorillas`](https://crates.io/crates/punch-gorillas)     | Gorilla executor, scheduler, triggers         | `punch-gorillas = "0.1.0"`   |
-| [`punch-extensions`](https://crates.io/crates/punch-extensions) | WASM plugin sandbox                           | `punch-extensions = "0.1.0"` |
-| [`punch-wire`](https://crates.io/crates/punch-wire)             | LLM provider abstraction                      | `punch-wire = "0.1.0"`       |
+| [`punch-types`](https://crates.io/crates/punch-types)           | Shared types, errors, config                  | `punch-types = "1.0.0"`      |
+| [`punch-memory`](https://crates.io/crates/punch-memory)         | SQLite persistence, memory decay, creeds      | `punch-memory = "1.0.0"`     |
+| [`punch-kernel`](https://crates.io/crates/punch-kernel)         | **The Ring** — coordinator, event bus, troops | `punch-kernel = "1.0.0"`     |
+| [`punch-runtime`](https://crates.io/crates/punch-runtime)       | Fighter loop, LLM driver, MCP client          | `punch-runtime = "1.0.0"`    |
+| [`punch-arena`](https://crates.io/crates/punch-arena)           | **The Arena** — Axum HTTP/WS API              | `punch-arena = "1.0.0"`      |
+| [`punch-channels`](https://crates.io/crates/punch-channels)     | 25 channel adapters                           | `punch-channels = "1.0.0"`   |
+| [`punch-skills`](https://crates.io/crates/punch-skills)         | **Moves** — tool registry                     | `punch-skills = "1.0.0"`     |
+| [`punch-gorillas`](https://crates.io/crates/punch-gorillas)     | Gorilla executor, scheduler, triggers         | `punch-gorillas = "1.0.0"`   |
+| [`punch-extensions`](https://crates.io/crates/punch-extensions) | WASM plugin sandbox                           | `punch-extensions = "1.0.0"` |
+| [`punch-wire`](https://crates.io/crates/punch-wire)             | LLM provider abstraction                      | `punch-wire = "1.0.0"`       |
 
 <br/>
 

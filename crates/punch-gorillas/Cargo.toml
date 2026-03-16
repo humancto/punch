@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "Autonomous agent (Gorilla) system for the Punch Agent Combat System"
 
 [dependencies]
-punch-types = { version = "0.1.0", path = "../punch-types" }
-punch-runtime = { version = "0.1.0", path = "../punch-runtime" }
-punch-memory = { version = "0.1.0", path = "../punch-memory" }
+punch-types = { version = "1.0.0", path = "../punch-types" }
+punch-runtime = { version = "1.0.0", path = "../punch-runtime" }
+punch-memory = { version = "1.0.0", path = "../punch-memory" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
