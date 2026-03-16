@@ -130,7 +130,7 @@ punch gorilla unleash alpha
 
 ### What makes Creeds unique
 
-Unlike OpenClaw's static `SOUL.md` files, Punch Creeds are:
+Punch Creeds are:
 
 - **Database-backed** — Stored in SQLite, not flat files. Queryable, versionable, shareable.
 - **Self-evolving** — `bout_count`, `message_count`, and learned behaviors update automatically after every interaction.
@@ -218,11 +218,14 @@ curl -X POST http://localhost:6660/api/creeds \
 ### Creed lifecycle
 
 ```
-Spawn Fighter ─→ Load Creed by name ─→ Inject into system prompt
+Spawn Fighter ─→ Auto-create Creed (with self-awareness) ─→ Bind to fighter
+                                              │
+                              Load Creed ─→ Inject into system prompt
                                               │
                                     Every LLM call uses creed.render()
                                               │
-                          After bout: bout_count++, relationships updated
+                          After bout: bout_count++, relationships updated,
+                                     heartbeat tasks marked as checked
                                               │
                               Fighter killed ─→ Creed persists in SQLite
                                               │
@@ -283,6 +286,119 @@ punch gorilla unleash alpha     # Start
 punch gorilla status alpha      # Check
 punch gorilla cage alpha        # Stop
 ```
+
+<br/>
+
+---
+
+<br/>
+
+## 💥 Skills Marketplace — Community Moves
+
+Punch ships with **103 bundled skills**, but the real power is the **community marketplace** — a Git-indexed, cryptographically signed skill registry modeled after crates.io-index.
+
+<br/>
+
+### How it works
+
+```
+PUBLISH:  SKILL.md → validate → security scan → tar.gz → SHA-256 → Ed25519 sign → PR to punch-index
+INSTALL:  sync index → resolve version → fetch tarball → verify sig + checksum → scan → install
+SEARCH:   local index search by name / category / tags → instant results
+```
+
+<br/>
+
+### CLI commands
+
+```bash
+punch move search "code review"       # Search the marketplace
+punch move install code-reviewer      # Install a skill
+punch move list                       # List all available moves
+punch move scan ./my-skill            # Security scan before publishing
+punch move publish ./my-skill --dry-run   # Validate & preview
+punch move publish ./my-skill         # Publish to the index
+punch move keygen                     # Generate Ed25519 signing keypair
+punch move verify code-reviewer       # Verify signature & checksum
+punch move sync                       # Sync the marketplace index
+punch move lock                       # Show lock file contents
+punch move remove code-reviewer       # Uninstall a skill
+punch move update                     # Update installed skills
+```
+
+<br/>
+
+### Three-gate security (why we're not ClawHub)
+
+Every skill passes through three verification gates — once at publish-time (CI) and again at install-time (local):
+
+| Gate                  | What it checks                                               | Blocks                                                                                        |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **SHA-256 Checksum**  | Tarball integrity — downloaded bytes match index entry       | Tampered downloads, MITM                                                                      |
+| **Ed25519 Signature** | Publisher authenticity — signed with publisher's private key | Impersonation, forged packages                                                                |
+| **Security Scanner**  | 20+ static analysis rules on SKILL.md content                | Pipe-to-shell, prompt injection, credential harvesting, encoded payloads, Unicode obfuscation |
+
+OpenClaw's ClawHub had 12-20% malicious skills (CVE-2026-25253). Punch catches these by design.
+
+<br/>
+
+### Creating a skill
+
+Skills are just markdown files with YAML frontmatter:
+
+```markdown
+---
+name: code-reviewer
+version: 1.0.0
+description: Expert code review with security and performance analysis
+author: HumanCTO
+category: code_analysis
+tags: [code, review, security, quality]
+tools: [file_read, file_list, git_diff, git_log]
+requires:
+  - name: git
+    kind: binary
+---
+
+# Code Reviewer
+
+When reviewing code:
+
+1. Check for security vulnerabilities (OWASP Top 10)
+2. Assess performance implications
+3. Verify error handling completeness
+```
+
+Drop it in `./skills/` (workspace), `~/.punch/skills/` (global), or publish it to the marketplace.
+
+<br/>
+
+### Precedence
+
+When the same skill exists at multiple levels, the highest wins:
+
+| Priority    | Source      | Path                           |
+| ----------- | ----------- | ------------------------------ |
+| 1 (highest) | Workspace   | `./skills/`                    |
+| 2           | Marketplace | `~/.punch/skills/` (installed) |
+| 3           | User        | `~/.punch/skills/` (manual)    |
+| 4 (lowest)  | Bundled     | Ships with Punch               |
+
+<br/>
+
+### API endpoints
+
+| Method   | Endpoint                    | Description                                    |
+| -------- | --------------------------- | ---------------------------------------------- |
+| `GET`    | `/api/moves`                | List all moves (with `?q=` search)             |
+| `GET`    | `/api/moves/marketplace`    | Search marketplace (category, tag, pagination) |
+| `GET`    | `/api/moves/installed`      | List installed moves with versions             |
+| `GET`    | `/api/moves/{name}`         | Get move details                               |
+| `POST`   | `/api/moves/{name}/install` | Install a move                                 |
+| `DELETE` | `/api/moves/{name}`         | Uninstall a move                               |
+| `POST`   | `/api/moves/{name}/report`  | Report a problematic move                      |
+| `POST`   | `/api/moves/sync`           | Trigger index sync                             |
+| `GET`    | `/api/moves/scan/{name}`    | Run security scan                              |
 
 <br/>
 
@@ -373,7 +489,7 @@ punch fighter spawn ml-engineer
       │   punch-arena   │  │  punch-kernel   │  │  punch-channels  │
       │   (The Arena)   │  │  (The Ring)     │  │  25 adapters     │
       │   Axum HTTP/WS  │  │  Coordination   │  │  Telegram, Slack │
-      │   14 route files │  │  Event bus      │  │  Discord, etc.   │
+      │   18 route files │  │  Event bus      │  │  Discord, etc.   │
       └────────┬────────┘  │  Troops, Creeds │  └────────┬─────────┘
                │           └───┬────────┬────┘           │
                └───────┬──────┘        │        ┌────────┘
@@ -381,24 +497,25 @@ punch fighter spawn ml-engineer
               ┌────────▼────────┐  ┌───▼────────▼────────┐
               │  punch-runtime  │  │  punch-gorillas     │
               │  Fighter loop   │  │  Executor, scheduler │
-              │  MCP client     │  │  Triggers, runners   │
-              │  LLM driver     │  │  Circuit breaker     │
+              │  LLM drivers    │  │  Triggers, runners   │
+              │  (15 providers) │  │  Circuit breaker     │
+              │  MCP client     │  │                      │
               └───────┬────────┘  └──────────────────────┘
                       │
-           ┌──────────┼──────────┐
-           │          │          │
-  ┌────────▼──┐  ┌────▼────┐  ┌──▼──────────┐
-  │punch-memory│  │punch-   │  │punch-wire   │
-  │ SQLite     │  │skills   │  │ 15 LLM      │
-  │ Decay      │  │ Moves   │  │ providers   │
-  │ Creeds     │  │ MCP     │  │ + Custom    │
-  └─────┬─────┘  └─────────┘  └─────────────┘
-        │
-  ┌─────▼───────────┐     ┌──────────────────┐
-  │  punch-types    │     │ punch-extensions │
-  │  Shared types   │◄────│ WASM sandbox     │
-  │  Config, errors │     │ Plugin system    │
-  └─────────────────┘     └──────────────────┘
+           ┌──────────┼──────────┬──────────┐
+           │          │          │          │
+  ┌────────▼──┐  ┌────▼────┐  ┌──▼────────┐  ┌──▼──────────────┐
+  │punch-memory│  │punch-   │  │punch-wire │  │punch-extensions │
+  │ SQLite     │  │skills   │  │ P2P       │  │ WASM sandbox    │
+  │ Decay      │  │ Moves   │  │ protocol  │  │ Plugin system   │
+  │ Creeds     │  │ MCP     │  │ HMAC auth │  └────────┬────────┘
+  └─────┬─────┘  └─────────┘  └───────────┘           │
+        │                                     ┌────────┘
+  ┌─────▼───────────┐                         │
+  │  punch-types    │◄────────────────────────┘
+  │  Shared types   │
+  │  Config, errors │
+  └─────────────────┘
 ```
 
 <br/>
@@ -407,44 +524,37 @@ punch fighter spawn ml-engineer
 
 <br/>
 
-## ⚔️ Honest Comparison
+## ⚔️ Feature Comparison
 
-We believe in transparency. Here's how Punch actually stacks up:
-
-| Feature                 | **Punch**                           | **OpenFang**      | **OpenClaw** (302k stars) | **CrewAI** | **AutoGen** |
-| ----------------------- | ----------------------------------- | ----------------- | ------------------------- | ---------- | ----------- |
-| **Language**            | Rust                                | Rust              | TypeScript                | Python     | Python      |
-| **Single binary**       | ✅                                  | ✅                | ❌ (Node.js)              | ❌         | ❌          |
-| **Autonomous agents**   | ✅ Gorillas                         | ✅ Hands (7)      | ✅ HEARTBEAT.md           | ❌         | ❌          |
-| **Interactive agents**  | ✅ Fighters                         | ✅ Agents         | ✅ Gateway                | ✅         | ✅          |
-| **Agent consciousness** | ✅ **Creeds (DB-backed, evolving)** | ❌                | ✅ SOUL.md (static files) | ❌         | ❌          |
-| **Agent coordination**  | ✅ Troops                           | ✅ Packs          | ✅ AGENTS.md              | ✅ Crews   | ✅ Groups   |
-| **Built-in memory**     | ✅ SQLite + decay                   | ✅ SQLite         | ✅ MEMORY.md              | ❌         | ❌          |
-| **HTTP API**            | ✅ Arena (14 routes)                | ✅ 140+ endpoints | ✅ Gateway                | ❌         | ❌          |
-| **Security layers**     | 10                                  | **16**            | ~5                        | 3          | 2           |
-| **Channel adapters**    | 25                                  | **40**            | 24+                       | 0          | 0           |
-| **LLM providers**       | 15                                  | **26**            | 6+ (via OpenRouter)       | 5          | 4           |
-| **MCP support**         | ✅ Native                           | ✅ Native         | ✅ Native                 | Plugin     | ❌          |
-| **Skills/tools**        | ✅ Moves                            | 38 built-in       | **800+ marketplace**      | Toolkit    | Toolkit     |
-| **Inter-agent comms**   | ✅ **A2A + direct**                 | ❌                | ✅ Multi-agent            | ✅         | ✅          |
-| **Plugin system**       | ✅ WASM sandbox                     | ✅ WASM           | ✅ Skills                 | ✅         | ✅          |
-| **Cron scheduling**     | ✅                                  | ✅                | ✅ HEARTBEAT.md           | ❌         | ❌          |
-| **Startup**             | **<50ms**                           | ~100ms            | ~2s                       | ~3s        | ~5s         |
-| **Memory**              | **~15MB**                           | ~25MB             | ~150MB                    | ~200MB     | ~300MB      |
+| Feature                 | **Punch**                           | **CrewAI** | **AutoGen** |
+| ----------------------- | ----------------------------------- | ---------- | ----------- |
+| **Language**            | Rust (single binary)                | Python     | Python      |
+| **Autonomous agents**   | ✅ Gorillas (cron + human schedule) | ❌         | ❌          |
+| **Interactive agents**  | ✅ Fighters                         | ✅         | ✅          |
+| **Agent consciousness** | ✅ **Creeds (DB-backed, evolving)** | ❌         | ❌          |
+| **Agent coordination**  | ✅ Troops                           | ✅ Crews   | ✅ Groups   |
+| **Built-in memory**     | ✅ SQLite + confidence decay        | ❌         | ❌          |
+| **HTTP API**            | ✅ Arena (14 route files)           | ❌         | ❌          |
+| **Skills marketplace**  | ✅ **Git-index + signed + scanned** | ❌         | ❌          |
+| **Security layers**     | 11                                  | 3          | 2           |
+| **Channel adapters**    | 25                                  | 0          | 0           |
+| **LLM providers**       | 15                                  | 5          | 4           |
+| **MCP support**         | ✅ Native                           | Plugin     | ❌          |
+| **Inter-agent comms**   | ✅ A2A protocol + direct messaging  | ✅         | ✅          |
+| **Plugin system**       | ✅ WASM sandbox (fuel-metered)      | ✅         | ✅          |
+| **Cron scheduling**     | ✅ (cron + human-readable)          | ❌         | ❌          |
+| **Startup**             | **<50ms**                           | ~3s        | ~5s         |
+| **Memory footprint**    | **~15MB**                           | ~200MB     | ~300MB      |
 
 <br/>
 
-### Where Punch wins
+### Punch differentiators
 
-- **Creeds > SOUL.md** — Database-backed consciousness that evolves, tracks relationships, decays learned behaviors, and survives respawns. OpenClaw's SOUL.md is a static markdown file.
-- **Inter-agent communication** — Native fighter-to-fighter messaging with automatic relationship tracking. OpenFang has no equivalent.
-- **Consciousness evolution** — Learned behaviors with confidence decay and reinforcement. No other framework does this.
-- **Performance** — Fastest startup, smallest memory footprint of any agent framework.
-
-### Where others lead
-
-- **OpenClaw** — 302k stars, 800+ skills marketplace, massive community, backed by OpenAI
-- **OpenFang** — More security layers (16 vs 10), more channels (40 vs 25), more providers (26 vs 15), 140+ API endpoints
+- **Creeds** — Database-backed consciousness that evolves, tracks relationships, decays learned behaviors, and survives respawns. Auto-created on spawn with full self-awareness.
+- **Secure marketplace** — Git-indexed skills with Ed25519 signing + SHA-256 checksums + 20-rule security scanner. Community skills without ClawHub's supply chain disasters.
+- **Inter-agent communication** — Native fighter-to-fighter messaging with automatic relationship tracking, plus A2A protocol support for cross-system delegation.
+- **Consciousness evolution** — Learned behaviors with confidence decay and reinforcement. Heartbeat tasks execute proactively on cadence.
+- **Performance** — Fastest startup, smallest memory footprint. Single Rust binary with zero runtime dependencies.
 
 <br/>
 
@@ -474,20 +584,21 @@ We believe in transparency. Here's how Punch actually stacks up:
 
 <br/>
 
-## 🔐 10 Security Layers
+## 🔐 11 Security Layers
 
-| #   | Layer                       | What it does                                        |
-| --- | --------------------------- | --------------------------------------------------- |
-| 1   | **HMAC-SHA256 signing**     | Inter-component messages cryptographically signed   |
-| 2   | **AES-256-GCM encryption**  | Credential vault uses authenticated encryption      |
-| 3   | **Rate limiting**           | Per-agent and per-provider rate limiting            |
-| 4   | **Auth middleware**         | API authentication on all Arena endpoints           |
-| 5   | **Audit logging**           | Every action logged with structured tracing         |
-| 6   | **Memory decay**            | Old data automatically decays, reducing exposure    |
-| 7   | **Zeroize secrets**         | Crypto material zeroized from memory on drop        |
-| 8   | **Gorilla containment**     | Circuit breaker isolation prevents lateral movement |
-| 9   | **Troop privilege scoping** | Task strategies limit fighter access                |
-| 10  | **WASM sandbox**            | Extension plugins in metered WebAssembly            |
+| #   | Layer                       | What it does                                          |
+| --- | --------------------------- | ----------------------------------------------------- |
+| 1   | **HMAC-SHA256 signing**     | Inter-component messages cryptographically signed     |
+| 2   | **AES-256-GCM encryption**  | Credential vault uses authenticated encryption        |
+| 3   | **Rate limiting**           | Per-agent and per-provider rate limiting              |
+| 4   | **Auth middleware**         | API authentication on all Arena endpoints             |
+| 5   | **Audit logging**           | Every action logged with structured tracing           |
+| 6   | **Memory decay**            | Old data automatically decays, reducing exposure      |
+| 7   | **Zeroize secrets**         | Crypto material zeroized from memory on drop          |
+| 8   | **Gorilla containment**     | Circuit breaker isolation prevents lateral movement   |
+| 9   | **Troop privilege scoping** | Task strategies limit fighter access                  |
+| 10  | **WASM sandbox**            | Extension plugins in metered WebAssembly              |
+| 11  | **Skill supply chain**      | Ed25519 signing + SHA-256 checksums + 20-rule scanner |
 
 <br/>
 
@@ -588,7 +699,7 @@ We believe in transparency. Here's how Punch actually stacks up:
 ```bash
 git clone https://github.com/humancto/punch.git && cd punch
 cargo build                                # Build
-cargo test --workspace                     # Test (1646 tests)
+cargo test --workspace                     # Test (2645 tests)
 cargo clippy --workspace -- -D warnings    # Lint
 cargo fmt --all                            # Format
 ```

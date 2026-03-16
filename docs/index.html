@@ -189,6 +189,31 @@ nav .gh-btn:hover { border-color: var(--red); color: var(--red); }
 .gorilla-schedule { font-family: var(--mono); font-size: 10px; color: var(--red); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
 .gorilla-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
 
+/* MARKETPLACE */
+.marketplace { padding: 120px 0; position: relative; }
+.marketplace::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--orange), transparent); }
+.marketplace-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 64px; align-items: start; }
+.marketplace-flow { display: flex; flex-direction: column; gap: 16px; }
+.flow-step { display: flex; align-items: flex-start; gap: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; transition: all 0.3s; }
+.flow-step:hover { border-color: var(--border-bright); }
+.flow-num { font-family: var(--mono); font-size: 20px; font-weight: 800; color: var(--red); flex-shrink: 0; width: 32px; }
+.flow-content { flex: 1; }
+.flow-title { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 1px; margin-bottom: 4px; }
+.flow-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.security-gates { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.gate-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; transition: all 0.3s; }
+.gate-card:hover { border-color: rgba(255,45,45,0.3); }
+.gate-card.critical { border-left: 3px solid var(--red); }
+.gate-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.gate-icon { font-size: 20px; }
+.gate-name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 1px; }
+.gate-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.gate-blocks { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.marketplace-cli { background: #0a0a0a; border: 1px solid var(--border-bright); border-radius: 12px; padding: 24px; font-family: var(--mono); font-size: 12px; line-height: 2; color: var(--text-dim); overflow-x: auto; white-space: pre; margin-top: 48px; }
+.marketplace-cli .cmd { color: var(--text); }
+.marketplace-cli .comment { color: var(--text-muted); }
+.marketplace-cli .prompt { color: var(--red); }
+
 /* COMPARISON */
 .comparison { padding: 120px 0; }
 .comparison-wrapper { margin-top: 64px; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
@@ -206,7 +231,7 @@ nav .gh-btn:hover { border-color: var(--red); color: var(--red); }
 
 /* STATS */
 .stats-bar { padding: 80px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 24px; text-align: center; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 24px; text-align: center; }
 .stat-num { font-family: var(--mono); font-size: 40px; font-weight: 800; color: #fff; display: block; line-height: 1; }
 .stat-label { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-top: 8px; display: block; }
 
@@ -247,7 +272,7 @@ footer a:hover { text-decoration: underline; }
 }
 @media (max-width: 768px) {
   .concepts-grid { grid-template-columns: 1fr; }
-  .creed-compare, .souls-demo, .comms-grid { grid-template-columns: 1fr; }
+  .creed-compare, .souls-demo, .comms-grid, .marketplace-grid { grid-template-columns: 1fr; }
   .hero-stats { flex-wrap: wrap; gap: 24px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .install-cmd { min-width: auto; width: 100%; }
@@ -269,6 +294,7 @@ footer a:hover { text-decoration: underline; }
       <a href="#concepts">Concepts</a>
       <a href="#creed">Creeds</a>
       <a href="#gorillas">Gorillas</a>
+      <a href="#marketplace">Marketplace</a>
       <a href="#comparison">Compare</a>
       <a href="https://github.com/humancto/punch" class="gh-btn" target="_blank" rel="noopener">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -319,7 +345,7 @@ footer a:hover { text-decoration: underline; }
     <div class="concepts-grid stagger reveal">
       <div class="concept-card"><span class="concept-icon">&#x1F94A;</span><div class="concept-name">Fighters</div><div class="concept-role">Interactive Agents</div><div class="concept-desc">Conversational AI agents you spar with. Chat, command, delegate tasks. 30 pre-built templates.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x1F98D;</span><div class="concept-name">Gorillas</div><div class="concept-role">Autonomous Agents</div><div class="concept-desc">Background agents that rampage through tasks 24/7 on a schedule. No prompting needed.</div></div>
-      <div class="concept-card"><span class="concept-icon">&#x1F4A5;</span><div class="concept-name">Moves</div><div class="concept-role">Skills &amp; Tools</div><div class="concept-desc">Capabilities agents wield &#8212; web search, file I/O, code execution, MCP servers.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F4A5;</span><div class="concept-name">Moves</div><div class="concept-role">Skills &amp; Tools</div><div class="concept-desc">103 bundled skills + community marketplace. Ed25519 signed, SHA-256 verified, security scanned.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x1F3DF;&#xFE0F;</span><div class="concept-name">The Ring</div><div class="concept-role">Execution Kernel</div><div class="concept-desc">Central coordinator. Manages lifecycle, quotas, event bus, and invariants.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x2694;&#xFE0F;</span><div class="concept-name">The Arena</div><div class="concept-role">HTTP/WS API</div><div class="concept-desc">RESTful + WebSocket API. 14 route files. Connect anything to your agent squads.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x1F4DC;</span><div class="concept-name">Creeds</div><div class="concept-role">Consciousness Layer</div><div class="concept-desc">Living identity documents. Personality, self-awareness, learned behaviors. Database-backed.</div></div>
@@ -460,6 +486,97 @@ curl localhost:6660/.well-known/agent.json</div>
   </div>
 </section>
 
+<!-- SKILLS MARKETPLACE -->
+<section class="marketplace" id="marketplace">
+  <div class="container-wide">
+    <div class="reveal" style="text-align: center; margin-bottom: 20px;">
+      <div class="section-tag">Skills Marketplace</div>
+      <div class="section-title">103 skills built in.<br>Infinite community potential.</div>
+      <p class="section-desc" style="margin: 0 auto;">A Git-indexed, cryptographically signed skill registry. Publish with a PR, install with a command. No ClawHub-style supply chain disasters.</p>
+    </div>
+
+    <div class="marketplace-grid reveal">
+      <div>
+        <div style="font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px;">How It Works</div>
+        <div class="marketplace-flow">
+          <div class="flow-step">
+            <div class="flow-num">01</div>
+            <div class="flow-content">
+              <div class="flow-title">Write a SKILL.md</div>
+              <div class="flow-desc">YAML frontmatter + markdown body. Tools, requirements, and domain expertise in one file.</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-num">02</div>
+            <div class="flow-content">
+              <div class="flow-title">Validate &amp; Sign</div>
+              <div class="flow-desc">CLI validates format, runs security scanner, creates tar.gz, signs with Ed25519 keypair.</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-num">03</div>
+            <div class="flow-content">
+              <div class="flow-title">Submit PR</div>
+              <div class="flow-desc">PR to the punch-index repo. CI scans before merge. Git repo as database &#8212; zero infrastructure.</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-num">04</div>
+            <div class="flow-content">
+              <div class="flow-title">Install &amp; Verify</div>
+              <div class="flow-desc">Users sync index, install skills. Three-gate verification: checksum + signature + scan.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px;">Three-Gate Security</div>
+        <div class="security-gates">
+          <div class="gate-card critical">
+            <div class="gate-header"><span class="gate-icon">&#x1F512;</span><span class="gate-name">SHA-256 Checksum</span></div>
+            <div class="gate-desc">Downloaded tarball bytes must match the index entry exactly.</div>
+            <div class="gate-blocks">Blocks: tampered downloads, MITM attacks</div>
+          </div>
+          <div class="gate-card critical">
+            <div class="gate-header"><span class="gate-icon">&#x1F58A;&#xFE0F;</span><span class="gate-name">Ed25519 Signature</span></div>
+            <div class="gate-desc">Cryptographic proof the package came from the declared publisher.</div>
+            <div class="gate-blocks">Blocks: impersonation, forged packages</div>
+          </div>
+          <div class="gate-card critical">
+            <div class="gate-header"><span class="gate-icon">&#x1F6E1;&#xFE0F;</span><span class="gate-name">Security Scanner</span></div>
+            <div class="gate-desc">20+ static analysis rules catch malicious patterns before they reach your agents.</div>
+            <div class="gate-blocks">Blocks: pipe-to-shell, prompt injection, credential harvesting, encoded payloads, Unicode tricks</div>
+          </div>
+        </div>
+        <div style="background: var(--bg-card); border: 1px solid rgba(255,107,53,0.2); border-radius: 10px; padding: 16px; margin-top: 16px;">
+          <div style="font-family: var(--mono); font-size: 11px; color: var(--orange); letter-spacing: 1px; margin-bottom: 8px;">VS CLAWHUB</div>
+          <div style="font-size: 13px; color: var(--text-dim); line-height: 1.5;">OpenClaw&#39;s ClawHub had 12-20% malicious skills (CVE-2026-25253). Punch runs every gate <strong style="color: var(--text);">twice</strong> &#8212; at publish-time and install-time.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="marketplace-cli reveal">
+<span class="comment"># Search the marketplace</span>
+<span class="prompt">$</span> <span class="cmd">punch move search "code review"</span>
+
+<span class="comment"># Install a skill</span>
+<span class="prompt">$</span> <span class="cmd">punch move install code-reviewer</span>
+
+<span class="comment"># Security scan before publishing</span>
+<span class="prompt">$</span> <span class="cmd">punch move scan ./my-skill</span>
+
+<span class="comment"># Publish (validate, sign, preview)</span>
+<span class="prompt">$</span> <span class="cmd">punch move publish ./my-skill --dry-run</span>
+
+<span class="comment"># Generate signing keypair</span>
+<span class="prompt">$</span> <span class="cmd">punch move keygen</span>
+
+<span class="comment"># Verify integrity</span>
+<span class="prompt">$</span> <span class="cmd">punch move verify code-reviewer</span></div>
+  </div>
+</section>
+
 <!-- COMPARISON -->
 <section class="comparison" id="comparison">
   <div class="container-wide">
@@ -479,10 +596,11 @@ curl localhost:6660/.well-known/agent.json</div>
           <tr><td>Inter-agent comms</td><td class="best">A2A + direct</td><td class="muted">&#10005;</td><td>Multi-agent</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
           <tr><td>Agent coordination</td><td class="win">Troops</td><td>Packs</td><td>AGENTS.md</td><td>Crews</td><td>Groups</td></tr>
           <tr><td>Built-in memory</td><td class="win">SQLite + decay</td><td>SQLite</td><td>MEMORY.md</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
-          <tr><td>Security layers</td><td>10</td><td class="best">16</td><td>~5</td><td>3</td><td>2</td></tr>
+          <tr><td>Security layers</td><td>11</td><td class="best">16</td><td>~5</td><td>3</td><td>2</td></tr>
           <tr><td>Channel adapters</td><td>25</td><td class="best">40</td><td>24+</td><td class="muted">0</td><td class="muted">0</td></tr>
           <tr><td>LLM providers</td><td>15</td><td class="best">26</td><td>6+</td><td>5</td><td>4</td></tr>
-          <tr><td>Skills / tools</td><td>Moves</td><td>38</td><td class="best">800+ marketplace</td><td>Toolkit</td><td>Toolkit</td></tr>
+          <tr><td>Skills / tools</td><td class="win">103 + marketplace</td><td>38</td><td class="best">800+ marketplace</td><td>Toolkit</td><td>Toolkit</td></tr>
+          <tr><td>Skill security</td><td class="best">Ed25519 + SHA-256 + scanner</td><td class="muted">&#10005;</td><td class="muted">none (CVE-2026-25253)</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
           <tr><td>MCP support</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td>Plugin</td><td class="muted">&#10005;</td></tr>
           <tr><td>Startup time</td><td class="best">&lt;50ms</td><td>~100ms</td><td>~2s</td><td>~3s</td><td>~5s</td></tr>
           <tr><td>Memory usage</td><td class="best">~15MB</td><td>~25MB</td><td>~150MB</td><td>~200MB</td><td>~300MB</td></tr>
@@ -492,11 +610,11 @@ curl localhost:6660/.well-known/agent.json</div>
     <div class="reveal" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px;">
       <div style="background: var(--bg-card); border: 1px solid rgba(255,45,45,0.2); border-radius: 10px; padding: 24px;">
         <div style="font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where Punch wins</div>
-        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;">Evolving agent consciousness. Native inter-agent communication with relationship tracking. Fastest startup and smallest footprint. No other framework does this.</p>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;">Evolving agent consciousness. Native inter-agent communication with relationship tracking. Cryptographically signed skill marketplace with supply-chain security. Fastest startup and smallest footprint.</p>
       </div>
       <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;">
         <div style="font-family: var(--mono); font-size: 11px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where others lead</div>
-        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;"><strong style="color: var(--text);">OpenClaw:</strong> 302k stars, 800+ skills, backed by OpenAI. <strong style="color: var(--text);">OpenFang:</strong> 16 security layers, 40 channels, 26 providers.</p>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;"><strong style="color: var(--text);">OpenClaw:</strong> 302k stars, 800+ skills (but 12-20% malicious &#8212; CVE-2026-25253). <strong style="color: var(--text);">OpenFang:</strong> 16 security layers, 40 channels, 26 providers.</p>
       </div>
     </div>
   </div>
@@ -509,8 +627,8 @@ curl localhost:6660/.well-known/agent.json</div>
       <div class="stat-item"><span class="stat-num" data-target="11">0</span><span class="stat-label">Crates on crates.io</span></div>
       <div class="stat-item"><span class="stat-num" data-target="25">0</span><span class="stat-label">Channel Adapters</span></div>
       <div class="stat-item"><span class="stat-num" data-target="15">0</span><span class="stat-label">LLM Providers</span></div>
-      <div class="stat-item"><span class="stat-num" data-target="10">0</span><span class="stat-label">Security Layers</span></div>
-      <div class="stat-item"><span class="stat-num" data-target="1646">0</span><span class="stat-label">Tests Passing</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="11">0</span><span class="stat-label">Security Layers</span></div>
+      <div class="stat-item"><span class="stat-num" data-target="103">0</span><span class="stat-label">Bundled Skills</span></div>
       <div class="stat-item"><span class="stat-num" data-target="30">0</span><span class="stat-label">Fighter Templates</span></div>
     </div>
   </div>
@@ -537,7 +655,7 @@ curl localhost:6660/.well-known/agent.json</div>
       <div class="cta-links">
         <a href="https://github.com/humancto/punch" class="cta-link">GitHub</a>
         <a href="https://crates.io/crates/punch-cli" class="cta-link">crates.io</a>
-        <a href="https://github.com/humancto/punch/tree/main/crates/punch-skills/bundled" class="cta-link">103 Skills</a>
+        <a href="https://github.com/humancto/punch/tree/main/crates/punch-skills/bundled" class="cta-link">103+ Skills</a>
       </div>
     </div>
   </div>
