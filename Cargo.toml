@@ -32,7 +32,7 @@ categories = ["command-line-utilities", "asynchronous"]
 tokio = { version = "1.44", features = ["full"] }
 # HTTP
 axum = { version = "0.8", features = ["ws", "macros"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "multipart"] }
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "fs"] }
 # Serialization
