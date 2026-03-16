@@ -1,0 +1,60 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Punch? We'd love to hear it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem does this solve? Why do you want this?
+      placeholder: I want to be able to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which area of Punch would this affect?
+      options:
+        - CLI
+        - API / Arena
+        - Fighters
+        - Gorillas
+        - Creeds
+        - Troops
+        - Skills / Marketplace
+        - Channels
+        - Dashboard
+        - Security
+        - Memory
+        - New crate / module
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you've thought about?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links, or anything else that helps explain the request.

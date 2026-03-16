@@ -1,0 +1,78 @@
+name: Bug Report
+description: Report a bug in Punch
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Fill in as much detail as you can.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: Describe what went wrong...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. punch start
+        2. punch fighter spawn researcher
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Punch is affected?
+      options:
+        - CLI (punch-cli)
+        - The Ring (punch-kernel)
+        - The Arena / API (punch-api)
+        - Fighters / Runtime (punch-runtime)
+        - Gorillas (punch-gorillas)
+        - Memory (punch-memory)
+        - Skills / Moves (punch-skills)
+        - Channels (punch-channels)
+        - Dashboard
+        - LLM Drivers
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Your setup details
+      value: |
+        - Punch version:
+        - OS:
+        - LLM provider:
+        - Rust version (if building from source):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any relevant error messages or logs.
+      render: shell

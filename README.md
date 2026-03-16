@@ -17,7 +17,7 @@
 
 <br/>
 
-[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli)
+[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli) &bull; [Getting Started](docs/getting-started.md) &bull; [Discussions](https://github.com/humancto/punch/discussions)
 
 <br/>
 
@@ -704,7 +704,7 @@ cargo clippy --workspace -- -D warnings    # Lint
 cargo fmt --all                            # Format
 ```
 
-See [CLAUDE.md](CLAUDE.md) for development conventions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines and [CLAUDE.md](CLAUDE.md) for development conventions.
 
 1. Fork the repo and create a feature branch
 2. Follow the combat metaphor naming conventions
@@ -728,7 +728,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 **Built with raw power by [HumanCTO](https://humancto.com)**
 
-[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli)
+[Website](https://humancto.github.io/punch/) &bull; [GitHub](https://github.com/humancto/punch) &bull; [crates.io](https://crates.io/crates/punch-cli) &bull; [Getting Started](docs/getting-started.md) &bull; [Discussions](https://github.com/humancto/punch/discussions)
 
 <sub>Fun fact: The name was inspired by [the internet's most iconic primate](https://www.rd.com/article/everyones-talking-about-punch-the-monkey/) — except our monkey punches back. With AI.</sub>
 

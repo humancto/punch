@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/humancto/punch/discussions
+    about: Ask questions, share ideas, or show what you've built with Punch
+  - name: Security Vulnerabilities
+    url: mailto:security@humancto.com
+    about: Report security issues privately — do not open a public issue
