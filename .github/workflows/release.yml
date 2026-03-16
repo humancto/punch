@@ -25,7 +25,7 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-13
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -73,9 +73,12 @@ jobs:
           merge-multiple: true
 
       - name: Create GitHub Release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          name: "Punch ${{ github.ref_name }} — The First Punch"
+          body_path: CHANGELOG.md
           files: |
             punch-*.tar.gz
 
@@ -91,7 +94,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for crate in punch-types punch-memory punch-skills punch-extensions punch-wire punch-runtime punch-kernel punch-api punch-channels punch-gorillas punch-cli; do
+          for crate in punch-types punch-memory punch-skills punch-extensions punch-wire punch-runtime punch-kernel punch-arena punch-channels punch-gorillas punch-cli; do
             echo "Publishing $crate..."
             cargo publish -p "$crate" --allow-dirty || true
             sleep 30
@@ -102,9 +105,77 @@ jobs:
     needs: publish-github
     runs-on: ubuntu-latest
     steps:
-      - name: Update Homebrew formula
+      - uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Compute SHA-256 hashes and update formula
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          echo "Update humancto/homebrew-tap Formula/punch.rb with tag $TAG_NAME"
-          echo "Update sha256 hashes from release artifacts"
+          SHA_AARCH64_DARWIN=$(sha256sum punch-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_X86_64_DARWIN=$(sha256sum punch-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_AARCH64_LINUX=$(sha256sum punch-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          SHA_X86_64_LINUX=$(sha256sum punch-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          VERSION="${RELEASE_TAG#v}"
+
+          cat > punch.rb << 'HEREDOC'
+          class Punch < Formula
+            desc "The Agent Combat System — deploy autonomous AI agent squads from a single binary"
+            homepage "https://github.com/humancto/punch"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/humancto/punch/releases/download/TAG_PLACEHOLDER/punch-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA_AARCH64_DARWIN_PLACEHOLDER"
+              else
+                url "https://github.com/humancto/punch/releases/download/TAG_PLACEHOLDER/punch-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA_X86_64_DARWIN_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/humancto/punch/releases/download/TAG_PLACEHOLDER/punch-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_AARCH64_LINUX_PLACEHOLDER"
+              else
+                url "https://github.com/humancto/punch/releases/download/TAG_PLACEHOLDER/punch-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_X86_64_LINUX_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "punch"
+            end
+
+            test do
+              assert_match "punch", shell_output("#{bin}/punch --version")
+            end
+          end
+          HEREDOC
+
+          # Remove leading whitespace from heredoc and substitute placeholders
+          sed -i 's/^          //' punch.rb
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" punch.rb
+          sed -i "s/TAG_PLACEHOLDER/${RELEASE_TAG}/g" punch.rb
+          sed -i "s/SHA_AARCH64_DARWIN_PLACEHOLDER/${SHA_AARCH64_DARWIN}/g" punch.rb
+          sed -i "s/SHA_X86_64_DARWIN_PLACEHOLDER/${SHA_X86_64_DARWIN}/g" punch.rb
+          sed -i "s/SHA_AARCH64_LINUX_PLACEHOLDER/${SHA_AARCH64_LINUX}/g" punch.rb
+          sed -i "s/SHA_X86_64_LINUX_PLACEHOLDER/${SHA_X86_64_LINUX}/g" punch.rb
+
+          # Get current file SHA for update
+          CURRENT_SHA=$(gh api repos/humancto/homebrew-tap/contents/Formula/punch.rb --jq '.sha')
+
+          # Push updated formula
+          gh api repos/humancto/homebrew-tap/contents/Formula/punch.rb \
+            --method PUT \
+            --field message="Update punch to ${RELEASE_TAG}" \
+            --field content="$(base64 -w0 punch.rb)" \
+            --field sha="${CURRENT_SHA}" \
+            --field branch="main"
