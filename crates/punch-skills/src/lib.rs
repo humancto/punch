@@ -23,8 +23,9 @@ use punch_types::ToolDefinition;
 
 pub use client::IndexClient;
 pub use loader::{
-    LoadedSkill, SkillFrontmatter, SkillPrecedence, load_all_skills, load_skill_from_dir,
-    load_skills_from_dir, parse_skill_md, render_skills_prompt,
+    LoadedSkill, SkillFrontmatter, SkillPrecedence, load_all_skills,
+    load_all_skills_with_marketplace, load_skill_from_dir, load_skills_from_dir, parse_skill_md,
+    render_skills_prompt,
 };
 pub use lockfile::{LockedMove, MoveLockfile};
 pub use marketplace::{

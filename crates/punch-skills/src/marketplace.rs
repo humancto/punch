@@ -186,6 +186,22 @@ impl SkillMarketplace {
             entry.value_mut().rating = rating;
         }
     }
+
+    /// Find a skill by exact name (case-insensitive).
+    pub fn find_by_name(&self, name: &str) -> Option<SkillListing> {
+        self.skills
+            .iter()
+            .find(|entry| entry.value().name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.value().clone())
+    }
+
+    /// List all available skill listings.
+    pub fn list_all(&self) -> Vec<SkillListing> {
+        self.skills
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
+    }
 }
 
 impl Default for SkillMarketplace {
@@ -952,5 +968,40 @@ mod tests {
 
         let missing = mp.get(&Uuid::new_v4());
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_find_by_name() {
+        let mp = SkillMarketplace::new();
+        mp.publish(sample_listing("Alpha Tool", "code"));
+        mp.publish(sample_listing("Beta Tool", "web"));
+
+        let found = mp.find_by_name("alpha tool");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Alpha Tool");
+
+        let found_exact = mp.find_by_name("Alpha Tool");
+        assert!(found_exact.is_some());
+
+        let not_found = mp.find_by_name("nonexistent");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_list_all() {
+        let mp = SkillMarketplace::new();
+        mp.publish(sample_listing("tool-a", "code"));
+        mp.publish(sample_listing("tool-b", "web"));
+        mp.publish(sample_listing("tool-c", "agent"));
+
+        let all = mp.list_all();
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_list_all_empty() {
+        let mp = SkillMarketplace::new();
+        let all = mp.list_all();
+        assert!(all.is_empty());
     }
 }

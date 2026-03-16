@@ -102,16 +102,19 @@ pub struct LoadedSkill {
 pub enum SkillPrecedence {
     /// Workspace-local (highest priority)
     Workspace = 0,
+    /// Installed from marketplace (~/.punch/skills/)
+    Marketplace = 1,
     /// User global (~/.punch/skills/)
-    User = 1,
+    User = 2,
     /// Bundled with Punch
-    Bundled = 2,
+    Bundled = 3,
 }
 
 impl std::fmt::Display for SkillPrecedence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Workspace => write!(f, "workspace"),
+            Self::Marketplace => write!(f, "marketplace"),
             Self::User => write!(f, "user"),
             Self::Bundled => write!(f, "bundled"),
         }
@@ -222,13 +225,27 @@ pub fn load_skills_from_dir(dir: &Path, precedence: SkillPrecedence) -> Vec<Load
 ///
 /// Skills are loaded from (highest to lowest precedence):
 /// 1. workspace_dir/skills/
-/// 2. ~/.punch/skills/
-/// 3. bundled_dir/skills/
+/// 2. marketplace_dir/ (e.g. ~/.punch/skills/ for marketplace-installed)
+/// 3. user_dir/ (user global skills)
+/// 4. bundled_dir/skills/
 ///
 /// When the same skill name appears at multiple levels, the highest
 /// precedence version wins.
 pub fn load_all_skills(
     workspace_dir: Option<&Path>,
+    user_dir: Option<&Path>,
+    bundled_dir: Option<&Path>,
+) -> Vec<LoadedSkill> {
+    load_all_skills_with_marketplace(workspace_dir, None, user_dir, bundled_dir)
+}
+
+/// Load all skills including marketplace-installed skills.
+///
+/// The `marketplace_dir` is typically `~/.punch/skills/` where marketplace
+/// skills are installed to after verification.
+pub fn load_all_skills_with_marketplace(
+    workspace_dir: Option<&Path>,
+    marketplace_dir: Option<&Path>,
     user_dir: Option<&Path>,
     bundled_dir: Option<&Path>,
 ) -> Vec<LoadedSkill> {
@@ -243,6 +260,12 @@ pub fn load_all_skills(
 
     if let Some(dir) = user_dir {
         for skill in load_skills_from_dir(dir, SkillPrecedence::User) {
+            skills_by_name.insert(skill.frontmatter.name.clone(), skill);
+        }
+    }
+
+    if let Some(dir) = marketplace_dir {
+        for skill in load_skills_from_dir(dir, SkillPrecedence::Marketplace) {
             skills_by_name.insert(skill.frontmatter.name.clone(), skill);
         }
     }
@@ -507,5 +530,77 @@ Docker operations skill.
             crate::RequirementKind::Binary
         );
         assert!(manifest.skill_prompt.contains("Convert things"));
+    }
+
+    #[test]
+    fn test_marketplace_precedence_display() {
+        assert_eq!(SkillPrecedence::Marketplace.to_string(), "marketplace");
+    }
+
+    #[test]
+    fn test_marketplace_precedence_ordering() {
+        assert!(SkillPrecedence::Workspace < SkillPrecedence::Marketplace);
+        assert!(SkillPrecedence::Marketplace < SkillPrecedence::User);
+        assert!(SkillPrecedence::User < SkillPrecedence::Bundled);
+    }
+
+    #[test]
+    fn test_load_all_skills_with_marketplace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let marketplace = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+
+        // Create a skill in marketplace dir
+        let mp_skill = marketplace.path().join("mp-skill");
+        fs::create_dir(&mp_skill).unwrap();
+        fs::write(
+            mp_skill.join("SKILL.md"),
+            "---\nname: mp-skill\ndescription: from marketplace\n---\n\nMarketplace skill.",
+        )
+        .unwrap();
+
+        // Create same skill in user dir (should be overridden by marketplace)
+        let user_skill = user.path().join("mp-skill");
+        fs::create_dir(&user_skill).unwrap();
+        fs::write(
+            user_skill.join("SKILL.md"),
+            "---\nname: mp-skill\ndescription: from user\n---\n\nUser skill.",
+        )
+        .unwrap();
+
+        let skills = load_all_skills_with_marketplace(
+            Some(workspace.path()),
+            Some(marketplace.path()),
+            Some(user.path()),
+            None,
+        );
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].frontmatter.description, "from marketplace");
+        assert_eq!(skills[0].precedence, SkillPrecedence::Marketplace);
+    }
+
+    #[test]
+    fn test_workspace_overrides_marketplace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let marketplace = tempfile::tempdir().unwrap();
+
+        for (dir, desc) in [(&workspace, "workspace"), (&marketplace, "marketplace")] {
+            let skill_dir = dir.path().join("override-skill");
+            fs::create_dir(&skill_dir).unwrap();
+            fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: override-skill\ndescription: from {desc}\n---\n\nBody."),
+            )
+            .unwrap();
+        }
+
+        let skills = load_all_skills_with_marketplace(
+            Some(workspace.path()),
+            Some(marketplace.path()),
+            None,
+            None,
+        );
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].frontmatter.description, "from workspace");
     }
 }
