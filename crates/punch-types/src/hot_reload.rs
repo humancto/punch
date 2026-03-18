@@ -455,6 +455,7 @@ mod tests {
                 knowledge_graph_enabled: true,
                 max_entries: Some(10000),
             },
+            tunnel: None,
             channels: HashMap::new(),
             mcp_servers: HashMap::new(),
         }
@@ -492,6 +493,9 @@ mod tests {
             crate::config::ChannelConfig {
                 channel_type: "slack".to_string(),
                 token_env: Some("SLACK_TOKEN".to_string()),
+                webhook_secret_env: None,
+                allowed_user_ids: vec![],
+                rate_limit_per_user: 20,
                 settings: HashMap::new(),
             },
         );
@@ -508,6 +512,9 @@ mod tests {
             crate::config::ChannelConfig {
                 channel_type: "discord".to_string(),
                 token_env: Some("DISCORD_TOKEN".to_string()),
+                webhook_secret_env: None,
+                allowed_user_ids: vec![],
+                rate_limit_per_user: 20,
                 settings: HashMap::new(),
             },
         );

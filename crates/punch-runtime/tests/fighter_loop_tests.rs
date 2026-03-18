@@ -142,6 +142,7 @@ fn make_params(
         coordinator: None,
         approval_engine: None,
         sandbox: None,
+        mcp_clients: None,
     }
 }
 
@@ -461,6 +462,7 @@ async fn test_messages_persisted_to_memory() {
         coordinator: None,
         approval_engine: None,
         sandbox: None,
+        mcp_clients: None,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -521,6 +523,7 @@ async fn test_creed_bout_count_increments() {
         coordinator: None,
         approval_engine: None,
         sandbox: None,
+        mcp_clients: None,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -576,6 +579,7 @@ async fn test_heartbeat_tasks_marked_checked() {
         coordinator: None,
         approval_engine: None,
         sandbox: None,
+        mcp_clients: None,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");

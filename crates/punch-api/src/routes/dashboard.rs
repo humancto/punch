@@ -383,6 +383,14 @@ fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
             "troop_disbanded".to_string(),
             format!("Troop '{}' disbanded", name),
         ),
+        PunchEvent::McpServerStarted { server_name } => (
+            "mcp_started".to_string(),
+            format!("MCP server '{}' started", server_name),
+        ),
+        PunchEvent::McpServerStopped { server_name } => (
+            "mcp_stopped".to_string(),
+            format!("MCP server '{}' stopped", server_name),
+        ),
         PunchEvent::Error { source, message } => (
             "error".to_string(),
             format!("[{}] {}", source, message),
@@ -660,6 +668,7 @@ mod tests {
                 knowledge_graph_enabled: false,
                 max_entries: None,
             },
+            tunnel: None,
             channels: Default::default(),
             mcp_servers: Default::default(),
         }
@@ -680,6 +689,7 @@ mod tests {
                 "http://localhost:0",
                 vec![],
             )),
+            channel_router: Arc::new(punch_channels::router::ChannelRouter::new()),
         }
     }
 
@@ -1038,6 +1048,7 @@ mod tests {
                 "http://localhost:0",
                 vec![],
             )),
+            channel_router: Arc::new(punch_channels::router::ChannelRouter::new()),
         };
 
         let app = dashboard_router().with_state(state);

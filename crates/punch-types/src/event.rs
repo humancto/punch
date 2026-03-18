@@ -57,6 +57,10 @@ pub enum PunchEvent {
     },
     /// A troop has been disbanded.
     TroopDisbanded { troop_id: TroopId, name: String },
+    /// An MCP server has been started and initialized.
+    McpServerStarted { server_name: String },
+    /// An MCP server has been shut down.
+    McpServerStopped { server_name: String },
     /// An error occurred in the system.
     Error { source: String, message: String },
 }

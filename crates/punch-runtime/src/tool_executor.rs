@@ -21,6 +21,8 @@ use punch_types::{
     capability::capability_matches,
 };
 
+use crate::mcp::McpClient;
+
 /// Context passed to every tool execution.
 pub struct ToolExecutionContext {
     /// Working directory for filesystem and shell operations.
@@ -53,6 +55,10 @@ pub struct ToolExecutionContext {
     /// WASM plugins (imported techniques). Without it, the tool reports
     /// "plugin runtime not configured".
     pub plugin_registry: Option<Arc<PluginRegistry>>,
+    /// Active MCP server clients, keyed by server name.
+    /// When present, tools prefixed with `mcp_{server}_` are routed to the
+    /// corresponding MCP server for execution.
+    pub mcp_clients: Option<Arc<DashMap<String, Arc<McpClient>>>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -204,6 +210,10 @@ async fn execute_tool_inner(
         "wasm_invoke" => tool_wasm_invoke(input, capabilities, context).await,
         // A2A delegation
         "a2a_delegate" => tool_a2a_delegate(input, capabilities).await,
+        // MCP server tools — dispatched by `mcp_{server}_{tool}` prefix.
+        _ if name.starts_with("mcp_") => {
+            tool_mcp_call(name, input, capabilities, context).await
+        }
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -276,6 +286,100 @@ fn is_sensitive_path(path: &str) -> bool {
     SENSITIVE_PATH_PATTERNS
         .iter()
         .any(|pattern| normalized.contains(pattern))
+}
+
+// ---------------------------------------------------------------------------
+// MCP tool dispatch
+// ---------------------------------------------------------------------------
+
+/// Route a tool call to the appropriate MCP server.
+///
+/// Tool names follow the convention `mcp_{server}_{tool}`. This function
+/// finds the matching server, checks the `McpAccess` capability, strips the
+/// namespace prefix, and forwards the call.
+async fn tool_mcp_call(
+    name: &str,
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let clients = context.mcp_clients.as_ref().ok_or_else(|| {
+        PunchError::ToolNotFound(format!(
+            "MCP tool '{}' requested but no MCP servers are configured",
+            name
+        ))
+    })?;
+
+    // Find the matching MCP server by trying each client's strip_namespace.
+    let mut matched_client: Option<Arc<McpClient>> = None;
+    let mut raw_tool_name: Option<String> = None;
+
+    for entry in clients.iter() {
+        if let Some(stripped) = entry.value().strip_namespace(name) {
+            // Check capability: the fighter must have McpAccess for this server.
+            require_capability(
+                capabilities,
+                &Capability::McpAccess(entry.key().clone()),
+            )?;
+            matched_client = Some(Arc::clone(entry.value()));
+            raw_tool_name = Some(stripped.to_string());
+            break;
+        }
+    }
+
+    let client = matched_client.ok_or_else(|| {
+        PunchError::ToolNotFound(format!(
+            "no MCP server matches tool '{}'",
+            name
+        ))
+    })?;
+    let raw_name = raw_tool_name.unwrap();
+
+    debug!(
+        server = %client.server_name(),
+        tool = %raw_name,
+        "dispatching MCP tool call"
+    );
+
+    match client.call_tool(&raw_name, input.clone()).await {
+        Ok(result) => {
+            // Extract text content from MCP response format.
+            let output = if let Some(content) = result.get("content") {
+                if let Some(arr) = content.as_array() {
+                    arr.iter()
+                        .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                }
+            } else {
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            };
+
+            let is_error = result
+                .get("isError")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            Ok(ToolResult {
+                success: !is_error,
+                output: serde_json::Value::String(output),
+                error: if is_error {
+                    Some("MCP tool returned error".to_string())
+                } else {
+                    None
+                },
+                duration_ms: 0,
+            })
+        }
+        Err(e) => Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some(format!("MCP call failed: {}", e)),
+            duration_ms: 0,
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3900,6 +4004,7 @@ mod tests {
             bleed_detector: None,
             browser_pool: None,
             plugin_registry: None,
+            mcp_clients: None,
         }
     }
 

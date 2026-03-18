@@ -319,6 +319,24 @@ pub enum ChannelCommands {
     /// List configured channels and their status
     List,
 
+    /// Interactive setup wizard for a channel platform
+    Setup {
+        /// Platform to set up (telegram, discord, slack). Interactive if omitted.
+        platform: Option<String>,
+    },
+
+    /// Show, update, or remove the shared tunnel URL
+    Tunnel {
+        #[command(subcommand)]
+        action: Option<TunnelAction>,
+    },
+
+    /// Remove a channel and its secrets
+    Remove {
+        /// Platform to remove (telegram, discord, slack)
+        platform: String,
+    },
+
     /// Send a test message through a channel adapter
     Test {
         /// Platform to test (telegram, discord, slack)
@@ -330,6 +348,20 @@ pub enum ChannelCommands {
         /// Channel name
         name: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TunnelAction {
+    /// Update the tunnel URL
+    Set {
+        /// New public URL
+        url: String,
+        /// Tunnel mode: quick, named, or manual
+        #[arg(short, long, default_value = "manual")]
+        mode: String,
+    },
+    /// Remove the tunnel configuration
+    Remove,
 }
 
 #[derive(Debug, Subcommand)]

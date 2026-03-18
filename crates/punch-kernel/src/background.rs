@@ -121,6 +121,7 @@ pub async fn run_gorilla_tick(
         coordinator: None,
         approval_engine: None,
         sandbox: None,
+        mcp_clients: None,
     };
 
     run_fighter_loop(params).await

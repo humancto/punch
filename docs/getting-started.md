@@ -240,17 +240,13 @@ Punch ships with **103 bundled skills** covering programming languages, framewor
 
 ## Step 10: Connect a Channel
 
-Route fighters to messaging platforms so users can talk to them from Telegram, Discord, Slack, and 23 other platforms:
+Deploy fighters to messaging platforms:
 
-Add to your `~/.punch/config.toml`:
-
-```toml
-[telegram]
-bot_token_env = "TELEGRAM_BOT_TOKEN"
-webhook_url = "https://yourdomain.com/api/channels/telegram/webhook"
+```bash
+punch channel setup telegram
 ```
 
-Then restart Punch. Your fighter now responds to Telegram messages.
+This wizard handles everything: bot creation guidance, security setup, Cloudflare Tunnel, and webhook registration. See [Channels Guide](channels.md) for the full documentation.
 
 ## What to Explore Next
 

@@ -19,7 +19,8 @@ use tracing::{info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_runtime::{
-    FighterLoopParams, FighterLoopResult, LlmDriver, run_fighter_loop, tools_for_capabilities,
+    FighterLoopParams, FighterLoopResult, LlmDriver, McpClient, run_fighter_loop,
+    tools_for_capabilities,
 };
 use punch_types::{
     AgentCoordinator, AgentInfo, AgentMessageResult, CoordinationStrategy, FighterId,
@@ -129,6 +130,8 @@ pub struct Ring {
     tenant_registry: TenantRegistry,
     /// Skill marketplace for discovering and installing moves.
     marketplace: SkillMarketplace,
+    /// Active MCP server clients, keyed by server name.
+    mcp_clients: Arc<DashMap<String, Arc<McpClient>>>,
     /// Shutdown signal sender.
     shutdown_tx: watch::Sender<bool>,
     /// Shutdown signal receiver.
@@ -160,6 +163,8 @@ impl Ring {
             marketplace.publish(listing);
         }
 
+        let mcp_clients = Arc::new(DashMap::new());
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -179,6 +184,7 @@ impl Ring {
             metrics: metrics_registry,
             tenant_registry: TenantRegistry::new(),
             marketplace,
+            mcp_clients,
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -205,6 +211,8 @@ impl Ring {
             marketplace.publish(listing);
         }
 
+        let mcp_clients = Arc::new(DashMap::new());
+
         Self {
             fighters: DashMap::new(),
             gorillas: DashMap::new(),
@@ -224,6 +232,7 @@ impl Ring {
             metrics: metrics_registry,
             tenant_registry: TenantRegistry::new(),
             marketplace,
+            mcp_clients,
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
         }
@@ -289,6 +298,94 @@ impl Ring {
     /// Access the skill marketplace.
     pub fn marketplace(&self) -> &SkillMarketplace {
         &self.marketplace
+    }
+
+    /// Access the active MCP clients.
+    pub fn mcp_clients(&self) -> &Arc<DashMap<String, Arc<McpClient>>> {
+        &self.mcp_clients
+    }
+
+    // -- MCP server lifecycle ------------------------------------------------
+
+    /// Spawn and initialize all MCP servers defined in the configuration.
+    ///
+    /// Each server is started as a subprocess, initialized via JSON-RPC 2.0
+    /// handshake, and its tools are discovered. Servers that fail to start
+    /// are logged and skipped — they don't block the Ring from operating.
+    pub async fn spawn_mcp_servers(&self) {
+        for (name, server_config) in &self.config.mcp_servers {
+            info!(server = %name, command = %server_config.command, "spawning MCP server");
+
+            match McpClient::spawn(
+                name.clone(),
+                &server_config.command,
+                &server_config.args,
+                &server_config.env,
+            )
+            .await
+            {
+                Ok(client) => {
+                    if let Err(e) = client.initialize().await {
+                        warn!(server = %name, error = %e, "MCP server initialization failed, skipping");
+                        let _ = client.shutdown().await;
+                        continue;
+                    }
+
+                    match client.list_tools().await {
+                        Ok(tools) => {
+                            info!(
+                                server = %name,
+                                tool_count = tools.len(),
+                                "MCP server ready with {} tools",
+                                tools.len()
+                            );
+                        }
+                        Err(e) => {
+                            warn!(server = %name, error = %e, "failed to list MCP tools");
+                        }
+                    }
+
+                    self.mcp_clients.insert(name.clone(), Arc::new(client));
+
+                    self.event_bus.publish(PunchEvent::McpServerStarted {
+                        server_name: name.clone(),
+                    });
+                }
+                Err(e) => {
+                    warn!(server = %name, error = %e, "failed to spawn MCP server, skipping");
+                }
+            }
+        }
+    }
+
+    /// Shut down all active MCP servers gracefully.
+    pub async fn shutdown_mcp_servers(&self) {
+        for entry in self.mcp_clients.iter() {
+            let name = entry.key().clone();
+            info!(server = %name, "shutting down MCP server");
+            if let Err(e) = entry.value().shutdown().await {
+                warn!(server = %name, error = %e, "MCP server shutdown error");
+            }
+        }
+        self.mcp_clients.clear();
+    }
+
+    /// Collect tool definitions from all active MCP servers.
+    pub async fn mcp_tools(&self) -> Vec<punch_types::ToolDefinition> {
+        let mut tools = Vec::new();
+        for entry in self.mcp_clients.iter() {
+            match entry.value().list_tools().await {
+                Ok(server_tools) => tools.extend(server_tools),
+                Err(e) => {
+                    warn!(
+                        server = %entry.key(),
+                        error = %e,
+                        "failed to list tools from MCP server"
+                    );
+                }
+            }
+        }
+        tools
     }
 
     // -- Tenant-scoped operations --------------------------------------------
@@ -589,12 +686,42 @@ impl Ring {
             }
         };
 
-        // Mark as fighting and publish status change.
+        // Mark as fighting and extract what we need before dropping the guard.
         entry.status = FighterStatus::Fighting;
         let manifest = entry.manifest.clone();
         let fighter_name = manifest.name.clone();
-        let available_tools = tools_for_capabilities(&manifest.capabilities);
-        drop(entry); // Release the DashMap guard before the async call.
+        drop(entry); // Release the DashMap guard before any async calls.
+
+        let mut available_tools = tools_for_capabilities(&manifest.capabilities);
+
+        // Merge MCP tools if the fighter has McpAccess capability.
+        let has_mcp_access = manifest.capabilities.iter().any(|c| {
+            matches!(c, punch_types::Capability::McpAccess(_))
+        });
+        if has_mcp_access && !self.mcp_clients.is_empty() {
+            for mcp_entry in self.mcp_clients.iter() {
+                let server_name = mcp_entry.key();
+                let can_access = manifest.capabilities.iter().any(|c| {
+                    if let punch_types::Capability::McpAccess(pattern) = c {
+                        pattern == "*" || pattern == server_name
+                    } else {
+                        false
+                    }
+                });
+                if can_access {
+                    match mcp_entry.value().list_tools().await {
+                        Ok(tools) => available_tools.extend(tools),
+                        Err(e) => {
+                            warn!(
+                                server = %server_name,
+                                error = %e,
+                                "failed to list MCP tools for fighter"
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         // Publish the incoming user message event.
         self.event_bus.publish(PunchEvent::FighterMessage {
@@ -619,6 +746,11 @@ impl Ring {
             coordinator,
             approval_engine: None,
             sandbox: None,
+            mcp_clients: if self.mcp_clients.is_empty() {
+                None
+            } else {
+                Some(Arc::clone(&self.mcp_clients))
+            },
         };
 
         // Record message metric.

@@ -1397,6 +1397,7 @@ impl WorkflowEngine {
             coordinator: None,
             approval_engine: None,
             sandbox: None,
+            mcp_clients: None,
         };
 
         let loop_result = tokio::time::timeout(

@@ -11,6 +11,7 @@ pub mod adapters;
 pub mod bridge;
 pub mod onboarding;
 pub mod router;
+pub mod security;
 
 use std::collections::HashMap;
 use std::sync::Arc;

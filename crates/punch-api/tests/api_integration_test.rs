@@ -90,6 +90,7 @@ fn test_config() -> PunchConfig {
             knowledge_graph_enabled: false,
             max_entries: None,
         },
+        tunnel: None,
         channels: Default::default(),
         mcp_servers: Default::default(),
     }
@@ -119,6 +120,7 @@ async fn start_test_server_with_auth(api_key: &str) -> TestServer {
             "http://localhost:0",
             vec![],
         )),
+        channel_router: Arc::new(punch_channels::router::ChannelRouter::new()),
     };
 
     let app = build_router(state, api_key, 60);
@@ -153,6 +155,7 @@ async fn start_test_server_with_rate_limit(rpm: u32) -> TestServer {
             "http://localhost:0",
             vec![],
         )),
+        channel_router: Arc::new(punch_channels::router::ChannelRouter::new()),
     };
 
     let app = build_router(state, "", rpm);
