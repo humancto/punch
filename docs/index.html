@@ -315,6 +315,9 @@ footer a:hover { text-decoration: underline; }
     <div class="hero-install">
       <div class="install-cmd" onclick="copyCmd(this, 'cargo install punch-cli')"><span class="prompt">$</span> cargo install punch-cli<span class="copy-hint">click to copy</span></div>
       <div class="install-cmd" onclick="copyCmd(this, 'brew tap humancto/tap &amp;&amp; brew install punch')"><span class="prompt">$</span> brew tap humancto/tap &amp;&amp; brew install punch<span class="copy-hint">click to copy</span></div>
+      <div style="margin-top: 24px; font-family: var(--mono); font-size: 12px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase;">Then</div>
+      <div class="install-cmd" onclick="copyCmd(this, 'punch init &amp;&amp; punch start')"><span class="prompt">$</span> punch init &amp;&amp; punch start<span class="copy-hint">click to copy</span></div>
+      <div style="font-family: var(--sans); font-size: 14px; color: var(--text-dim); margin-top: 8px;">That's it. A fighter auto-spawns. Chat via CLI or <a href="getting-started.html" style="color: var(--red); text-decoration: none;">connect Telegram</a>.</div>
     </div>
     <div class="hero-ctas">
       <a href="https://github.com/humancto/punch" class="btn btn-primary" target="_blank" rel="noopener">
@@ -640,10 +643,11 @@ curl localhost:6660/.well-known/agent.json</div>
     <div class="reveal">
       <img src="assets/punch-hero.jpeg" alt="Punch" style="width: 180px; border-radius: 16px; margin-bottom: 32px; box-shadow: 0 0 60px rgba(255,45,45,0.15), 0 20px 60px rgba(0,0,0,0.4);">
       <div class="cta-title">Get in the ring.</div>
-      <p class="cta-desc">One binary. Conscious agents. Deploy in seconds.</p>
+      <p class="cta-desc">Install. Init. Start. Your agent is live.</p>
       <div class="cta-installs">
         <div class="install-cmd" onclick="copyCmd(this, 'cargo install punch-cli')"><span class="prompt">$</span> cargo install punch-cli<span class="copy-hint">click to copy</span></div>
-        <div class="install-cmd" onclick="copyCmd(this, 'brew tap humancto/tap &amp;&amp; brew install punch')"><span class="prompt">$</span> brew tap humancto/tap &amp;&amp; brew install punch<span class="copy-hint">click to copy</span></div>
+        <div class="install-cmd" onclick="copyCmd(this, 'punch init &amp;&amp; punch start')"><span class="prompt">$</span> punch init &amp;&amp; punch start<span class="copy-hint">click to copy</span></div>
+        <div class="install-cmd" onclick="copyCmd(this, 'punch channel setup telegram')"><span class="prompt">$</span> punch channel setup telegram<span class="copy-hint">click to copy</span></div>
       </div>
       <div class="hero-ctas">
         <a href="https://github.com/humancto/punch" class="btn btn-primary" target="_blank" rel="noopener">
