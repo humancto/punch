@@ -190,7 +190,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
             system_prompt:
                 "You are Punch, a capable AI assistant. Be helpful, concise, and direct."
                     .to_string(),
-            capabilities: vec![],
+            capabilities: vec![Capability::Memory, Capability::McpAccess("*".to_string())],
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -208,6 +208,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::ShellExec("*".to_string()),
                 Capability::Network("*".to_string()),
                 Capability::Memory,
+                Capability::McpAccess("*".to_string()),
             ],
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
@@ -225,6 +226,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::FileRead("**".to_string()),
                 Capability::FileWrite("**".to_string()),
                 Capability::Memory,
+                Capability::McpAccess("*".to_string()),
             ],
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
@@ -237,7 +239,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  on broad knowledge to give insightful, well-reasoned answers. Be clear, \
                  concise, and helpful."
                 .to_string(),
-            capabilities: vec![Capability::Memory],
+            capabilities: vec![Capability::Memory, Capability::McpAccess("*".to_string())],
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -253,6 +255,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                 Capability::FileWrite("**".to_string()),
                 Capability::ShellExec("*".to_string()),
                 Capability::Memory,
+                Capability::McpAccess("*".to_string()),
             ],
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
