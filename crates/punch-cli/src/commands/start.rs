@@ -114,6 +114,8 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
             capabilities: vec![
                 Capability::Network("*".to_string()),
                 Capability::FileRead("**".to_string()),
+                Capability::FileWrite("**".to_string()),
+                Capability::ShellExec("*".to_string()),
                 Capability::Memory,
                 Capability::McpAccess("*".to_string()),
             ],
