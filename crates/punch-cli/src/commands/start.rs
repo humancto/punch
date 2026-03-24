@@ -8,7 +8,7 @@ use punch_api::server::start_arena;
 use punch_kernel::{OnError, Ring, Workflow, WorkflowId, WorkflowStep};
 use punch_memory::MemorySubstrate;
 use punch_runtime::create_driver;
-use punch_types::GorillaManifest;
+use punch_types::{Capability, GorillaManifest, WeightClass};
 
 use super::{load_config, load_dotenv, punch_home};
 
@@ -98,6 +98,28 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     // Register built-in workflows.
     let workflow_count = register_builtin_workflows(&ring);
 
+    // Auto-spawn a default fighter if none are running.
+    if ring.list_fighters().is_empty() {
+        let manifest = punch_types::FighterManifest {
+            name: "Punch".to_string(),
+            description: "The default all-rounder fighter.".to_string(),
+            model: config.default_model.clone(),
+            system_prompt:
+                "You are Punch, a capable AI assistant. Be helpful, concise, and direct."
+                    .to_string(),
+            capabilities: vec![
+                Capability::Network("*".to_string()),
+                Capability::FileRead("**".to_string()),
+                Capability::Memory,
+                Capability::McpAccess("*".to_string()),
+            ],
+            weight_class: WeightClass::Middleweight,
+            tenant_id: None,
+        };
+        let id = ring.spawn_fighter(manifest).await;
+        info!(%id, "auto-spawned default fighter: Punch");
+    }
+
     // Write PID file.
     let pid_path = punch_home().join(".daemon.pid");
     let pid = std::process::id();
@@ -116,6 +138,8 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
         "  MCP Servers:  {} active",
         ring.mcp_clients().len()
     );
+    let fighter_count = ring.list_fighters().len();
+    println!("  Fighters:     {} ready", fighter_count);
     println!("  Channels:     {} configured", config.channels.len());
     if !config.channels.is_empty() {
         for (name, ch) in &config.channels {
