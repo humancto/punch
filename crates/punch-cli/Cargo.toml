@@ -19,6 +19,7 @@ punch-kernel = { version = "1.0.0", path = "../punch-kernel" }
 punch-runtime = { version = "1.0.0", path = "../punch-runtime" }
 punch-arena = { version = "1.0.0", path = "../punch-api" }
 punch-skills = { version = "1.0.0", path = "../punch-skills" }
+punch-channels = { version = "1.0.0", path = "../punch-channels" }
 
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -34,6 +35,7 @@ ratatui = { workspace = true }
 crossterm = { workspace = true }
 anyhow = { workspace = true }
 dirs = "6"
+rand = { workspace = true }
 
 [features]
 default = []

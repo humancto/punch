@@ -34,6 +34,7 @@ fn make_config() -> PunchConfig {
             knowledge_graph_enabled: true,
             max_entries: Some(10000),
         },
+        tunnel: None,
         channels: HashMap::new(),
         mcp_servers: HashMap::new(),
     }

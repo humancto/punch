@@ -1,22 +1,33 @@
 //! Webhook endpoints for channel adapters.
 //!
-//! These endpoints receive incoming messages from external platforms
-//! (Discord, Telegram, Slack) and route them to fighters via the Ring.
+//! Security architecture:
+//! 1. Parse raw payload (platform-specific)
+//! 2. Verify webhook signature (Telegram secret_token, Slack HMAC-SHA256)
+//! 3. Check user allowlist (deny unknown users)
+//! 4. Check per-user rate limit (prevent DoS)
+//! 5. Route to fighter via persistent ChannelRouter (from AppState)
+//! 6. Send message via MCP-aware bridge handle (fighters get MCP tools)
+//!
+//! All security checks happen BEFORE any fighter interaction.
+
+use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
+use axum::body::Bytes;
 use axum::{Json, Router};
-use punch_channels::ChannelAdapter;
 use serde::Serialize;
 use tracing::{info, warn};
 
+use punch_channels::ChannelAdapter;
 use punch_channels::ChannelPlatform;
 use punch_channels::adapters::{DiscordAdapter, SlackAdapter, TelegramAdapter};
 use punch_channels::bridge::{self, ChannelBridgeHandle};
-use punch_channels::router::ChannelRouter;
+use punch_channels::security::ChannelGateway;
 use punch_types::FighterId;
+use punch_types::config::ChannelConfig;
 
 use crate::AppState;
 
@@ -35,17 +46,65 @@ struct WebhookResponse {
     error: Option<String>,
 }
 
-/// Ring-backed implementation of ChannelBridgeHandle.
+fn ok_response(response: String) -> (StatusCode, Json<WebhookResponse>) {
+    (
+        StatusCode::OK,
+        Json(WebhookResponse {
+            ok: true,
+            response: Some(response),
+            error: None,
+        }),
+    )
+}
+
+fn err_response(error: String) -> (StatusCode, Json<WebhookResponse>) {
+    (
+        StatusCode::OK,
+        Json(WebhookResponse {
+            ok: false,
+            response: None,
+            error: Some(error),
+        }),
+    )
+}
+
+fn filtered_response() -> (StatusCode, Json<WebhookResponse>) {
+    (
+        StatusCode::OK,
+        Json(WebhookResponse {
+            ok: true,
+            response: None,
+            error: Some("Message filtered or unparseable".to_string()),
+        }),
+    )
+}
+
+fn denied_response(reason: &str) -> (StatusCode, Json<WebhookResponse>) {
+    (
+        StatusCode::FORBIDDEN,
+        Json(WebhookResponse {
+            ok: false,
+            response: None,
+            error: Some(reason.to_string()),
+        }),
+    )
+}
+
+/// MCP-aware Ring bridge handle.
+///
+/// Uses `send_message_with_coordinator` so fighters routed from channels
+/// have access to MCP tools (LocalMind, etc.) — not just plain send_message.
 struct RingBridgeHandle {
-    ring: std::sync::Arc<punch_kernel::Ring>,
+    ring: Arc<punch_kernel::Ring>,
 }
 
 #[async_trait::async_trait]
 impl ChannelBridgeHandle for RingBridgeHandle {
     async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String> {
+        // Use coordinator-aware path so channel fighters get MCP tools.
         match self
             .ring
-            .send_message(&fighter_id, message.to_string())
+            .send_message_with_coordinator(&fighter_id, message.to_string(), None)
             .await
         {
             Ok(result) => Ok(result.response),
@@ -70,75 +129,41 @@ impl ChannelBridgeHandle for RingBridgeHandle {
     }
 
     async fn spawn_fighter_by_name(&self, _manifest_name: &str) -> Result<FighterId, String> {
-        // For webhook mode, we don't auto-spawn fighters.
-        // Fighters should be pre-created via the API or CLI.
         Err("Auto-spawn not available in webhook mode. Create a fighter first via `punch fighter spawn`.".to_string())
     }
 }
 
-// ---------------------------------------------------------------------------
-// Discord webhook handler
-// ---------------------------------------------------------------------------
+/// Resolve the ChannelGateway for a given channel type.
+///
+/// Looks up the channel config by type name and builds a gateway with
+/// security settings (allowlist, rate limit, webhook secret).
+fn resolve_gateway(state: &AppState, channel_type: &str) -> ChannelGateway {
+    let config = state
+        .config
+        .channels
+        .values()
+        .find(|c| c.channel_type == channel_type);
 
-/// POST /api/channels/discord/webhook — receive Discord messages.
-async fn discord_webhook(
-    State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    // Create a temporary adapter for parsing (no bot token needed for parsing)
-    let adapter = DiscordAdapter::new(String::new(), None);
-
-    let msg = match adapter.parse_webhook_payload(&payload) {
-        Some(msg) => msg,
+    match config {
+        Some(cfg) => ChannelGateway::from_config(channel_type, cfg),
         None => {
-            return (
-                StatusCode::OK,
-                Json(WebhookResponse {
-                    ok: true,
-                    response: None,
-                    error: Some("Message filtered or unparseable".to_string()),
-                }),
+            // No config for this channel — create a permissive gateway (dev mode).
+            warn!(
+                channel = %channel_type,
+                "no channel config found — running with open access (dev mode)"
             );
+            ChannelGateway::from_config(
+                channel_type,
+                &ChannelConfig {
+                    channel_type: channel_type.to_string(),
+                    token_env: None,
+                    webhook_secret_env: None,
+                    allowed_user_ids: vec![],
+                    rate_limit_per_user: 20,
+                    settings: Default::default(),
+                },
+            )
         }
-    };
-
-    info!(
-        user_id = %msg.user_id,
-        channel_id = %msg.channel_id,
-        "Discord webhook message received"
-    );
-
-    let handle = RingBridgeHandle {
-        ring: state.ring.clone(),
-    };
-    let router = ChannelRouter::new();
-
-    match bridge::process_incoming_message(
-        &handle,
-        &router,
-        &ChannelPlatform::Discord,
-        &msg.user_id,
-        &msg.display_name,
-        &msg.text,
-    )
-    .await
-    {
-        Ok(response) => (
-            StatusCode::OK,
-            Json(WebhookResponse {
-                ok: true,
-                response: Some(response),
-                error: None,
-            }),
-        ),
-        Err(e) => (
-            StatusCode::OK,
-            Json(WebhookResponse {
-                ok: false,
-                response: None,
-                error: Some(e),
-            }),
-        ),
     }
 }
 
@@ -147,24 +172,35 @@ async fn discord_webhook(
 // ---------------------------------------------------------------------------
 
 /// POST /api/channels/telegram/webhook — receive Telegram updates.
+///
+/// Security: Verifies X-Telegram-Bot-Api-Secret-Token header against
+/// the configured webhook secret. This header is set when you register
+/// the webhook with Telegram's setWebhook API.
 async fn telegram_webhook(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let adapter = TelegramAdapter::new(String::new());
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
+    let gateway = resolve_gateway(&state, "telegram");
 
+    // 1. Verify Telegram secret token header.
+    if let Some(ref expected_secret) = gateway.webhook_secret {
+        let provided = headers
+            .get("x-telegram-bot-api-secret-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if provided != expected_secret {
+            warn!("Telegram webhook signature verification FAILED");
+            return denied_response("Invalid webhook secret");
+        }
+    }
+
+    // 2. Parse the payload.
+    let adapter = TelegramAdapter::new(String::new());
     let msg = match adapter.parse_webhook_payload(&payload) {
         Some(msg) => msg,
-        None => {
-            return (
-                StatusCode::OK,
-                Json(WebhookResponse {
-                    ok: true,
-                    response: None,
-                    error: Some("Message filtered or unparseable".to_string()),
-                }),
-            );
-        }
+        None => return filtered_response(),
     };
 
     info!(
@@ -173,14 +209,19 @@ async fn telegram_webhook(
         "Telegram webhook message received"
     );
 
+    // 3. Security checks: allowlist + rate limit.
+    if let Err(reason) = gateway.authorize_request(&msg.user_id) {
+        return denied_response(&reason);
+    }
+
+    // 4. Route to fighter via persistent router.
     let handle = RingBridgeHandle {
         ring: state.ring.clone(),
     };
-    let router = ChannelRouter::new();
 
     match bridge::process_incoming_message(
         &handle,
-        &router,
+        &state.channel_router,
         &ChannelPlatform::Telegram,
         &msg.user_id,
         &msg.display_name,
@@ -189,32 +230,91 @@ async fn telegram_webhook(
     .await
     {
         Ok(response) => {
-            // Also send the response back via Telegram API if bot token is configured
-            let bot_token_env = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
-            if !bot_token_env.is_empty() {
-                let tg = TelegramAdapter::new(bot_token_env);
+            // Send response back via Telegram Bot API.
+            if let Some(cfg) = state
+                .config
+                .channels
+                .values()
+                .find(|c| c.channel_type == "telegram")
+                && let Some(ref env_var) = cfg.token_env
+                && let Ok(token) = std::env::var(env_var)
+            {
+                let tg = TelegramAdapter::new(token);
                 if let Err(e) = tg.send_response(&msg.channel_id, &response).await {
                     warn!("Failed to send Telegram response: {e}");
                 }
             }
-
-            (
-                StatusCode::OK,
-                Json(WebhookResponse {
-                    ok: true,
-                    response: Some(response),
-                    error: None,
-                }),
-            )
+            ok_response(response)
         }
-        Err(e) => (
-            StatusCode::OK,
-            Json(WebhookResponse {
-                ok: false,
-                response: None,
-                error: Some(e),
-            }),
-        ),
+        Err(e) => err_response(e),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Discord webhook handler
+// ---------------------------------------------------------------------------
+
+/// POST /api/channels/discord/webhook — receive Discord messages.
+///
+/// Security: Verifies X-Punch-Secret header against the configured
+/// webhook secret. Discord's native Ed25519 verification requires the
+/// `ed25519-dalek` dependency — for now we use a shared secret header
+/// that should be set on the Discord bot's webhook configuration.
+async fn discord_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
+    let gateway = resolve_gateway(&state, "discord");
+
+    // 1. Verify shared secret header.
+    if let Some(ref expected_secret) = gateway.webhook_secret {
+        let provided = headers
+            .get("x-punch-secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if provided != expected_secret {
+            warn!("Discord webhook secret verification FAILED");
+            return denied_response("Invalid webhook secret");
+        }
+    }
+
+    // 2. Parse the payload.
+    let adapter = DiscordAdapter::new(String::new(), None);
+    let msg = match adapter.parse_webhook_payload(&payload) {
+        Some(msg) => msg,
+        None => return filtered_response(),
+    };
+
+    info!(
+        user_id = %msg.user_id,
+        channel_id = %msg.channel_id,
+        "Discord webhook message received"
+    );
+
+    // 3. Security checks.
+    if let Err(reason) = gateway.authorize_request(&msg.user_id) {
+        return denied_response(&reason);
+    }
+
+    // 4. Route to fighter.
+    let handle = RingBridgeHandle {
+        ring: state.ring.clone(),
+    };
+
+    match bridge::process_incoming_message(
+        &handle,
+        &state.channel_router,
+        &ChannelPlatform::Discord,
+        &msg.user_id,
+        &msg.display_name,
+        &msg.text,
+    )
+    .await
+    {
+        Ok(response) => ok_response(response),
+        Err(e) => err_response(e),
     }
 }
 
@@ -223,13 +323,33 @@ async fn telegram_webhook(
 // ---------------------------------------------------------------------------
 
 /// POST /api/channels/slack/events — receive Slack Events API payloads.
+///
+/// Security: Verifies the X-Slack-Signature header using HMAC-SHA256
+/// with the configured signing secret. This is Slack's standard
+/// request verification mechanism.
 async fn slack_events(
     State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    headers: HeaderMap,
+    bytes: Bytes,
 ) -> impl IntoResponse {
-    let adapter = SlackAdapter::new(String::new(), None);
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
+    let gateway = resolve_gateway(&state, "slack");
 
-    // Handle URL verification challenge
+    // Parse JSON from raw bytes — we keep `bytes` around for HMAC verification.
+    let payload: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Slack webhook: failed to parse JSON body: {e}");
+            return err_response(format!("Invalid JSON: {e}")).into_response();
+        }
+    };
+
+    // Resolve signing secret for Slack HMAC verification.
+    let signing_secret = gateway.webhook_secret.clone();
+    let adapter = SlackAdapter::new(String::new(), signing_secret.clone());
+
+    // Handle URL verification challenge (no auth needed — Slack sends this
+    // during webhook setup and expects the challenge echoed back).
     if let Some(challenge) = adapter.check_url_verification(&payload) {
         return (
             StatusCode::OK,
@@ -238,19 +358,38 @@ async fn slack_events(
             .into_response();
     }
 
+    // 1. Verify Slack HMAC-SHA256 signature against the raw body bytes.
+    if signing_secret.is_some() {
+        let timestamp = headers
+            .get("x-slack-request-timestamp")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let signature = headers
+            .get("x-slack-signature")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        // Replay attack protection: reject requests older than 5 minutes.
+        if let Ok(ts) = timestamp.parse::<i64>() {
+            let now = chrono::Utc::now().timestamp();
+            if (now - ts).unsigned_abs() > 300 {
+                warn!("Slack webhook rejected: timestamp too old (replay attack?)");
+                return denied_response("Request too old").into_response();
+            }
+        }
+
+        // Verify against raw body bytes (not re-serialized JSON) so the HMAC
+        // matches exactly what Slack computed.
+        if !adapter.verify_webhook_signature(timestamp, signature, &bytes) {
+            warn!("Slack webhook signature verification FAILED");
+            return denied_response("Invalid signature").into_response();
+        }
+    }
+
+    // 2. Parse the event.
     let msg = match adapter.parse_webhook_payload(&payload).await {
         Some(msg) => msg,
-        None => {
-            return (
-                StatusCode::OK,
-                Json(WebhookResponse {
-                    ok: true,
-                    response: None,
-                    error: Some("Message filtered or unparseable".to_string()),
-                }),
-            )
-                .into_response();
-        }
+        None => return filtered_response().into_response(),
     };
 
     info!(
@@ -259,14 +398,19 @@ async fn slack_events(
         "Slack event message received"
     );
 
+    // 3. Security checks.
+    if let Err(reason) = gateway.authorize_request(&msg.user_id) {
+        return denied_response(&reason).into_response();
+    }
+
+    // 4. Route to fighter.
     let handle = RingBridgeHandle {
         ring: state.ring.clone(),
     };
-    let router = ChannelRouter::new();
 
     match bridge::process_incoming_message(
         &handle,
-        &router,
+        &state.channel_router,
         &ChannelPlatform::Slack,
         &msg.user_id,
         &msg.display_name,
@@ -275,33 +419,22 @@ async fn slack_events(
     .await
     {
         Ok(response) => {
-            // Send the response back via Slack API if bot token is configured
-            let bot_token_env = std::env::var("SLACK_BOT_TOKEN").unwrap_or_default();
-            if !bot_token_env.is_empty() {
-                let slack = SlackAdapter::new(bot_token_env, None);
+            // Send response back via Slack Web API.
+            if let Some(cfg) = state
+                .config
+                .channels
+                .values()
+                .find(|c| c.channel_type == "slack")
+                && let Some(ref env_var) = cfg.token_env
+                && let Ok(token) = std::env::var(env_var)
+            {
+                let slack = SlackAdapter::new(token, None);
                 if let Err(e) = slack.send_response(&msg.channel_id, &response).await {
                     warn!("Failed to send Slack response: {e}");
                 }
             }
-
-            (
-                StatusCode::OK,
-                Json(WebhookResponse {
-                    ok: true,
-                    response: Some(response),
-                    error: None,
-                }),
-            )
-                .into_response()
+            ok_response(response).into_response()
         }
-        Err(e) => (
-            StatusCode::OK,
-            Json(WebhookResponse {
-                ok: false,
-                response: None,
-                error: Some(e),
-            }),
-        )
-            .into_response(),
+        Err(e) => err_response(e).into_response(),
     }
 }

@@ -338,6 +338,8 @@ fn event_kind_string(event: &PunchEvent) -> String {
         PunchEvent::ComboTriggered { .. } => "combo_triggered".to_string(),
         PunchEvent::TroopFormed { .. } => "troop_formed".to_string(),
         PunchEvent::TroopDisbanded { .. } => "troop_disbanded".to_string(),
+        PunchEvent::McpServerStarted { .. } => "mcp_server_started".to_string(),
+        PunchEvent::McpServerStopped { .. } => "mcp_server_stopped".to_string(),
         PunchEvent::Error { .. } => "error".to_string(),
     }
 }

@@ -89,6 +89,9 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     // Create the Ring.
     let ring = Arc::new(Ring::new(config.clone(), memory, driver));
 
+    // Spawn MCP servers from configuration.
+    ring.spawn_mcp_servers().await;
+
     // Auto-load bundled gorilla manifests.
     let gorilla_count = load_bundled_gorillas(&ring);
 
@@ -109,6 +112,10 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     println!("  Model:        {}", config.default_model.model);
     println!("  Gorillas:     {} registered", gorilla_count);
     println!("  Workflows:    {} registered", workflow_count);
+    println!(
+        "  MCP Servers:  {} active",
+        ring.mcp_clients().len()
+    );
     println!("  Channels:     {} configured", config.channels.len());
     if !config.channels.is_empty() {
         for (name, ch) in &config.channels {

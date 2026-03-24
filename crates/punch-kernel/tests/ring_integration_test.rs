@@ -86,6 +86,7 @@ fn test_config() -> PunchConfig {
             knowledge_graph_enabled: false,
             max_entries: None,
         },
+        tunnel: None,
         channels: Default::default(),
         mcp_servers: Default::default(),
     }

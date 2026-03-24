@@ -11,6 +11,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use punch_channels::router::ChannelRouter;
 use punch_kernel::{A2ATaskExecutor, Ring};
 use punch_types::a2a::A2ARegistry;
 use punch_types::{PunchConfig, PunchResult};
@@ -47,11 +48,14 @@ pub async fn start_arena(ring: Arc<Ring>, config: &PunchConfig) -> PunchResult<(
     let mut a2a_executor = A2ATaskExecutor::new(Arc::clone(&ring), Arc::clone(&a2a_state.tasks));
     a2a_executor.start();
 
+    let channel_router = Arc::new(ChannelRouter::new());
+
     let state = AppState {
         ring,
         started_at: chrono::Utc::now(),
         config: Arc::new(config.clone()),
         a2a: a2a_state,
+        channel_router,
     };
 
     let app = build_router(state, &api_key, config.rate_limit_rpm);

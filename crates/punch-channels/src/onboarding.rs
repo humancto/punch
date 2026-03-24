@@ -29,6 +29,17 @@ pub struct OnboardingGuide {
     pub webhook_path: &'static str,
 }
 
+/// Return the list of platforms that have onboarding guides.
+pub fn available_platforms() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("telegram", "Telegram"),
+        ("slack", "Slack"),
+        ("discord", "Discord"),
+        ("whatsapp", "WhatsApp Business"),
+        ("github", "GitHub"),
+    ]
+}
+
 /// Get the onboarding guide for a platform.
 pub fn guide_for(platform: &str) -> Option<OnboardingGuide> {
     match platform.to_lowercase().as_str() {
@@ -49,7 +60,7 @@ pub fn guide_for(platform: &str) -> Option<OnboardingGuide> {
                     url: None,
                 },
                 OnboardingStep {
-                    instruction: "Set the webhook URL in BotFather to: https://YOUR_DOMAIN:6660/api/channels/telegram/webhook",
+                    instruction: "The wizard will register the webhook automatically",
                     url: None,
                 },
             ],
@@ -266,6 +277,26 @@ mod tests {
         for platform in &["telegram", "slack", "discord", "whatsapp", "github"] {
             let guide = guide_for(platform).unwrap();
             assert!(guide.webhook_path.starts_with("/api/channels/"));
+        }
+    }
+
+    #[test]
+    fn test_available_platforms_returns_all() {
+        let platforms = available_platforms();
+        assert_eq!(platforms.len(), 5);
+        let ids: Vec<&str> = platforms.iter().map(|(id, _)| *id).collect();
+        assert!(ids.contains(&"telegram"));
+        assert!(ids.contains(&"slack"));
+        assert!(ids.contains(&"discord"));
+        assert!(ids.contains(&"whatsapp"));
+        assert!(ids.contains(&"github"));
+    }
+
+    #[test]
+    fn test_available_platforms_match_guides() {
+        for (id, display) in available_platforms() {
+            let guide = guide_for(id).expect(&format!("{} should have a guide", id));
+            assert_eq!(guide.display_name, display);
         }
     }
 

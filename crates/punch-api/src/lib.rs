@@ -15,6 +15,8 @@ use std::sync::Arc;
 use punch_kernel::Ring;
 use punch_types::PunchConfig;
 
+use punch_channels::router::ChannelRouter;
+
 use crate::routes::a2a::A2AState;
 
 /// Shared application state threaded through all Axum handlers.
@@ -28,4 +30,6 @@ pub struct AppState {
     pub config: Arc<PunchConfig>,
     /// Agent-to-Agent protocol state.
     pub a2a: A2AState,
+    /// Persistent channel router — routes survive across webhook requests.
+    pub channel_router: Arc<ChannelRouter>,
 }

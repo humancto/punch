@@ -20,11 +20,14 @@ use std::sync::Arc;
 use serde::Deserialize as SerdeDeserialize;
 use tracing::{debug, error, info, instrument, warn};
 
+use dashmap::DashMap;
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
     AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
     Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
 };
+
+use crate::mcp::McpClient;
 
 use crate::context_budget::ContextBudget;
 use crate::driver::{CompletionRequest, LlmDriver, StopReason, TokenUsage};
@@ -68,6 +71,9 @@ pub struct FighterLoopParams {
     /// Optional subprocess sandbox (containment ring) for shell and filesystem tools.
     /// When present, commands are validated and environments are sanitized before execution.
     pub sandbox: Option<Arc<SandboxEnforcer>>,
+    /// Active MCP server clients shared across fighters.
+    /// When present, MCP tools are available for dispatch.
+    pub mcp_clients: Option<Arc<DashMap<String, Arc<McpClient>>>>,
 }
 
 /// Result of a completed fighter loop run.
@@ -151,6 +157,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         bleed_detector: Some(Arc::new(ShellBleedDetector::new())),
         browser_pool: None,
         plugin_registry: None,
+        mcp_clients: params.mcp_clients.clone(),
     };
 
     // 4. Main loop.

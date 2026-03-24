@@ -49,6 +49,8 @@ pub enum Capability {
     PluginInvoke,
     /// Delegate tasks to remote A2A agents.
     A2ADelegate,
+    /// Access MCP servers matching the given name pattern (e.g., "*" for all, "github" for specific).
+    McpAccess(String),
 }
 
 impl std::fmt::Display for Capability {
@@ -74,6 +76,7 @@ impl std::fmt::Display for Capability {
             Self::Crypto => write!(f, "crypto"),
             Self::PluginInvoke => write!(f, "plugin_invoke"),
             Self::A2ADelegate => write!(f, "a2a_delegate"),
+            Self::McpAccess(p) => write!(f, "mcp_access({})", p),
         }
     }
 }
@@ -127,6 +130,9 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
         (Capability::Crypto, Capability::Crypto) => true,
         (Capability::PluginInvoke, Capability::PluginInvoke) => true,
         (Capability::A2ADelegate, Capability::A2ADelegate) => true,
+        (Capability::McpAccess(granted_pat), Capability::McpAccess(required_name)) => {
+            pattern_matches(granted_pat, required_name)
+        }
         _ => false,
     }
 }
@@ -241,6 +247,34 @@ mod tests {
     }
 
     #[test]
+    fn test_mcp_access_wildcard() {
+        let granted = Capability::McpAccess("*".to_string());
+        let required = Capability::McpAccess("github".to_string());
+        assert!(capability_matches(&granted, &required));
+    }
+
+    #[test]
+    fn test_mcp_access_exact() {
+        let granted = Capability::McpAccess("github".to_string());
+        assert!(capability_matches(
+            &granted,
+            &Capability::McpAccess("github".to_string())
+        ));
+        assert!(!capability_matches(
+            &granted,
+            &Capability::McpAccess("slack".to_string())
+        ));
+    }
+
+    #[test]
+    fn test_mcp_access_display() {
+        assert_eq!(
+            Capability::McpAccess("github".to_string()).to_string(),
+            "mcp_access(github)"
+        );
+    }
+
+    #[test]
     fn test_capability_display_all_scopeless() {
         assert_eq!(Capability::Memory.to_string(), "memory");
         assert_eq!(Capability::KnowledgeGraph.to_string(), "knowledge_graph");
@@ -286,6 +320,9 @@ mod tests {
         for cap in &scopeless {
             assert!(capability_matches(cap, cap), "{} should match itself", cap);
         }
+        // Scoped MCP access should match itself
+        let mcp = Capability::McpAccess("test".to_string());
+        assert!(capability_matches(&mcp, &mcp));
         // Cross-variant should not match
         assert!(!capability_matches(
             &Capability::Memory,
@@ -307,6 +344,7 @@ mod tests {
             Capability::Memory,
             Capability::BrowserControl,
             Capability::Crypto,
+            Capability::McpAccess("*".to_string()),
         ];
         for cap in &caps {
             let json = serde_json::to_string(cap).expect("serialize");

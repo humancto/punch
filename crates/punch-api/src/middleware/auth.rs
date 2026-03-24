@@ -44,6 +44,12 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
 
+    // Channel webhook endpoints use their own authentication (webhook
+    // signatures, secret tokens) — skip API key auth for these.
+    if path.starts_with("/api/channels/") {
+        return next.run(request).await;
+    }
+
     // Check Authorization: Bearer <token>
     let bearer_token = request
         .headers()
@@ -102,9 +108,9 @@ pub async fn tenant_auth_middleware(
     mut request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
-    // Always allow /health without tenant checks.
+    // Always allow /health and channel webhooks without tenant checks.
     let path = request.uri().path();
-    if path == "/health" {
+    if path == "/health" || path.starts_with("/api/channels/") {
         return next.run(request).await;
     }
 

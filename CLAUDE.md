@@ -159,27 +159,67 @@ All strategies use `MessageRouter::request()` with configurable timeout (default
 
 ## Combat Theme Terminology Reference
 
-| Term        | Meaning                              | Code Location                            |
-| ----------- | ------------------------------------ | ---------------------------------------- |
-| Fighter     | Interactive/conversational AI agent  | `punch-types::fighter`, `punch-runtime`  |
-| Gorilla     | Autonomous background AI agent       | `punch-types::gorilla`, `punch-gorillas` |
-| Move        | A skill or tool an agent can use     | `punch-skills`, `punch-types::tool`      |
-| The Ring    | Central execution kernel/coordinator | `punch-kernel::ring::Ring`               |
-| The Arena   | HTTP API server                      | `punch-api`                              |
-| Bout        | A conversation session with memory   | `punch-memory::BoutId`                   |
-| Creed       | Database-backed agent identity       | `punch-types::creed::Creed`              |
-| Heartbeat   | Proactive task on a cadence          | `punch-types::creed::HeartbeatTask`      |
-| Combo       | Chained multi-agent workflow         | `punch-runtime` (planned)                |
-| Troop       | Coordinated group of agents          | `punch-kernel::troop::TroopManager`      |
-| Spawn       | Create a new fighter                 | `Ring::spawn_fighter()`                  |
-| Kill        | Terminate a fighter                  | `Ring::kill_fighter()`                   |
-| Unleash     | Start a gorilla                      | `Ring::unleash_gorilla()`                |
-| Cage        | Stop a gorilla                       | `Ring::cage_gorilla()`                   |
-| Rampaging   | Gorilla actively executing           | `GorillaStatus::Rampaging`               |
-| KnockedOut  | Fighter that errored out             | `FighterStatus::KnockedOut`              |
-| Resting     | Fighter that's rate-limited          | `FighterStatus::Resting`                 |
-| WeightClass | Fighter capability tier              | `punch-types::fighter::WeightClass`      |
-| A2A         | Agent-to-Agent protocol delegation   | `punch-runtime::tool_executor`           |
+| Term        | Meaning                              | Code Location                                    |
+| ----------- | ------------------------------------ | ------------------------------------------------ |
+| Fighter     | Interactive/conversational AI agent  | `punch-types::fighter`, `punch-runtime`          |
+| Gorilla     | Autonomous background AI agent       | `punch-types::gorilla`, `punch-gorillas`         |
+| Move        | A skill or tool an agent can use     | `punch-skills`, `punch-types::tool`              |
+| The Ring    | Central execution kernel/coordinator | `punch-kernel::ring::Ring`                       |
+| The Arena   | HTTP API server                      | `punch-api`                                      |
+| Bout        | A conversation session with memory   | `punch-memory::BoutId`                           |
+| Creed       | Database-backed agent identity       | `punch-types::creed::Creed`                      |
+| Heartbeat   | Proactive task on a cadence          | `punch-types::creed::HeartbeatTask`              |
+| Combo       | Chained multi-agent workflow         | `punch-runtime` (planned)                        |
+| Troop       | Coordinated group of agents          | `punch-kernel::troop::TroopManager`              |
+| Spawn       | Create a new fighter                 | `Ring::spawn_fighter()`                          |
+| Kill        | Terminate a fighter                  | `Ring::kill_fighter()`                           |
+| Unleash     | Start a gorilla                      | `Ring::unleash_gorilla()`                        |
+| Cage        | Stop a gorilla                       | `Ring::cage_gorilla()`                           |
+| Rampaging   | Gorilla actively executing           | `GorillaStatus::Rampaging`                       |
+| KnockedOut  | Fighter that errored out             | `FighterStatus::KnockedOut`                      |
+| Resting     | Fighter that's rate-limited          | `FighterStatus::Resting`                         |
+| WeightClass | Fighter capability tier              | `punch-types::fighter::WeightClass`              |
+| A2A         | Agent-to-Agent protocol delegation   | `punch-runtime::tool_executor`                   |
+| Channel     | Messaging platform adapter           | `punch-channels`, `punch-cli::commands::channel` |
+
+## Channel System
+
+Channels connect fighters to external messaging platforms (Telegram, Slack, Discord, etc.) via webhooks.
+
+### Setup Wizard
+
+`punch channel setup <platform>` — interactive wizard that handles bot creation guidance, credential collection, webhook secret generation, tunnel setup, and webhook registration.
+
+### Architecture
+
+- **One tunnel, many channels** — a single public URL (Cloudflare Tunnel or BYO) is saved to `[tunnel]` in `~/.punch/config.toml` and shared across all channels
+- **Three tunnel modes**: quick (temporary dev), named (persistent Cloudflare), manual (BYO URL)
+- **Config storage**: Channel configs in `~/.punch/config.toml`, secrets in `~/.punch/.env` (env var references, never plaintext tokens in config)
+- **Security layers**: Signature verification (platform-specific HMAC/Ed25519), user allowlist, per-user rate limiting, auth isolation per channel
+
+### Key types
+
+- `punch-types::config::TunnelConfig` — base_url + mode (quick/named/manual)
+- `punch-types::config::ChannelConfig` — channel_type, token_env, webhook_secret_env, allowed_user_ids, rate_limit_per_user
+- `punch-channels::onboarding::OnboardingGuide` — step-by-step setup instructions per platform
+- `punch-channels::router::ChannelRouter` — persistent message router surviving across webhook requests
+- `punch-channels::security::SecurityGateway` — signature verification + allowlist + rate limiting
+
+### CLI commands
+
+| Command                           | What it does                         |
+| --------------------------------- | ------------------------------------ |
+| `punch channel setup <platform>`  | Interactive setup wizard             |
+| `punch channel list`              | Show configured channels             |
+| `punch channel tunnel`            | Show/update/remove shared tunnel URL |
+| `punch channel remove <platform>` | Remove channel config + secrets      |
+| `punch channel test <platform>`   | Send test payload to webhook         |
+| `punch channel status <name>`     | Query daemon for live channel status |
+
+### Documentation
+
+- `docs/channels.md` — Full channel guide (setup, security, tunnel modes, management, troubleshooting)
+- `docs/getting-started.md` Step 10 — Points to the wizard
 
 ## Testing Requirements
 
@@ -211,6 +251,8 @@ punch/
 ├── punch.toml.example          # Example configuration
 ├── docs/
 │   ├── architecture.md         # Architecture deep-dive
+│   ├── channels.md             # Channel setup, tunnel modes, management
+│   ├── getting-started.md      # Quickstart guide (10 steps)
 │   └── security.md             # Security documentation
 └── crates/
     ├── punch-cli/              # Binary crate (main entry point)

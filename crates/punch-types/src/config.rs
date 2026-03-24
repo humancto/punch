@@ -4,7 +4,9 @@ use std::collections::HashMap;
 /// Top-level Punch configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PunchConfig {
-    /// Socket address for the Arena API server (e.g. "0.0.0.0:6660").
+    /// Socket address for the Arena API server (e.g. "127.0.0.1:6660").
+    /// Use 127.0.0.1 for local-only access. Only bind to 0.0.0.0 if you
+    /// need external access AND have authentication configured.
     pub api_listen: String,
     /// API key for authentication. If empty, auth is disabled (dev mode).
     #[serde(default)]
@@ -16,6 +18,9 @@ pub struct PunchConfig {
     pub default_model: ModelConfig,
     /// Memory subsystem configuration.
     pub memory: MemoryConfig,
+    /// Tunnel / public URL configuration shared by all channel webhooks.
+    #[serde(default)]
+    pub tunnel: Option<TunnelConfig>,
     /// Channel configurations keyed by channel name (e.g. "slack", "discord").
     #[serde(default)]
     pub channels: HashMap<String, ChannelConfig>,
@@ -99,6 +104,21 @@ pub struct MemoryConfig {
     pub max_entries: Option<u64>,
 }
 
+/// Configuration for the public tunnel / base URL used by all channel webhooks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelConfig {
+    /// The public base URL that all channel webhooks share
+    /// (e.g. "https://abc.trycloudflare.com" or "https://channels.yourdomain.com").
+    pub base_url: String,
+    /// How this tunnel was set up: "quick", "named", or "manual".
+    #[serde(default = "default_tunnel_mode")]
+    pub mode: String,
+}
+
+fn default_tunnel_mode() -> String {
+    "manual".to_string()
+}
+
 /// Configuration for a communication channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfig {
@@ -106,9 +126,23 @@ pub struct ChannelConfig {
     pub channel_type: String,
     /// Environment variable holding the authentication token.
     pub token_env: Option<String>,
+    /// Environment variable holding the webhook signing secret (for signature verification).
+    /// Slack: signing secret. Telegram: secret_token header value. Discord: public key.
+    pub webhook_secret_env: Option<String>,
+    /// Allowlisted user/chat IDs. Only these users can interact with fighters.
+    /// Empty list = open access (logs a security warning on startup).
+    #[serde(default)]
+    pub allowed_user_ids: Vec<String>,
+    /// Per-user rate limit in messages per minute. Default: 20.
+    #[serde(default = "default_channel_rate_limit")]
+    pub rate_limit_per_user: u32,
     /// Additional channel-specific settings.
     #[serde(default)]
     pub settings: HashMap<String, serde_json::Value>,
+}
+
+fn default_channel_rate_limit() -> u32 {
+    20
 }
 
 /// Configuration for an MCP (Model Context Protocol) server.
@@ -279,6 +313,9 @@ mod tests {
         let config = ChannelConfig {
             channel_type: "slack".to_string(),
             token_env: Some("SLACK_TOKEN".to_string()),
+            webhook_secret_env: Some("SLACK_SIGNING_SECRET".to_string()),
+            allowed_user_ids: vec!["U123".to_string()],
+            rate_limit_per_user: 20,
             settings: HashMap::from([("channel_id".to_string(), serde_json::json!("C123456"))]),
         };
         let json = serde_json::to_string(&config).expect("serialize");
@@ -318,6 +355,25 @@ mod tests {
         assert_eq!(config.command, "python");
         assert!(config.args.is_empty());
         assert!(config.env.is_empty());
+    }
+
+    #[test]
+    fn test_tunnel_config_serde() {
+        let config = TunnelConfig {
+            base_url: "https://abc.trycloudflare.com".to_string(),
+            mode: "quick".to_string(),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deser: TunnelConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deser.base_url, "https://abc.trycloudflare.com");
+        assert_eq!(deser.mode, "quick");
+    }
+
+    #[test]
+    fn test_tunnel_config_default_mode() {
+        let json = r#"{"base_url": "https://example.com"}"#;
+        let config: TunnelConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.mode, "manual");
     }
 
     #[test]
