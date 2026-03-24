@@ -505,27 +505,35 @@ fn resolve_quick_tunnel() -> Option<(String, String)> {
                     Some((url, "quick".to_string()))
                 }
                 Err(e) => {
-                    eprintln!("  [!] {}", e);
-                    eprintln!("  Falling back to manual URL entry.");
+                    eprintln!("  [X] Failed to start tunnel: {}", e);
                     println!();
+                    println!("  Falling back to manual URL entry.");
                     resolve_manual_url()
                 }
             }
         }
         None => {
-            println!("  cloudflared not found. Install it:");
+            println!("  cloudflared is not installed.");
             println!();
-            println!("    brew install cloudflared");
-            println!("    # or: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+            println!("  Install it first:");
             println!();
-            println!("  You can also use npx:");
-            println!("    npx cloudflared tunnel --url http://127.0.0.1:6660");
+            println!("    # macOS");
+            println!("    brew install cloudflare/cloudflare/cloudflared");
             println!();
-            let url = prompt("Paste the tunnel URL once it's running (or any public URL)");
-            if url.is_empty() {
+            println!("    # Linux (Debian/Ubuntu)");
+            println!("    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb");
+            println!("    sudo dpkg -i cloudflared.deb");
+            println!();
+            println!("    # Other platforms");
+            println!("    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+            println!();
+            println!("  After installing, re-run: punch channel setup telegram");
+            println!();
+            let fallback = prompt_default("Or enter a public URL manually instead? (leave empty to exit)", "");
+            if fallback.is_empty() {
                 None
             } else {
-                Some((url.trim_end_matches('/').to_string(), "quick".to_string()))
+                Some((fallback.trim_end_matches('/').to_string(), "manual".to_string()))
             }
         }
     }
@@ -537,7 +545,25 @@ fn resolve_named_tunnel() -> Option<(String, String)> {
     println!("  Named tunnels give you a stable URL that survives restarts.");
     println!("  You need a free Cloudflare account and a domain on Cloudflare.");
     println!();
-    println!("  If you haven't set one up yet, run these commands first:");
+
+    if detect_cloudflared().is_none() {
+        println!("  cloudflared is not installed. Install it first:");
+        println!();
+        println!("    # macOS");
+        println!("    brew install cloudflare/cloudflare/cloudflared");
+        println!();
+        println!("    # Linux (Debian/Ubuntu)");
+        println!("    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb");
+        println!("    sudo dpkg -i cloudflared.deb");
+        println!();
+        println!("    # Other platforms");
+        println!("    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+        println!();
+        println!("  After installing, run these commands to set up a named tunnel:");
+    } else {
+        println!("  If you haven't set one up yet, run these commands:");
+    }
+
     println!();
     println!("    cloudflared tunnel login");
     println!("    cloudflared tunnel create punch");
