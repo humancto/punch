@@ -657,13 +657,45 @@ async fn run_setup(platform: Option<String>) -> i32 {
         }
     }
 
-    // Generate webhook secret
-    let webhook_secret = generate_secret();
-    println!();
-    println!(
-        "  [+] Generated webhook secret: {}...",
-        &webhook_secret[..16]
-    );
+    // Collect or generate webhook secret (platform-dependent).
+    // Telegram accepts any secret_token we set, so we generate one.
+    // Slack and Discord have their own signing secrets in the platform dashboard.
+    let webhook_secret = match platform.as_str() {
+        "slack" => {
+            println!();
+            println!("  Slack uses its own signing secret for webhook verification.");
+            println!("  Find it at: https://api.slack.com/apps → your app → Basic Information → Signing Secret");
+            let secret = prompt("Paste your Slack signing secret");
+            if secret.is_empty() {
+                eprintln!("  [X] Slack signing secret is required for webhook verification.");
+                return 1;
+            }
+            println!("  [+] Slack signing secret saved ({}...)", &secret[..secret.len().min(8)]);
+            secret
+        }
+        "discord" => {
+            println!();
+            println!("  Discord uses its own public key for webhook verification.");
+            println!("  Find it at: https://discord.com/developers/applications → your app → General Information → Public Key");
+            let key = prompt("Paste your Discord public key");
+            if key.is_empty() {
+                eprintln!("  [X] Discord public key is required for webhook verification.");
+                return 1;
+            }
+            println!("  [+] Discord public key saved ({}...)", &key[..key.len().min(8)]);
+            key
+        }
+        _ => {
+            // Telegram and other platforms: generate a random secret
+            let secret = generate_secret();
+            println!();
+            println!(
+                "  [+] Generated webhook secret: {}...",
+                &secret[..16]
+            );
+            secret
+        }
+    };
     let secret_env_var = format!("{}_WEBHOOK_SECRET", platform.to_uppercase());
     env_vars.push((secret_env_var.clone(), webhook_secret.clone()));
 
@@ -718,14 +750,31 @@ mode = "{mode}"
         mode = tunnel_mode,
     );
 
-    // Only append [tunnel] if not already in the config file
+    // Write tunnel config: append if new, update if URL changed.
     let existing_config = std::fs::read_to_string(&config_file).unwrap_or_default();
     if !existing_config.contains("[tunnel]") {
+        // New tunnel — append it
         println!();
         println!("  Writing tunnel config to {}...", config_file.display());
         if let Err(e) = append_channel_config(&config_file, &tunnel_block) {
             eprintln!("  [X] {}", e);
             return 1;
+        }
+    } else if load_saved_tunnel(None).map(|(url, _)| url) != Some(base_url.clone()) {
+        // Tunnel URL changed — update the existing [tunnel] section
+        println!();
+        println!("  Updating tunnel config in {}...", config_file.display());
+        match replace_toml_section(&existing_config, "tunnel", &tunnel_block) {
+            Ok(new_content) => {
+                if let Err(e) = std::fs::write(&config_file, new_content) {
+                    eprintln!("  [X] Failed to write config: {}", e);
+                    return 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("  [X] {}", e);
+                return 1;
+            }
         }
     }
 
@@ -764,9 +813,28 @@ rate_limit_per_user = 20
     );
 
     println!("  Writing channel config to {}...", config_file.display());
-    if let Err(e) = append_channel_config(&config_file, &channel_block) {
-        eprintln!("  [X] {}", e);
-        return 1;
+    let existing_config = std::fs::read_to_string(&config_file).unwrap_or_default();
+    let section_name = format!("channels.{}", platform);
+    if existing_config.contains(&format!("[{}]", section_name)) {
+        // Update existing channel config instead of appending a duplicate
+        match replace_toml_section(&existing_config, &section_name, &channel_block) {
+            Ok(new_content) => {
+                if let Err(e) = std::fs::write(&config_file, new_content) {
+                    eprintln!("  [X] Failed to write config: {}", e);
+                    return 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("  [X] {}", e);
+                return 1;
+            }
+        }
+    } else {
+        // Append new channel config
+        if let Err(e) = append_channel_config(&config_file, &channel_block) {
+            eprintln!("  [X] {}", e);
+            return 1;
+        }
     }
 
     println!("  Writing secrets to {}...", env_file.display());

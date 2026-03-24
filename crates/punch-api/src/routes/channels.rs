@@ -16,6 +16,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
+use axum::body::Bytes;
 use axum::{Json, Router};
 use serde::Serialize;
 use tracing::{info, warn};
@@ -180,6 +181,7 @@ async fn telegram_webhook(
     headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
     let gateway = resolve_gateway(&state, "telegram");
 
     // 1. Verify Telegram secret token header.
@@ -263,6 +265,7 @@ async fn discord_webhook(
     headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
     let gateway = resolve_gateway(&state, "discord");
 
     // 1. Verify shared secret header.
@@ -327,9 +330,19 @@ async fn discord_webhook(
 async fn slack_events(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<serde_json::Value>,
+    bytes: Bytes,
 ) -> impl IntoResponse {
+    // TODO: Cache ChannelGateway in AppState instead of constructing per-request
     let gateway = resolve_gateway(&state, "slack");
+
+    // Parse JSON from raw bytes — we keep `bytes` around for HMAC verification.
+    let payload: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Slack webhook: failed to parse JSON body: {e}");
+            return err_response(format!("Invalid JSON: {e}")).into_response();
+        }
+    };
 
     // Resolve signing secret for Slack HMAC verification.
     let signing_secret = gateway.webhook_secret.clone();
@@ -345,7 +358,7 @@ async fn slack_events(
             .into_response();
     }
 
-    // 1. Verify Slack HMAC-SHA256 signature.
+    // 1. Verify Slack HMAC-SHA256 signature against the raw body bytes.
     if signing_secret.is_some() {
         let timestamp = headers
             .get("x-slack-request-timestamp")
@@ -365,12 +378,9 @@ async fn slack_events(
             }
         }
 
-        // We need the raw body for HMAC verification, but axum already parsed it.
-        // Re-serialize the JSON for verification. This is imperfect (whitespace may differ)
-        // but is the best we can do without raw body extraction middleware.
-        // For production, consider using `axum::body::Bytes` extractor.
-        let body_bytes = serde_json::to_vec(&payload).unwrap_or_default();
-        if !adapter.verify_webhook_signature(timestamp, signature, &body_bytes) {
+        // Verify against raw body bytes (not re-serialized JSON) so the HMAC
+        // matches exactly what Slack computed.
+        if !adapter.verify_webhook_signature(timestamp, signature, &bytes) {
             warn!("Slack webhook signature verification FAILED");
             return denied_response("Invalid signature").into_response();
         }
