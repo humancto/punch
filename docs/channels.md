@@ -417,11 +417,10 @@ Increase `rate_limit_per_user` in config, or set to `0` for unlimited. Default i
 
 ### No fighters available
 
-The daemon must be running with at least one spawned fighter:
+The daemon auto-spawns a default fighter on startup. Just make sure it's running:
 
 ```bash
 punch start
-punch fighter spawn scout
 ```
 
 ### Webhook registered but no responses

@@ -54,11 +54,22 @@ An **agent operating system** — deploy, orchestrate, and manage fleets of AI a
 ## Quick Start
 
 ```bash
-punch init                              # Initialize
-punch start                             # Start the daemon
-punch fighter spawn researcher          # Spawn a fighter
-punch chat "Explain quantum computing"  # Chat
-punch gorilla unleash alpha             # Unleash an autonomous agent
+punch init                              # Configure provider + API key
+punch start                             # Start daemon (auto-spawns a fighter)
+punch chat "Explain quantum computing"  # Chat via CLI
+```
+
+### Connect to Telegram, Slack, or Discord
+
+```bash
+punch channel setup telegram            # Interactive wizard — bot to chat in 2 minutes
+```
+
+### Go deeper
+
+```bash
+punch fighter spawn coder               # Spawn a specialist fighter
+punch gorilla unleash alpha             # Unleash an autonomous background agent
 ```
 
 ---

@@ -71,9 +71,35 @@ api_listen = "127.0.0.1:6660"
 
 [default_model]
 provider = "openai"
-model = "gpt-4o"
+model = "gpt-4o-mini"
 api_key_env = "OPENAI_API_KEY"
 ```
+
+### Option D: Google Gemini (fast + free tier)
+
+```toml
+api_listen = "127.0.0.1:6660"
+
+[default_model]
+provider = "google"
+model = "gemini-2.0-flash"
+api_key_env = "GOOGLE_API_KEY"
+```
+
+Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+
+### Option E: Groq (extremely fast, free tier)
+
+```toml
+api_listen = "127.0.0.1:6660"
+
+[default_model]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+```
+
+> **Tip:** Store API keys in `~/.punch/.env` — the daemon loads them automatically on startup. Example: `echo 'GOOGLE_API_KEY=your-key' >> ~/.punch/.env`
 
 ## Step 3: Start the Daemon
 
@@ -81,17 +107,9 @@ api_key_env = "OPENAI_API_KEY"
 punch start
 ```
 
-Punch is now running. Open the dashboard at **http://127.0.0.1:6660/dashboard** to see everything in real-time.
+Punch auto-spawns a default fighter ("Punch") with full MCP tool access. You're ready to chat immediately.
 
-## Step 4: Spawn Your First Fighter
-
-```bash
-punch fighter spawn researcher
-```
-
-This creates a fighter using the `researcher` template — a deep research agent with citation capabilities.
-
-### Chat with it
+### Chat via CLI
 
 ```bash
 punch chat "What are the key differences between Rust and Go for systems programming?"
@@ -108,6 +126,28 @@ curl -X POST http://localhost:6660/api/fighters/{fighter_id}/message \
   -H "Content-Type: application/json" \
   -d '{"message": "Explain the actor model in distributed systems"}'
 ```
+
+### Connect a messaging channel (optional)
+
+Deploy your fighter to Telegram, Slack, or Discord — the wizard handles bot creation, security, tunnel setup, and webhook registration:
+
+```bash
+punch channel setup telegram
+```
+
+See [Channels Guide](channels.md) for the full documentation.
+
+## Step 4: Spawn Specialist Fighters (Optional)
+
+The default fighter handles most tasks. For specialized work, spawn additional fighters:
+
+```bash
+punch fighter spawn coder       # Full-stack engineer with shell access
+punch fighter spawn scout       # Deep research agent
+punch fighter spawn oracle      # Conversational AI with broad knowledge
+```
+
+All fighters have access to MCP tools (calendar, email, etc.) configured in your `config.toml`.
 
 ## Step 5: Create a Custom Fighter
 
@@ -238,15 +278,24 @@ punch move scan security-auditor
 
 Punch ships with **103 bundled skills** covering programming languages, frameworks, cloud platforms, business operations, and more.
 
-## Step 10: Connect a Channel
+## Step 10: Add More Channels
 
-Deploy fighters to messaging platforms:
+Already set up Telegram in Step 3? Add more platforms — they share the same tunnel:
 
 ```bash
-punch channel setup telegram
+punch channel setup slack
+punch channel setup discord
 ```
 
-This wizard handles everything: bot creation guidance, security setup, Cloudflare Tunnel, and webhook registration. See [Channels Guide](channels.md) for the full documentation.
+Manage your channels:
+
+```bash
+punch channel list                  # See all channels
+punch channel tunnel                # Show tunnel URL
+punch channel remove slack          # Remove a channel
+```
+
+See [Channels Guide](channels.md) for the full documentation.
 
 ## What to Explore Next
 
