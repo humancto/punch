@@ -319,7 +319,11 @@ async fn test_tool_calling_multi_turn() {
     ]));
 
     let memory = test_memory();
-    let mut params = make_params(driver.clone(), memory.clone(), "Remember test_key=test_value");
+    let mut params = make_params(
+        driver.clone(),
+        memory.clone(),
+        "Remember test_key=test_value",
+    );
     params.available_tools = vec![memory_store_tool_def()];
 
     let result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -400,7 +404,9 @@ async fn test_empty_response_after_tool_use_fallback() {
 
     // Should contain the fallback message
     assert!(
-        result.response.contains("completed the requested operations"),
+        result
+            .response
+            .contains("completed the requested operations"),
         "should get fallback: {}",
         result.response
     );
@@ -498,10 +504,7 @@ async fn test_creed_bout_count_increments() {
 
     // Create a creed for this fighter
     let creed = punch_types::Creed::new(fighter_name);
-    memory
-        .save_creed(&creed)
-        .await
-        .expect("should save creed");
+    memory.save_creed(&creed).await.expect("should save creed");
 
     let bout_id = punch_memory::BoutId::new();
     let fighter_id = FighterId::new();

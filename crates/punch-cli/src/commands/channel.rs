@@ -130,15 +130,8 @@ fn parse_tunnel_url(line: &str) -> Option<String> {
 }
 
 /// Register a Telegram webhook via the Bot API.
-async fn register_telegram_webhook(
-    token: &str,
-    url: &str,
-    secret: &str,
-) -> Result<(), String> {
-    let api_url = format!(
-        "https://api.telegram.org/bot{}/setWebhook",
-        token
-    );
+async fn register_telegram_webhook(token: &str, url: &str, secret: &str) -> Result<(), String> {
+    let api_url = format!("https://api.telegram.org/bot{}/setWebhook", token);
     let client = reqwest::Client::new();
     let resp = client
         .post(&api_url)
@@ -177,8 +170,7 @@ fn append_channel_config(path: &Path, toml_block: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to open config: {}", e))?;
 
     // Add a blank line separator before the new block
-    write!(file, "\n{}", toml_block)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+    write!(file, "\n{}", toml_block).map_err(|e| format!("Failed to write config: {}", e))?;
 
     Ok(())
 }
@@ -215,8 +207,7 @@ fn update_env_file(path: &Path, vars: &[(String, String)]) -> Result<(), String>
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write .env file: {}", e))?;
+    std::fs::write(path, content).map_err(|e| format!("Failed to write .env file: {}", e))?;
 
     Ok(())
 }
@@ -231,39 +222,37 @@ fn run_tunnel(action: Option<crate::cli::TunnelAction>, config_path: Option<Stri
 
     match action {
         // `punch channel tunnel` (no subcommand) — show current tunnel
-        None => {
-            match load_saved_tunnel(config_path.as_deref()) {
-                Some((url, mode)) => {
-                    println!();
-                    println!("  Tunnel configuration:");
-                    println!("    URL:    {}", url);
-                    println!("    Mode:   {}", mode);
-                    println!("    Config: {}", config_file.display());
-                    println!();
-                    println!("  All channel webhooks use this base URL:");
-                    println!("    <url>/api/channels/telegram/webhook");
-                    println!("    <url>/api/channels/slack/events");
-                    println!("    <url>/api/channels/discord/webhook");
-                    println!();
-                    println!("  To change:  punch channel tunnel set <new-url>");
-                    println!("  To remove:  punch channel tunnel remove");
-                    println!();
-                    0
-                }
-                None => {
-                    println!();
-                    println!("  No tunnel configured.");
-                    println!();
-                    println!("  Run `punch channel setup <platform>` to set one up,");
-                    println!("  or set it directly:");
-                    println!();
-                    println!("    punch channel tunnel set https://your-url.com");
-                    println!("    punch channel tunnel set https://your-url.com --mode named");
-                    println!();
-                    0
-                }
+        None => match load_saved_tunnel(config_path.as_deref()) {
+            Some((url, mode)) => {
+                println!();
+                println!("  Tunnel configuration:");
+                println!("    URL:    {}", url);
+                println!("    Mode:   {}", mode);
+                println!("    Config: {}", config_file.display());
+                println!();
+                println!("  All channel webhooks use this base URL:");
+                println!("    <url>/api/channels/telegram/webhook");
+                println!("    <url>/api/channels/slack/events");
+                println!("    <url>/api/channels/discord/webhook");
+                println!();
+                println!("  To change:  punch channel tunnel set <new-url>");
+                println!("  To remove:  punch channel tunnel remove");
+                println!();
+                0
             }
-        }
+            None => {
+                println!();
+                println!("  No tunnel configured.");
+                println!();
+                println!("  Run `punch channel setup <platform>` to set one up,");
+                println!("  or set it directly:");
+                println!();
+                println!("    punch channel tunnel set https://your-url.com");
+                println!("    punch channel tunnel set https://your-url.com --mode named");
+                println!();
+                0
+            }
+        },
         // `punch channel tunnel set <url>`
         Some(crate::cli::TunnelAction::Set { url, mode }) => {
             let url = url.trim_end_matches('/');
@@ -276,10 +265,11 @@ fn run_tunnel(action: Option<crate::cli::TunnelAction>, config_path: Option<Stri
 
             if config_content.contains("[tunnel]") {
                 // Replace existing tunnel block
-                match replace_toml_section(&config_content, "tunnel", &format!(
-                    "[tunnel]\nbase_url = \"{}\"\nmode = \"{}\"\n",
-                    url, mode
-                )) {
+                match replace_toml_section(
+                    &config_content,
+                    "tunnel",
+                    &format!("[tunnel]\nbase_url = \"{}\"\nmode = \"{}\"\n", url, mode),
+                ) {
                     Ok(new_content) => {
                         if let Err(e) = std::fs::write(&config_file, new_content) {
                             eprintln!("  [X] Failed to write config: {}", e);
@@ -333,7 +323,10 @@ fn run_tunnel(action: Option<crate::cli::TunnelAction>, config_path: Option<Stri
             }
 
             println!();
-            println!("  [+] Tunnel configuration removed from {}", config_file.display());
+            println!(
+                "  [+] Tunnel configuration removed from {}",
+                config_file.display()
+            );
             println!();
             println!("  Webhook registrations with platforms are still active.");
             println!("  They'll start failing once the tunnel is stopped.");
@@ -391,9 +384,7 @@ fn run_remove(platform: &str) -> i32 {
     {
         let filtered: Vec<&str> = content
             .lines()
-            .filter(|line| {
-                !env_prefixes.iter().any(|prefix| line.starts_with(prefix))
-            })
+            .filter(|line| !env_prefixes.iter().any(|prefix| line.starts_with(prefix)))
             .collect();
         let new_content = if filtered.is_empty() {
             String::new()
@@ -409,10 +400,21 @@ fn run_remove(platform: &str) -> i32 {
     println!("  [+] Removed '{}' channel.", platform);
     println!();
     println!("  Cleaned up:");
-    println!("    Config: {} (removed [{}])", config_file.display(), section_name);
-    println!("    Secrets: {} (removed {} vars)", env_file.display(), platform_upper);
+    println!(
+        "    Config: {} (removed [{}])",
+        config_file.display(),
+        section_name
+    );
+    println!(
+        "    Secrets: {} (removed {} vars)",
+        env_file.display(),
+        platform_upper
+    );
     println!();
-    println!("  NOTE: The webhook registration with {} is still active.", platform);
+    println!(
+        "  NOTE: The webhook registration with {} is still active.",
+        platform
+    );
     println!("  It will keep sending requests until you deregister it on the platform side.");
     println!();
     0
@@ -420,9 +422,14 @@ fn run_remove(platform: &str) -> i32 {
 
 /// Replace or remove a TOML section in a config string.
 /// Finds `[section_name]` and replaces everything up to the next `[` header or EOF.
-fn replace_toml_section(content: &str, section_name: &str, replacement: &str) -> Result<String, String> {
+fn replace_toml_section(
+    content: &str,
+    section_name: &str,
+    replacement: &str,
+) -> Result<String, String> {
     let header = format!("[{}]", section_name);
-    let start = content.find(&header)
+    let start = content
+        .find(&header)
         .ok_or_else(|| format!("Section [{}] not found", section_name))?;
 
     // Find the end — next section header or EOF
@@ -522,19 +529,29 @@ fn resolve_quick_tunnel() -> Option<(String, String)> {
             println!("    brew install cloudflare/cloudflare/cloudflared");
             println!();
             println!("    # Linux (Debian/Ubuntu)");
-            println!("    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb");
+            println!(
+                "    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb"
+            );
             println!("    sudo dpkg -i cloudflared.deb");
             println!();
             println!("    # Other platforms");
-            println!("    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+            println!(
+                "    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+            );
             println!();
             println!("  After installing, re-run: punch channel setup telegram");
             println!();
-            let fallback = prompt_default("Or enter a public URL manually instead? (leave empty to exit)", "");
+            let fallback = prompt_default(
+                "Or enter a public URL manually instead? (leave empty to exit)",
+                "",
+            );
             if fallback.is_empty() {
                 None
             } else {
-                Some((fallback.trim_end_matches('/').to_string(), "manual".to_string()))
+                Some((
+                    fallback.trim_end_matches('/').to_string(),
+                    "manual".to_string(),
+                ))
             }
         }
     }
@@ -554,11 +571,15 @@ fn resolve_named_tunnel() -> Option<(String, String)> {
         println!("    brew install cloudflare/cloudflare/cloudflared");
         println!();
         println!("    # Linux (Debian/Ubuntu)");
-        println!("    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb");
+        println!(
+            "    curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb"
+        );
         println!("    sudo dpkg -i cloudflared.deb");
         println!();
         println!("    # Other platforms");
-        println!("    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+        println!(
+            "    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+        );
         println!();
         println!("  After installing, run these commands to set up a named tunnel:");
     } else {
@@ -588,10 +609,7 @@ fn resolve_manual_url() -> Option<(String, String)> {
     if url.is_empty() {
         None
     } else {
-        Some((
-            url.trim_end_matches('/').to_string(),
-            "manual".to_string(),
-        ))
+        Some((url.trim_end_matches('/').to_string(), "manual".to_string()))
     }
 }
 
@@ -712,35 +730,42 @@ async fn run_setup(platform: Option<String>) -> i32 {
         "slack" => {
             println!();
             println!("  Slack uses its own signing secret for webhook verification.");
-            println!("  Find it at: https://api.slack.com/apps → your app → Basic Information → Signing Secret");
+            println!(
+                "  Find it at: https://api.slack.com/apps → your app → Basic Information → Signing Secret"
+            );
             let secret = prompt("Paste your Slack signing secret");
             if secret.is_empty() {
                 eprintln!("  [X] Slack signing secret is required for webhook verification.");
                 return 1;
             }
-            println!("  [+] Slack signing secret saved ({}...)", &secret[..secret.len().min(8)]);
+            println!(
+                "  [+] Slack signing secret saved ({}...)",
+                &secret[..secret.len().min(8)]
+            );
             secret
         }
         "discord" => {
             println!();
             println!("  Discord uses its own public key for webhook verification.");
-            println!("  Find it at: https://discord.com/developers/applications → your app → General Information → Public Key");
+            println!(
+                "  Find it at: https://discord.com/developers/applications → your app → General Information → Public Key"
+            );
             let key = prompt("Paste your Discord public key");
             if key.is_empty() {
                 eprintln!("  [X] Discord public key is required for webhook verification.");
                 return 1;
             }
-            println!("  [+] Discord public key saved ({}...)", &key[..key.len().min(8)]);
+            println!(
+                "  [+] Discord public key saved ({}...)",
+                &key[..key.len().min(8)]
+            );
             key
         }
         _ => {
             // Telegram and other platforms: generate a random secret
             let secret = generate_secret();
             println!();
-            println!(
-                "  [+] Generated webhook secret: {}...",
-                &secret[..16]
-            );
+            println!("  [+] Generated webhook secret: {}...", &secret[..16]);
             secret
         }
     };
@@ -775,9 +800,7 @@ async fn run_setup(platform: Option<String>) -> i32 {
             Err(e) => {
                 eprintln!("  [X] Failed to register webhook: {}", e);
                 eprintln!("      You can register manually later:");
-                eprintln!(
-                    "      curl -X POST 'https://api.telegram.org/bot<TOKEN>/setWebhook' \\",
-                );
+                eprintln!("      curl -X POST 'https://api.telegram.org/bot<TOKEN>/setWebhook' \\",);
                 eprintln!("        -d 'url={}'", webhook_url);
             }
         }
@@ -894,10 +917,7 @@ rate_limit_per_user = 20
     // Success banner
     println!();
     println!("  ========================================");
-    println!(
-        "    {} channel is battle-ready!",
-        guide.display_name
-    );
+    println!("    {} channel is battle-ready!", guide.display_name);
     println!("  ========================================");
     println!();
     println!("  Webhook:  {}", webhook_url);
@@ -912,10 +932,7 @@ rate_limit_per_user = 20
     println!("  Next steps:");
     println!("    1. punch start");
     println!("    2. punch fighter spawn scout");
-    println!(
-        "    3. Message your bot on {}!",
-        guide.display_name
-    );
+    println!("    3. Message your bot on {}!", guide.display_name);
     println!();
     println!("  Manage your setup:");
     println!("    punch channel list                  — see all channels");
@@ -923,17 +940,14 @@ rate_limit_per_user = 20
     println!("    punch channel tunnel                 — show tunnel URL");
     println!("    punch channel tunnel set <url>       — change tunnel URL");
     println!("    punch channel tunnel remove          — remove tunnel config");
-    println!("    punch channel remove {}           — remove this channel + secrets", platform);
+    println!(
+        "    punch channel remove {}           — remove this channel + secrets",
+        platform
+    );
     println!();
     println!("  Files:");
-    println!(
-        "    Config:  {}",
-        config_file.display()
-    );
-    println!(
-        "    Secrets: {}",
-        env_file.display()
-    );
+    println!("    Config:  {}", config_file.display());
+    println!("    Secrets: {}", env_file.display());
     println!();
 
     0
@@ -1392,7 +1406,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
 
-        std::fs::write(&path, "# Existing config\napi_listen = \"127.0.0.1:6660\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "# Existing config\napi_listen = \"127.0.0.1:6660\"\n",
+        )
+        .unwrap();
 
         let block = "[channels.telegram]\nchannel_type = \"telegram\"\n";
         super::append_channel_config(&path, block).unwrap();
@@ -1407,7 +1425,12 @@ mod tests {
     #[test]
     fn test_replace_toml_section_middle() {
         let content = "[server]\nport = 8080\n\n[tunnel]\nbase_url = \"https://old.com\"\nmode = \"quick\"\n\n[channels.telegram]\nchannel_type = \"telegram\"\n";
-        let result = super::replace_toml_section(content, "tunnel", "[tunnel]\nbase_url = \"https://new.com\"\nmode = \"named\"\n").unwrap();
+        let result = super::replace_toml_section(
+            content,
+            "tunnel",
+            "[tunnel]\nbase_url = \"https://new.com\"\nmode = \"named\"\n",
+        )
+        .unwrap();
         assert!(result.contains("https://new.com"));
         assert!(!result.contains("https://old.com"));
         assert!(result.contains("[server]"));
@@ -1426,7 +1449,8 @@ mod tests {
 
     #[test]
     fn test_replace_toml_section_at_end() {
-        let content = "[server]\nport = 8080\n\n[tunnel]\nbase_url = \"https://old.com\"\nmode = \"quick\"\n";
+        let content =
+            "[server]\nport = 8080\n\n[tunnel]\nbase_url = \"https://old.com\"\nmode = \"quick\"\n";
         let result = super::replace_toml_section(content, "tunnel", "").unwrap();
         assert!(!result.contains("[tunnel]"));
         assert!(result.contains("[server]"));
