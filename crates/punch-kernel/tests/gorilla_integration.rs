@@ -49,6 +49,7 @@ impl LlmDriver for MockLlmDriver {
                 content: "Autonomous tick completed. No new actions required.".to_string(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
+                content_parts: Vec::new(),
                 timestamp: chrono::Utc::now(),
             },
             usage: TokenUsage {
@@ -85,7 +86,7 @@ fn test_config() -> PunchConfig {
         tunnel: None,
         channels: Default::default(),
         mcp_servers: Default::default(),
-            model_routing: Default::default(),
+        model_routing: Default::default(),
     }
 }
 

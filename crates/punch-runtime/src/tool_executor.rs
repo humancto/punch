@@ -21,6 +21,7 @@ use punch_types::{
     ToolResult, capability::capability_matches,
 };
 
+use crate::automation::{self, AutomationBackend, UiSelector};
 use crate::mcp::McpClient;
 
 /// Context passed to every tool execution.
@@ -63,6 +64,11 @@ pub struct ToolExecutionContext {
     /// When present, the `channel_notify` tool can send messages to
     /// connected channels (Telegram, Slack, Discord, etc.).
     pub channel_notifier: Option<Arc<dyn ChannelNotifier>>,
+    /// Optional desktop automation backend for screenshot, OCR, and UI tools.
+    /// When present, automation tools (sys_screenshot, ui_click, etc.) can
+    /// interact with the desktop. Without it, automation tools report
+    /// "automation backend not configured".
+    pub automation_backend: Option<Arc<dyn AutomationBackend>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -216,6 +222,22 @@ async fn execute_tool_inner(
         "a2a_delegate" => tool_a2a_delegate(input, capabilities).await,
         // Channel notification
         "channel_notify" => tool_channel_notify(input, capabilities, context).await,
+        // Self-configuration
+        "heartbeat_add" => tool_heartbeat_add(input, capabilities, context).await,
+        "heartbeat_list" => tool_heartbeat_list(capabilities, context).await,
+        "heartbeat_remove" => tool_heartbeat_remove(input, capabilities, context).await,
+        "creed_view" => tool_creed_view(capabilities, context).await,
+        "skill_list" => tool_skill_list(capabilities).await,
+        "skill_recommend" => tool_skill_recommend(input, capabilities).await,
+        // Desktop automation
+        "sys_screenshot" => tool_sys_screenshot(input, capabilities, context).await,
+        "ui_screenshot" => tool_ui_screenshot(input, capabilities, context).await,
+        "app_ocr" => tool_app_ocr(input, capabilities, context).await,
+        "ui_find_elements" => tool_ui_find_elements(input, capabilities, context).await,
+        "ui_click" => tool_ui_click(input, capabilities, context).await,
+        "ui_type_text" => tool_ui_type_text(input, capabilities, context).await,
+        "ui_list_windows" => tool_ui_list_windows(capabilities, context).await,
+        "ui_read_attribute" => tool_ui_read_attribute(input, capabilities, context).await,
         // MCP server tools — dispatched by `mcp_{server}_{tool}` prefix.
         _ if name.starts_with("mcp_") => tool_mcp_call(name, input, capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
@@ -3992,6 +4014,652 @@ async fn tool_a2a_delegate(
 }
 
 // ---------------------------------------------------------------------------
+// Self-Configuration Tools
+// ---------------------------------------------------------------------------
+
+/// Add a heartbeat task to the fighter's own creed.
+async fn tool_heartbeat_add(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let task = input["task"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "heartbeat_add".into(),
+        message: "missing 'task' parameter".into(),
+    })?;
+
+    let cadence = input["cadence"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "heartbeat_add".into(),
+        message: "missing 'cadence' parameter".into(),
+    })?;
+
+    let valid_cadences = ["every_bout", "on_wake", "hourly", "daily"];
+    if !valid_cadences.contains(&cadence) {
+        return Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some(format!(
+                "invalid cadence '{}'. Must be one of: {}",
+                cadence,
+                valid_cadences.join(", ")
+            )),
+            duration_ms: 0,
+        });
+    }
+
+    // Load the creed for this fighter.
+    let mut creed = context
+        .memory
+        .load_creed_by_fighter(&context.fighter_id)
+        .await?
+        .ok_or_else(|| PunchError::Tool {
+            tool: "heartbeat_add".into(),
+            message: "no creed found for this fighter".into(),
+        })?;
+
+    // Add the heartbeat task.
+    let heartbeat = punch_types::creed::HeartbeatTask {
+        task: task.to_string(),
+        cadence: cadence.to_string(),
+        active: true,
+        execution_count: 0,
+        last_checked: None,
+    };
+    creed.heartbeat.push(heartbeat);
+
+    // Save.
+    context.memory.save_creed(&creed).await?;
+
+    debug!(
+        fighter = %context.fighter_id,
+        task = %task,
+        cadence = %cadence,
+        "heartbeat_add: task added to creed"
+    );
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "message": format!("Heartbeat added: \"{}\" (cadence: {})", task, cadence),
+            "total_heartbeats": creed.heartbeat.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+/// List all heartbeat tasks in the fighter's creed.
+async fn tool_heartbeat_list(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let creed = context
+        .memory
+        .load_creed_by_fighter(&context.fighter_id)
+        .await?
+        .ok_or_else(|| PunchError::Tool {
+            tool: "heartbeat_list".into(),
+            message: "no creed found for this fighter".into(),
+        })?;
+
+    let tasks: Vec<serde_json::Value> = creed
+        .heartbeat
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            serde_json::json!({
+                "index": i,
+                "task": h.task,
+                "cadence": h.cadence,
+                "active": h.active,
+                "execution_count": h.execution_count,
+                "last_checked": h.last_checked.map(|t| t.to_rfc3339()),
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "heartbeats": tasks,
+            "total": tasks.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+/// Remove a heartbeat task from the fighter's creed by index.
+async fn tool_heartbeat_remove(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let index = input["index"].as_u64().ok_or_else(|| PunchError::Tool {
+        tool: "heartbeat_remove".into(),
+        message: "missing 'index' parameter".into(),
+    })? as usize;
+
+    let mut creed = context
+        .memory
+        .load_creed_by_fighter(&context.fighter_id)
+        .await?
+        .ok_or_else(|| PunchError::Tool {
+            tool: "heartbeat_remove".into(),
+            message: "no creed found for this fighter".into(),
+        })?;
+
+    if index >= creed.heartbeat.len() {
+        return Ok(ToolResult {
+            success: false,
+            output: serde_json::json!(null),
+            error: Some(format!(
+                "index {} out of range (have {} heartbeat tasks)",
+                index,
+                creed.heartbeat.len()
+            )),
+            duration_ms: 0,
+        });
+    }
+
+    let removed = creed.heartbeat.remove(index);
+    context.memory.save_creed(&creed).await?;
+
+    debug!(
+        fighter = %context.fighter_id,
+        task = %removed.task,
+        "heartbeat_remove: task removed from creed"
+    );
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "message": format!("Removed heartbeat: \"{}\"", removed.task),
+            "remaining": creed.heartbeat.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+/// View the fighter's current creed.
+async fn tool_creed_view(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let creed = context
+        .memory
+        .load_creed_by_fighter(&context.fighter_id)
+        .await?
+        .ok_or_else(|| PunchError::Tool {
+            tool: "creed_view".into(),
+            message: "no creed found for this fighter".into(),
+        })?;
+
+    let heartbeats: Vec<serde_json::Value> = creed
+        .heartbeat
+        .iter()
+        .map(|h| {
+            serde_json::json!({
+                "task": h.task,
+                "cadence": h.cadence,
+                "active": h.active,
+                "execution_count": h.execution_count,
+            })
+        })
+        .collect();
+
+    let relationships: Vec<serde_json::Value> = creed
+        .relationships
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "entity": r.entity,
+                "nature": r.nature,
+                "interaction_count": r.interaction_count,
+            })
+        })
+        .collect();
+
+    let learned: Vec<serde_json::Value> = creed
+        .learned_behaviors
+        .iter()
+        .map(|b| {
+            serde_json::json!({
+                "observation": b.observation,
+                "confidence": b.confidence,
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "fighter_name": creed.fighter_name,
+            "identity": creed.identity,
+            "personality": creed.personality,
+            "directives": creed.directives,
+            "heartbeats": heartbeats,
+            "relationships": relationships,
+            "learned_behaviors": learned,
+            "bout_count": creed.bout_count,
+            "message_count": creed.message_count,
+            "version": creed.version,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+/// List available skill packs.
+async fn tool_skill_list(capabilities: &[Capability]) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let packs = punch_skills::packs::available_packs();
+    let pack_list: Vec<serde_json::Value> = packs
+        .iter()
+        .map(|(name, desc)| {
+            serde_json::json!({
+                "name": name,
+                "description": desc,
+            })
+        })
+        .collect();
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "packs": pack_list,
+            "total": pack_list.len(),
+            "note": "Use skill_install to install a pack. Only approved packs from the bundled registry are available.",
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+/// Recommend a skill pack to the user — returns pack details and install command.
+async fn tool_skill_recommend(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SelfConfig)?;
+
+    let pack_name = input["pack_name"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "skill_recommend".into(),
+            message: "missing 'pack_name' parameter".into(),
+        })?;
+
+    // Look up the pack details from the bundled registry.
+    let pack = punch_skills::packs::find_bundled_pack(pack_name);
+
+    match pack {
+        Some(p) => {
+            let servers: Vec<serde_json::Value> = p
+                .mcp_servers
+                .iter()
+                .map(|s| {
+                    let mut info = serde_json::json!({
+                        "name": s.name,
+                        "description": s.description,
+                    });
+                    if let Some(ref setup) = s.setup_command {
+                        info["setup_command"] = serde_json::json!(setup);
+                    }
+                    info
+                })
+                .collect();
+
+            let mut output = serde_json::json!({
+                "pack_name": p.name,
+                "description": p.description,
+                "servers": servers,
+                "install_command": format!("punch move add {}", p.name),
+            });
+
+            if !p.required_env_vars.is_empty() {
+                output["required_env_vars"] = serde_json::json!(p.required_env_vars);
+                output["setup_note"] = serde_json::json!(format!(
+                    "This pack requires environment variables: {}. Set them in ~/.punch/.env before installing.",
+                    p.required_env_vars.join(", ")
+                ));
+            }
+
+            Ok(ToolResult {
+                success: true,
+                output,
+                error: None,
+                duration_ms: 0,
+            })
+        }
+        None => {
+            // Pack not found — list what's available.
+            let available = punch_skills::packs::available_packs();
+            let names: Vec<&str> = available.iter().map(|(n, _)| n.as_str()).collect();
+
+            Ok(ToolResult {
+                success: false,
+                output: serde_json::json!({
+                    "error": format!("Skill pack '{}' not found", pack_name),
+                    "available_packs": names,
+                }),
+                error: Some(format!(
+                    "Pack '{}' not found. Available: {}",
+                    pack_name,
+                    names.join(", ")
+                )),
+                duration_ms: 0,
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Desktop automation tool handlers
+// ---------------------------------------------------------------------------
+
+/// Helper: get the automation backend or return a helpful error.
+fn require_automation_backend(
+    context: &ToolExecutionContext,
+    tool: &str,
+) -> PunchResult<Arc<dyn AutomationBackend>> {
+    context.automation_backend.clone().ok_or_else(|| {
+        PunchError::Tool {
+            tool: tool.into(),
+            message: "Automation backend not configured. Spawn the fighter with --capabilities system_automation,ui_automation(*),app_integration(*) to enable desktop automation.".into(),
+        }
+    })
+}
+
+async fn tool_sys_screenshot(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = require_automation_backend(context, "sys_screenshot")?;
+
+    let window = input.get("window").and_then(|v| v.as_str());
+    let result = backend.screenshot(window).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "description": format!(
+                "Screenshot captured{}",
+                window.map(|w| format!(" of window: {w}")).unwrap_or_default()
+            ),
+            "width": result.width,
+            "height": result.height,
+            "png_base64": result.png_base64,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_screenshot(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input.get("element_id").and_then(|v| v.as_str());
+    // Check UiAutomation capability scoped to the app in element_id.
+    if let Some(eid) = element_id {
+        let app = automation::extract_app_from_element_id(eid, "ui_screenshot")?;
+        require_capability(capabilities, &Capability::UiAutomation(app))?;
+    } else {
+        require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
+    }
+    let backend = require_automation_backend(context, "ui_screenshot")?;
+
+    let bounds = input.get("bounds").and_then(|b| {
+        let x = b.get("x")?.as_i64()? as i32;
+        let y = b.get("y")?.as_i64()? as i32;
+        let w = b.get("width")?.as_u64()? as u32;
+        let h = b.get("height")?.as_u64()? as u32;
+        Some((x, y, w, h))
+    });
+
+    let result = backend.ui_screenshot(element_id, bounds).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "description": "UI region screenshot captured",
+            "width": result.width,
+            "height": result.height,
+            "png_base64": result.png_base64,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_app_ocr(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input
+        .get("app")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "app_ocr".into(),
+            message: "missing required field: app".into(),
+        })?;
+
+    require_capability(capabilities, &Capability::AppIntegration(app.to_string()))?;
+    let backend = require_automation_backend(context, "app_ocr")?;
+
+    let result = backend.app_ocr(app).await?;
+
+    // Check confidence and provide guidance if low.
+    let avg_confidence = if result.regions.is_empty() {
+        0.0
+    } else {
+        result.regions.iter().map(|r| r.confidence).sum::<f32>() / result.regions.len() as f32
+    };
+
+    let mut output = serde_json::json!({
+        "text": result.text,
+        "regions": result.regions.len(),
+        "average_confidence": avg_confidence,
+    });
+
+    if avg_confidence < 0.3 {
+        output["warning"] = serde_json::json!(
+            "Low OCR confidence (likely non-text content). Use sys_screenshot for visual inspection instead."
+        );
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_find_elements(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input
+        .get("app")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_find_elements".into(),
+            message: "missing required field: app".into(),
+        })?;
+
+    require_capability(capabilities, &Capability::UiAutomation(app.to_string()))?;
+    let backend = require_automation_backend(context, "ui_find_elements")?;
+
+    let selector = UiSelector {
+        role: input.get("role").and_then(|v| v.as_str()).map(String::from),
+        label: input
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        value: input
+            .get("value")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    };
+
+    let elements = backend.find_ui_elements(app, &selector).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "app": app,
+            "count": elements.len(),
+            "elements": elements,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_click(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_click".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_click")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_click")?;
+
+    backend.click_element(element_id).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "clicked": element_id,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_type_text(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_type_text".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+    let text = input
+        .get("text")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_type_text".into(),
+            message: "missing required field: text".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_type_text")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_type_text")?;
+
+    backend.type_text(element_id, text).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "typed_into": element_id,
+            "text_length": text.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_list_windows(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
+    let backend = require_automation_backend(context, "ui_list_windows")?;
+
+    let windows = backend.list_windows().await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "count": windows.len(),
+            "windows": windows,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_read_attribute(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+    let attribute = input
+        .get("attribute")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing required field: attribute".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_read_attribute")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_read_attribute")?;
+
+    let value = backend
+        .read_element_attribute(element_id, attribute)
+        .await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "element_id": element_id,
+            "attribute": attribute,
+            "value": value,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -4061,6 +4729,7 @@ mod tests {
             plugin_registry: None,
             mcp_clients: None,
             channel_notifier: None,
+            automation_backend: None,
         }
     }
 
@@ -5986,5 +6655,207 @@ mod tests {
             "error should mention discovery failure: {:?}",
             result.error
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-configuration tool tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_heartbeat_add_requires_self_config() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::Memory]; // No SelfConfig
+        let input = serde_json::json!({"task": "test", "cadence": "daily"});
+        let result = execute_tool("heartbeat_add", &input, &caps, &context).await;
+        assert!(result.is_err() || !result.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_add_invalid_cadence() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        // First create a creed bound to this fighter.
+        let mut creed = punch_types::creed::Creed::new("test-fighter");
+        creed.fighter_id = Some(context.fighter_id);
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({"task": "test", "cadence": "every_5_minutes"});
+        let result = execute_tool("heartbeat_add", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("invalid cadence"));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_add_success() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        let mut creed = punch_types::creed::Creed::new("test-fighter");
+        creed.fighter_id = Some(context.fighter_id);
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({"task": "Morning briefing", "cadence": "daily"});
+        let result = execute_tool("heartbeat_add", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output["total_heartbeats"], 1);
+
+        // Verify it was persisted.
+        let updated = context
+            .memory
+            .load_creed_by_fighter(&context.fighter_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.heartbeat.len(), 1);
+        assert_eq!(updated.heartbeat[0].task, "Morning briefing");
+        assert_eq!(updated.heartbeat[0].cadence, "daily");
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_list_success() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        let mut creed = punch_types::creed::Creed::new("test-fighter");
+        creed.fighter_id = Some(context.fighter_id);
+        creed = creed.with_heartbeat_task("Check health", "hourly");
+        creed = creed.with_heartbeat_task("Daily summary", "daily");
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({});
+        let result = execute_tool("heartbeat_list", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output["total"], 2);
+        let heartbeats = result.output["heartbeats"].as_array().unwrap();
+        assert_eq!(heartbeats[0]["task"], "Check health");
+        assert_eq!(heartbeats[1]["cadence"], "daily");
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_remove_success() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        let mut creed = punch_types::creed::Creed::new("test-fighter");
+        creed.fighter_id = Some(context.fighter_id);
+        creed = creed.with_heartbeat_task("Task A", "hourly");
+        creed = creed.with_heartbeat_task("Task B", "daily");
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({"index": 0});
+        let result = execute_tool("heartbeat_remove", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output["remaining"], 1);
+
+        let updated = context
+            .memory
+            .load_creed_by_fighter(&context.fighter_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.heartbeat.len(), 1);
+        assert_eq!(updated.heartbeat[0].task, "Task B");
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_remove_out_of_range() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        let mut creed = punch_types::creed::Creed::new("test-fighter");
+        creed.fighter_id = Some(context.fighter_id);
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({"index": 5});
+        let result = execute_tool("heartbeat_remove", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("out of range"));
+    }
+
+    #[tokio::test]
+    async fn test_creed_view_success() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+
+        let mut creed = punch_types::creed::Creed::new("view-test")
+            .with_identity("A test fighter")
+            .with_trait("curiosity", 0.9)
+            .with_directive("Be thorough");
+        creed.fighter_id = Some(context.fighter_id);
+        context.memory.save_creed(&creed).await.unwrap();
+
+        let input = serde_json::json!({});
+        let result = execute_tool("creed_view", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output["fighter_name"], "view-test");
+        assert_eq!(result.output["identity"], "A test fighter");
+        assert!(
+            result.output["directives"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d == "Be thorough")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_skill_list_success() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+        let input = serde_json::json!({});
+        let result = execute_tool("skill_list", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        let packs = result.output["packs"].as_array().unwrap();
+        assert!(!packs.is_empty(), "should have bundled packs");
+        // Check that productivity pack is listed.
+        assert!(
+            packs.iter().any(|p| p["name"] == "productivity"),
+            "should include productivity pack"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_skill_recommend_known_pack() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+        let input = serde_json::json!({"pack_name": "productivity"});
+        let result = execute_tool("skill_recommend", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output["pack_name"], "productivity");
+        assert!(
+            result.output["install_command"]
+                .as_str()
+                .unwrap()
+                .contains("punch move add productivity")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_skill_recommend_unknown_pack() {
+        let context = make_test_context(None);
+        let caps = vec![Capability::SelfConfig];
+        let input = serde_json::json!({"pack_name": "nonexistent-pack"});
+        let result = execute_tool("skill_recommend", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.output["available_packs"].as_array().unwrap().len() > 0);
     }
 }

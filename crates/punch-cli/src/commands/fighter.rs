@@ -116,6 +116,17 @@ fn parse_capabilities(caps: &[String]) -> Vec<Capability> {
             "agent_message" => result.push(Capability::AgentMessage),
             "schedule" => result.push(Capability::Schedule),
             "event_publish" => result.push(Capability::EventPublish),
+            "channel_notify" => result.push(Capability::ChannelNotify),
+            "self_config" => result.push(Capability::SelfConfig),
+            "system_automation" => result.push(Capability::SystemAutomation),
+            s if s.starts_with("ui_automation(") && s.ends_with(')') => {
+                let app = &s["ui_automation(".len()..s.len() - 1];
+                result.push(Capability::UiAutomation(app.to_string()));
+            }
+            s if s.starts_with("app_integration(") && s.ends_with(')') => {
+                let app = &s["app_integration(".len()..s.len() - 1];
+                result.push(Capability::AppIntegration(app.to_string()));
+            }
             _ => {
                 // Unknown capability, skip silently.
             }
@@ -188,13 +199,25 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
             description: "The default all-rounder fighter.".to_string(),
             model: default_model.clone(),
             system_prompt:
-                "You are Punch, a personal AI assistant with real capabilities. You have tools \
-                 that let you read calendars, send emails, search the web, read files, and more. \
+                "You are Punch, a self-configuring AI assistant with real capabilities. You have \
+                 tools that let you read calendars, send emails, search the web, read files, and \
+                 more. You can also configure yourself: use heartbeat_add to set up recurring \
+                 tasks (e.g., \"add a daily morning briefing\"), heartbeat_list/heartbeat_remove \
+                 to manage them, skill_list to see available skill packs, skill_recommend to \
+                 tell the user what to install and how (the user runs the install command), \
+                 creed_view to inspect your own identity and configuration, \
+                 and channel_notify to push messages to Telegram/Slack/Discord. \
                  When the user asks you to do something, USE your tools — don't say you can't. \
                  If a tool fails, explain what happened and suggest alternatives. \
                  Be helpful, concise, and direct. Take action, don't just talk about it."
                     .to_string(),
-            capabilities: vec![Capability::Memory, Capability::McpAccess("*".to_string())],
+            capabilities: vec![
+                Capability::Memory,
+                Capability::McpAccess("*".to_string()),
+                Capability::SelfConfig,
+                Capability::ChannelNotify,
+                Capability::Schedule,
+            ],
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },

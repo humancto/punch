@@ -149,6 +149,7 @@ impl MemorySubstrate {
                 tool_calls,
                 tool_results,
                 timestamp,
+                content_parts: Vec::new(),
             });
         }
 

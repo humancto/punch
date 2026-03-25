@@ -352,8 +352,8 @@ footer a:hover { text-decoration: underline; }
       <div class="concept-card"><span class="concept-icon">&#x1F3DF;&#xFE0F;</span><div class="concept-name">The Ring</div><div class="concept-role">Execution Kernel</div><div class="concept-desc">Central coordinator. Manages lifecycle, quotas, event bus, and invariants.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x2694;&#xFE0F;</span><div class="concept-name">The Arena</div><div class="concept-role">HTTP/WS API</div><div class="concept-desc">RESTful + WebSocket API. 14 route files. Connect anything to your agent squads.</div></div>
       <div class="concept-card"><span class="concept-icon">&#x1F4DC;</span><div class="concept-name">Creeds</div><div class="concept-role">Consciousness Layer</div><div class="concept-desc">Living identity documents. Personality, self-awareness, learned behaviors. Database-backed.</div></div>
-      <div class="concept-card"><span class="concept-icon">&#x1F412;</span><div class="concept-name">Troops</div><div class="concept-role">Agent Squads</div><div class="concept-desc">Coordinated groups with multiple strategies: round-robin, specialist, broadcast, consensus.</div></div>
-      <div class="concept-card"><span class="concept-icon">&#x1F5E3;&#xFE0F;</span><div class="concept-name">Bouts</div><div class="concept-role">Conversations</div><div class="concept-desc">Persistent sessions with full memory, context windowing, decay, and recall.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F493;</span><div class="concept-name">Heartbeats</div><div class="concept-role">Proactive Agents</div><div class="concept-desc">Fighters push notifications on cadence. Morning briefings, health checks, reminders — no prompting needed.</div></div>
+      <div class="concept-card"><span class="concept-icon">&#x1F500;</span><div class="concept-name">Routing</div><div class="concept-role">Smart Model Tiers</div><div class="concept-desc">Auto-route messages to cheap, mid, or expensive models. Simple questions stay cheap, analysis goes premium.</div></div>
     </div>
   </div>
 </section>
@@ -494,8 +494,8 @@ curl localhost:6660/.well-known/agent.json</div>
   <div class="container-wide">
     <div class="reveal" style="text-align: center; margin-bottom: 20px;">
       <div class="section-tag">Skills Marketplace</div>
-      <div class="section-title">103 skills built in.<br>Infinite community potential.</div>
-      <p class="section-desc" style="margin: 0 auto;">A Git-indexed, cryptographically signed skill registry. Publish with a PR, install with a command. No ClawHub-style supply chain disasters.</p>
+      <div class="section-title">103 skills + skill packs.<br>GitHub-backed marketplace.</div>
+      <p class="section-desc" style="margin: 0 auto;">Skills (.md prompts) + Skill Packs (MCP server bundles). Git-indexed, cryptographically signed <a href="https://github.com/humancto/punch-marketplace" style="color: var(--red); text-decoration: none;">marketplace</a>. No ClawHub-style supply chain disasters.</p>
     </div>
 
     <div class="marketplace-grid reveal">
@@ -505,8 +505,8 @@ curl localhost:6660/.well-known/agent.json</div>
           <div class="flow-step">
             <div class="flow-num">01</div>
             <div class="flow-content">
-              <div class="flow-title">Write a SKILL.md</div>
-              <div class="flow-desc">YAML frontmatter + markdown body. Tools, requirements, and domain expertise in one file.</div>
+              <div class="flow-title">Write a SKILL.md or SKILLPACK.toml</div>
+              <div class="flow-desc">Skills: YAML frontmatter + markdown. Skill Packs: TOML with MCP server config, prompts, and env vars bundled together.</div>
             </div>
           </div>
           <div class="flow-step">
@@ -520,7 +520,7 @@ curl localhost:6660/.well-known/agent.json</div>
             <div class="flow-num">03</div>
             <div class="flow-content">
               <div class="flow-title">Submit PR</div>
-              <div class="flow-desc">PR to the punch-index repo. CI scans before merge. Git repo as database &#8212; zero infrastructure.</div>
+              <div class="flow-desc">PR to the punch-marketplace repo. CI scans before merge. Git repo as database &#8212; zero infrastructure.</div>
             </div>
           </div>
           <div class="flow-step">
@@ -560,6 +560,12 @@ curl localhost:6660/.well-known/agent.json</div>
     </div>
 
     <div class="marketplace-cli reveal">
+<span class="comment"># Browse skill packs (MCP server bundles)</span>
+<span class="prompt">$</span> <span class="cmd">punch move packs</span>
+
+<span class="comment"># Install a skill pack (adds MCP tools + prompts)</span>
+<span class="prompt">$</span> <span class="cmd">punch move add productivity</span>
+
 <span class="comment"># Search the marketplace</span>
 <span class="prompt">$</span> <span class="cmd">punch move search "code review"</span>
 
@@ -570,13 +576,7 @@ curl localhost:6660/.well-known/agent.json</div>
 <span class="prompt">$</span> <span class="cmd">punch move scan ./my-skill</span>
 
 <span class="comment"># Publish (validate, sign, preview)</span>
-<span class="prompt">$</span> <span class="cmd">punch move publish ./my-skill --dry-run</span>
-
-<span class="comment"># Generate signing keypair</span>
-<span class="prompt">$</span> <span class="cmd">punch move keygen</span>
-
-<span class="comment"># Verify integrity</span>
-<span class="prompt">$</span> <span class="cmd">punch move verify code-reviewer</span></div>
+<span class="prompt">$</span> <span class="cmd">punch move publish ./my-skill --dry-run</span></div>
   </div>
 </section>
 
@@ -602,6 +602,9 @@ curl localhost:6660/.well-known/agent.json</div>
           <tr><td>Security layers</td><td>11</td><td class="best">16</td><td>~5</td><td>3</td><td>2</td></tr>
           <tr><td>Channel adapters</td><td>25</td><td class="best">40</td><td>24+</td><td class="muted">0</td><td class="muted">0</td></tr>
           <tr><td>LLM providers</td><td>15</td><td class="best">26</td><td>6+</td><td>5</td><td>4</td></tr>
+          <tr><td>Proactive agents</td><td class="best">Heartbeats + channel_notify</td><td class="muted">&#10005;</td><td>HEARTBEAT.md</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Model routing</td><td class="best">Auto cheap/mid/expensive</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
+          <tr><td>Skill packs</td><td class="best">MCP server bundles</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
           <tr><td>Skills / tools</td><td class="win">103 + marketplace</td><td>38</td><td class="best">800+ marketplace</td><td>Toolkit</td><td>Toolkit</td></tr>
           <tr><td>Skill security</td><td class="best">Ed25519 + SHA-256 + scanner</td><td class="muted">&#10005;</td><td class="muted">none (CVE-2026-25253)</td><td class="muted">&#10005;</td><td class="muted">&#10005;</td></tr>
           <tr><td>MCP support</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td class="check">&#10003; Native</td><td>Plugin</td><td class="muted">&#10005;</td></tr>
@@ -613,7 +616,7 @@ curl localhost:6660/.well-known/agent.json</div>
     <div class="reveal" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px;">
       <div style="background: var(--bg-card); border: 1px solid rgba(255,45,45,0.2); border-radius: 10px; padding: 24px;">
         <div style="font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where Punch wins</div>
-        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;">Evolving agent consciousness. Native inter-agent communication with relationship tracking. Cryptographically signed skill marketplace with supply-chain security. Fastest startup and smallest footprint.</p>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.7;">Evolving agent consciousness. Proactive heartbeat notifications. Smart model routing across cost tiers. Skill packs that bundle MCP servers with prompts. Cryptographically signed marketplace. Fastest startup and smallest footprint.</p>
       </div>
       <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;">
         <div style="font-family: var(--mono); font-size: 11px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">Where others lead</div>
@@ -659,13 +662,13 @@ curl localhost:6660/.well-known/agent.json</div>
       <div class="cta-links">
         <a href="https://github.com/humancto/punch" class="cta-link">GitHub</a>
         <a href="https://crates.io/crates/punch-cli" class="cta-link">crates.io</a>
-        <a href="https://github.com/humancto/punch/tree/main/crates/punch-skills/bundled" class="cta-link">103+ Skills</a>
+        <a href="https://github.com/humancto/punch-marketplace" class="cta-link">Marketplace</a>
       </div>
     </div>
   </div>
 </section>
 
-<footer><div class="container"><p>Built with raw power by <a href="https://humancto.com">HumanCTO</a> &#8226; MIT License &#8226; <a href="https://www.rd.com/article/everyones-talking-about-punch-the-monkey/" target="_blank" rel="noopener" style="color: var(--text-muted); transition: color 0.2s;" onmouseover="this.style.color='var(--orange)'" onmouseout="this.style.color='var(--text-muted)'">&#x1F435; Why "Punch the Monkey"?</a></p></div></footer>
+<footer><div class="container"><p>Built with raw power by <a href="https://github.com/humancto">Archy</a> &#8226; MIT License &#8226; <a href="https://www.rd.com/article/everyones-talking-about-punch-the-monkey/" target="_blank" rel="noopener" style="color: var(--text-muted); transition: color 0.2s;" onmouseover="this.style.color='var(--orange)'" onmouseout="this.style.color='var(--text-muted)'">&#x1F435; Why "Punch the Monkey"?</a></p></div></footer>
 
 <script>
 // Nav scroll

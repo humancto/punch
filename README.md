@@ -43,7 +43,9 @@ An **agent operating system** — deploy, orchestrate, and manage fleets of AI a
             ├── Gorillas ──── Autonomous background agents (cron-scheduled)
             ├── Troops ────── Multi-agent coordination (6 strategies)
             ├── Creeds ────── Evolving agent consciousness (DB-backed)
-            ├── Moves ─────── 103 bundled skills + community marketplace
+            ├── Heartbeats ── Proactive notifications on cadence
+            ├── Routing ───── Smart model routing (cheap/mid/expensive)
+            ├── Moves ─────── 103 skills + skill packs + marketplace
             ├── Channels ──── 26 platform adapters
             ├── Extensions ── WASM plugin sandbox (fuel-metered)
             └── Wire ──────── P2P federation + A2A protocol
@@ -63,6 +65,14 @@ punch chat "Explain quantum computing"  # Chat via CLI
 
 ```bash
 punch channel setup telegram            # Interactive wizard — bot to chat in 2 minutes
+```
+
+### Add capabilities
+
+```bash
+punch move add productivity             # Install calendar + email MCP tools
+punch move add developer                # Install GitHub MCP tools
+punch heartbeat add "Morning briefing" --cadence daily  # Proactive notifications
 ```
 
 ### Go deeper
@@ -122,16 +132,20 @@ punch gorilla cage alpha        # Stop
 
 ---
 
-## Skills Marketplace
+## Skills & Skill Packs
 
-103 bundled skills + a Git-indexed, cryptographically signed community marketplace.
+103 bundled skills + **skill packs** that bundle MCP server configs with prompts. A GitHub-backed, cryptographically signed marketplace ([punch-marketplace](https://github.com/humancto/punch-marketplace)).
 
 ```bash
-punch move search "code review"       # Search
-punch move install code-reviewer      # Install
-punch move publish ./my-skill         # Publish
+punch move search "code review"       # Search marketplace
+punch move install code-reviewer      # Install a skill
+punch move packs                      # List available skill packs
+punch move add productivity           # Install a skill pack (calendar + email MCP tools)
+punch move publish ./my-skill         # Publish to marketplace
 punch move scan ./my-skill            # Security scan
 ```
+
+**Bundled skill packs:** `productivity` (calendar/email via localmind), `developer` (GitHub MCP), `research` (web fetch MCP), `files` (filesystem MCP)
 
 Every skill passes three gates — at publish-time and again at install-time:
 
@@ -140,6 +154,46 @@ Every skill passes three gates — at publish-time and again at install-time:
 | **SHA-256 Checksum**  | Tampered downloads, MITM                                                    |
 | **Ed25519 Signature** | Impersonation, forged packages                                              |
 | **Security Scanner**  | Pipe-to-shell, prompt injection, credential harvesting, Unicode obfuscation |
+
+---
+
+## Proactive Heartbeats
+
+Fighters don't just respond — they **reach out**. Heartbeat tasks fire on a cadence and push messages to Telegram, Slack, or Discord without user prompting.
+
+```bash
+punch heartbeat add "Morning briefing" --cadence daily
+punch heartbeat add "Check system health" --cadence hourly
+punch heartbeat list
+punch heartbeat remove 0
+```
+
+The `channel_notify` tool lets fighters push notifications to any connected channel. Combined with memory recall, fighters can deliver contextual daily summaries, reminders, and alerts.
+
+---
+
+## Smart Model Routing
+
+Route messages to the right model tier automatically. Simple questions hit a cheap model, complex analysis goes to an expensive one — no config per message.
+
+```toml
+[model_routing]
+enabled = true
+
+[model_routing.cheap]
+provider = "openai"
+model = "gpt-4.1-nano"
+
+[model_routing.mid]
+provider = "openai"
+model = "gpt-4.1-mini"
+
+[model_routing.expensive]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+```
+
+Keyword-based classifier (no LLM call overhead): "check my calendar" hits cheap, "analyze this report" hits expensive.
 
 ---
 
@@ -153,6 +207,8 @@ Every skill passes three gates — at publish-time and again at install-time:
 | **Agent coordination**  | Troops (6 strategies)            | Crews      | Groups      |
 | **Built-in memory**     | SQLite + confidence decay        | —          | —           |
 | **HTTP API**            | Arena (25+ endpoint groups)      | —          | —           |
+| **Proactive agents**    | Heartbeats + channel_notify      | —          | —           |
+| **Model routing**       | Auto cheap/mid/expensive tiers   | —          | —           |
 | **Skills marketplace**  | Git-index + signed + scanned     | —          | —           |
 | **Channel adapters**    | 26                               | 0          | 0           |
 | **LLM providers**       | 15                               | 5          | 4           |
@@ -204,7 +260,7 @@ MIT. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**Built by [HumanCTO](https://humancto.com)**
+**Built by [Archy](https://github.com/humancto)**
 
 [Website](https://humancto.github.io/punch/) · [GitHub](https://github.com/humancto/punch) · [crates.io](https://crates.io/crates/punch-cli) · [Getting Started](docs/getting-started.md) · [Discussions](https://github.com/humancto/punch/discussions)
 

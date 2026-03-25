@@ -144,6 +144,28 @@ Key types: `StreamChunk`, `ToolCallDelta`, `StreamCallback` (all in `punch-runti
 - Discovers remote agent, sends task, polls for completion with timeout
 - Located in `punch-runtime::tool_executor`
 
+### Self-Configuration Tools
+
+Fighters with `Capability::SelfConfig` can manage their own configuration through natural conversation:
+
+| Tool               | What it does                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `heartbeat_add`    | Agent adds proactive tasks to its own creed (cadences: every_bout, on_wake, hourly, daily) |
+| `heartbeat_list`   | Agent views its heartbeat schedule with execution counts                                   |
+| `heartbeat_remove` | Agent removes a heartbeat by index                                                         |
+| `creed_view`       | Agent inspects its own identity, personality, stats, relationships                         |
+| `skill_list`       | Agent sees available skill packs from the registry                                         |
+| `skill_recommend`  | Agent recommends a pack + gives user the install command (does NOT auto-install)           |
+
+- All gated by `Capability::SelfConfig`
+- Included by default on the "Punch" fighter
+- `skill_recommend` is deliberately recommend-only — agent tells the user what to run, user decides. This avoids daemon restarts and keeps the user in control.
+- Tool definitions in `punch-runtime::tools`, dispatch in `punch-runtime::tool_executor`
+
+### Model Routing
+
+`ModelRouter::classify()` in `punch-runtime` uses keyword heuristics to route prompts to cheap/mid/expensive model tiers. Configured via `[routing]` in config. Transparent to the agent — no tool or capability needed.
+
 ## Troop Coordination
 
 Troops provide multi-agent task coordination with 6 strategies, all with real result collection:

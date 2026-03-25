@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use punch_types::PunchResult;
 use punch_types::config::{ModelConfig, ModelRoutingConfig};
+use punch_types::{ContentPart, Message, PunchResult};
 
 use crate::driver::{LlmDriver, create_driver};
 
@@ -107,6 +107,35 @@ impl ModelRouter {
         ModelTier::Cheap
     }
 
+    /// Classify a user message with context awareness: if the conversation
+    /// contains images (from screenshots, Telegram photos, etc.), force the
+    /// expensive tier so a vision-capable model handles them.
+    pub fn classify_with_context(message: &str, messages: &[Message]) -> ModelTier {
+        // If any message in the conversation has an image, force expensive tier.
+        let has_images = messages.iter().any(|m| {
+            m.has_images()
+                || m.content_parts
+                    .iter()
+                    .any(|p| matches!(p, ContentPart::Image { .. }))
+                || m.tool_results.iter().any(|tr| tr.image.is_some())
+        });
+        if has_images {
+            return ModelTier::Expensive;
+        }
+
+        // Also check tool results for png_base64 field (screenshot output).
+        let has_screenshot_output = messages.iter().any(|m| {
+            m.tool_results
+                .iter()
+                .any(|tr| tr.content.contains("png_base64"))
+        });
+        if has_screenshot_output {
+            return ModelTier::Expensive;
+        }
+
+        Self::classify(message)
+    }
+
     /// Select the model config for a given tier. Returns `None` if the tier
     /// has no model configured (caller should fall back to the default model).
     pub fn select_model(&self, tier: ModelTier) -> Option<&ModelConfig> {
@@ -123,11 +152,22 @@ impl ModelRouter {
     /// model is configured. Returns `None` if routing is disabled or the tier
     /// model is not configured (the caller should use the default driver).
     pub fn route_message(&self, message: &str) -> Option<(ModelTier, ModelConfig)> {
+        self.route_message_with_context(message, &[])
+    }
+
+    /// Classify a message with conversation context and return the tier-specific
+    /// model config. This enables image-aware routing where conversations containing
+    /// screenshots or photos automatically escalate to vision-capable models.
+    pub fn route_message_with_context(
+        &self,
+        message: &str,
+        messages: &[Message],
+    ) -> Option<(ModelTier, ModelConfig)> {
         if !self.config.enabled {
             return None;
         }
 
-        let tier = Self::classify(message);
+        let tier = Self::classify_with_context(message, messages);
         let model_config = self.select_model(tier)?;
 
         debug!(
@@ -362,5 +402,71 @@ mod tests {
         assert!(config.cheap.is_none());
         assert!(config.mid.is_none());
         assert!(config.expensive.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Image detection tests (classify_with_context)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_classify_with_context_no_images_is_normal() {
+        let messages = vec![Message::new(punch_types::Role::User, "hello")];
+        assert_eq!(
+            ModelRouter::classify_with_context("hello", &messages),
+            ModelTier::Cheap
+        );
+    }
+
+    #[test]
+    fn test_classify_with_context_image_forces_expensive() {
+        let msg = Message::with_parts(
+            punch_types::Role::User,
+            "What's in this image?",
+            vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "base64data".to_string(),
+            }],
+        );
+        let messages = vec![msg];
+        // Even though "hello" would be Cheap, image presence forces Expensive.
+        assert_eq!(
+            ModelRouter::classify_with_context("hello", &messages),
+            ModelTier::Expensive
+        );
+    }
+
+    #[test]
+    fn test_classify_with_context_tool_result_image_forces_expensive() {
+        let mut msg = Message::new(punch_types::Role::Tool, "");
+        msg.tool_results = vec![punch_types::ToolCallResult {
+            id: "tc1".to_string(),
+            content: "screenshot taken".to_string(),
+            is_error: false,
+            image: Some(ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "base64data".to_string(),
+            }),
+        }];
+        let messages = vec![msg];
+        assert_eq!(
+            ModelRouter::classify_with_context("ok", &messages),
+            ModelTier::Expensive
+        );
+    }
+
+    #[test]
+    fn test_classify_with_context_png_base64_in_content() {
+        let mut msg = Message::new(punch_types::Role::Tool, "");
+        msg.tool_results = vec![punch_types::ToolCallResult {
+            id: "tc1".to_string(),
+            content: r#"{"png_base64": "iVBORw0KGgo=", "width": 1920}"#.to_string(),
+            is_error: false,
+            image: None,
+        }];
+        let messages = vec![msg];
+        assert_eq!(
+            ModelRouter::classify_with_context("ok", &messages),
+            ModelTier::Expensive
+        );
     }
 }

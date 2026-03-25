@@ -329,6 +329,7 @@ mod tests {
             tool_calls: Vec::new(),
             tool_results: results,
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         }
     }
 
@@ -464,6 +465,7 @@ mod tests {
             id: "call_1".into(),
             content: big_result,
             is_error: false,
+            image: None,
         }])];
 
         let trimmed = budget.apply_context_guard(&mut msgs);
@@ -478,6 +480,7 @@ mod tests {
             id: "call_1".into(),
             content: "small result".into(),
             is_error: false,
+            image: None,
         }])];
 
         let trimmed = budget.apply_context_guard(&mut msgs);
@@ -530,6 +533,7 @@ mod tests {
             }],
             tool_results: Vec::new(),
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         };
         let tokens = budget.estimate_tokens(&[msg], &[]);
         assert!(tokens > 0);
@@ -546,8 +550,10 @@ mod tests {
                 id: "call_1".into(),
                 content: "x".repeat(400),
                 is_error: false,
+                image: None,
             }],
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         };
         let tokens = budget.estimate_tokens(&[msg], &[]);
         assert!(tokens >= 100); // 400+ chars / 4
@@ -646,11 +652,13 @@ mod tests {
                 id: "c1".into(),
                 content: big_result.clone(),
                 is_error: false,
+                image: None,
             }]),
             make_tool_message(vec![ToolCallResult {
                 id: "c2".into(),
                 content: big_result,
                 is_error: false,
+                image: None,
             }]),
         ];
 

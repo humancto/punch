@@ -53,6 +53,16 @@ pub enum Capability {
     McpAccess(String),
     /// Send proactive notifications to connected channels (Telegram, Slack, Discord, etc.).
     ChannelNotify,
+    /// Self-configuration: modify own creed, heartbeats, and install skill packs.
+    SelfConfig,
+    /// System-level automation: screenshots, screen recording permission required.
+    SystemAutomation,
+    /// UI automation scoped to a specific app (accessibility tree interaction).
+    /// Use "*" to grant access to all apps.
+    UiAutomation(String),
+    /// Deep app integration scoped to a specific app (OCR, app-specific APIs).
+    /// Use "*" to grant access to all apps.
+    AppIntegration(String),
 }
 
 impl std::fmt::Display for Capability {
@@ -80,6 +90,10 @@ impl std::fmt::Display for Capability {
             Self::A2ADelegate => write!(f, "a2a_delegate"),
             Self::McpAccess(p) => write!(f, "mcp_access({})", p),
             Self::ChannelNotify => write!(f, "channel_notify"),
+            Self::SelfConfig => write!(f, "self_config"),
+            Self::SystemAutomation => write!(f, "system_automation"),
+            Self::UiAutomation(app) => write!(f, "ui_automation({})", app),
+            Self::AppIntegration(app) => write!(f, "app_integration({})", app),
         }
     }
 }
@@ -137,6 +151,14 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
             pattern_matches(granted_pat, required_name)
         }
         (Capability::ChannelNotify, Capability::ChannelNotify) => true,
+        (Capability::SelfConfig, Capability::SelfConfig) => true,
+        (Capability::SystemAutomation, Capability::SystemAutomation) => true,
+        (Capability::UiAutomation(granted_app), Capability::UiAutomation(required_app)) => {
+            pattern_matches(granted_app, required_app)
+        }
+        (Capability::AppIntegration(granted_app), Capability::AppIntegration(required_app)) => {
+            pattern_matches(granted_app, required_app)
+        }
         _ => false,
     }
 }
@@ -299,6 +321,11 @@ mod tests {
         assert_eq!(Capability::Crypto.to_string(), "crypto");
         assert_eq!(Capability::A2ADelegate.to_string(), "a2a_delegate");
         assert_eq!(Capability::PluginInvoke.to_string(), "plugin_invoke");
+        assert_eq!(Capability::SelfConfig.to_string(), "self_config");
+        assert_eq!(
+            Capability::SystemAutomation.to_string(),
+            "system_automation"
+        );
     }
 
     #[test]
@@ -320,6 +347,8 @@ mod tests {
             Capability::Crypto,
             Capability::A2ADelegate,
             Capability::PluginInvoke,
+            Capability::SelfConfig,
+            Capability::SystemAutomation,
         ];
         for cap in &scopeless {
             assert!(capability_matches(cap, cap), "{} should match itself", cap);
@@ -404,6 +433,60 @@ mod tests {
         };
         assert_eq!(grant.granted_by, "admin");
         assert!(grant.expires_at.is_none());
+    }
+
+    #[test]
+    fn test_ui_automation_scoped() {
+        let granted = Capability::UiAutomation("*".to_string());
+        let required = Capability::UiAutomation("Messages".to_string());
+        assert!(capability_matches(&granted, &required));
+
+        let specific = Capability::UiAutomation("Safari".to_string());
+        assert!(capability_matches(
+            &specific,
+            &Capability::UiAutomation("Safari".to_string())
+        ));
+        assert!(!capability_matches(
+            &specific,
+            &Capability::UiAutomation("Messages".to_string())
+        ));
+    }
+
+    #[test]
+    fn test_app_integration_scoped() {
+        let granted = Capability::AppIntegration("*".to_string());
+        let required = Capability::AppIntegration("Messages".to_string());
+        assert!(capability_matches(&granted, &required));
+
+        let specific = Capability::AppIntegration("Safari".to_string());
+        assert!(!capability_matches(
+            &specific,
+            &Capability::AppIntegration("Finder".to_string())
+        ));
+    }
+
+    #[test]
+    fn test_automation_display() {
+        assert_eq!(
+            Capability::UiAutomation("Safari".to_string()).to_string(),
+            "ui_automation(Safari)"
+        );
+        assert_eq!(
+            Capability::AppIntegration("*".to_string()).to_string(),
+            "app_integration(*)"
+        );
+    }
+
+    #[test]
+    fn test_automation_cross_variant_no_match() {
+        assert!(!capability_matches(
+            &Capability::SystemAutomation,
+            &Capability::UiAutomation("*".to_string())
+        ));
+        assert!(!capability_matches(
+            &Capability::UiAutomation("*".to_string()),
+            &Capability::AppIntegration("*".to_string())
+        ));
     }
 
     #[test]

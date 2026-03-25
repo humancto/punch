@@ -13,6 +13,7 @@
 //! - **Bout**: A session / conversation
 //! - **Move**: A tool invocation
 
+pub mod automation;
 pub mod circuit_breaker;
 pub mod context_budget;
 pub mod driver;

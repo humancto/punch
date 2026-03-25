@@ -23,6 +23,9 @@ pub enum ToolCategory {
     Crypto,
     Plugin,
     Channel,
+    SystemAutomation,
+    UiAutomation,
+    AppIntegration,
 }
 
 impl std::fmt::Display for ToolCategory {
@@ -47,6 +50,9 @@ impl std::fmt::Display for ToolCategory {
             Self::Crypto => write!(f, "crypto"),
             Self::Plugin => write!(f, "plugin"),
             Self::Channel => write!(f, "channel"),
+            Self::SystemAutomation => write!(f, "system_automation"),
+            Self::UiAutomation => write!(f, "ui_automation"),
+            Self::AppIntegration => write!(f, "app_integration"),
         }
     }
 }
@@ -102,6 +108,12 @@ mod tests {
         assert_eq!(ToolCategory::Crypto.to_string(), "crypto");
         assert_eq!(ToolCategory::Plugin.to_string(), "plugin");
         assert_eq!(ToolCategory::Channel.to_string(), "channel");
+        assert_eq!(
+            ToolCategory::SystemAutomation.to_string(),
+            "system_automation"
+        );
+        assert_eq!(ToolCategory::UiAutomation.to_string(), "ui_automation");
+        assert_eq!(ToolCategory::AppIntegration.to_string(), "app_integration");
     }
 
     #[test]
@@ -126,6 +138,9 @@ mod tests {
             ToolCategory::Crypto,
             ToolCategory::Plugin,
             ToolCategory::Channel,
+            ToolCategory::SystemAutomation,
+            ToolCategory::UiAutomation,
+            ToolCategory::AppIntegration,
         ];
         for cat in &categories {
             let json = serde_json::to_string(cat).expect("serialize");

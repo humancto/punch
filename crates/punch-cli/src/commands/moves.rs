@@ -712,7 +712,10 @@ fn run_add_pack(name: String) -> i32 {
         Ok(result) => {
             println!("  Skill pack '{}' installed.", result.pack_name);
             println!();
-            println!("  MCP servers added to: {}", punch_home.join("config.toml").display());
+            println!(
+                "  MCP servers added to: {}",
+                punch_home.join("config.toml").display()
+            );
             for srv in &result.servers_added {
                 println!("    - {}", srv);
             }
