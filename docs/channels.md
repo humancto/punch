@@ -354,8 +354,6 @@ allowed_user_ids = []
 rate_limit_per_user = 20
 ```
 
-**Note:** iMessage is not supported — Apple does not offer a public bot API.
-
 ## Configuration Reference
 
 Full annotated config:
