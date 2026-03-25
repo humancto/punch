@@ -152,11 +152,22 @@ impl ModelRouter {
     /// model is configured. Returns `None` if routing is disabled or the tier
     /// model is not configured (the caller should use the default driver).
     pub fn route_message(&self, message: &str) -> Option<(ModelTier, ModelConfig)> {
+        self.route_message_with_context(message, &[])
+    }
+
+    /// Classify a message with conversation context and return the tier-specific
+    /// model config. This enables image-aware routing where conversations containing
+    /// screenshots or photos automatically escalate to vision-capable models.
+    pub fn route_message_with_context(
+        &self,
+        message: &str,
+        messages: &[Message],
+    ) -> Option<(ModelTier, ModelConfig)> {
         if !self.config.enabled {
             return None;
         }
 
-        let tier = Self::classify(message);
+        let tier = Self::classify_with_context(message, messages);
         let model_config = self.select_model(tier)?;
 
         debug!(

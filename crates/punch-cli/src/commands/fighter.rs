@@ -118,6 +118,15 @@ fn parse_capabilities(caps: &[String]) -> Vec<Capability> {
             "event_publish" => result.push(Capability::EventPublish),
             "channel_notify" => result.push(Capability::ChannelNotify),
             "self_config" => result.push(Capability::SelfConfig),
+            "system_automation" => result.push(Capability::SystemAutomation),
+            s if s.starts_with("ui_automation(") && s.ends_with(')') => {
+                let app = &s["ui_automation(".len()..s.len() - 1];
+                result.push(Capability::UiAutomation(app.to_string()));
+            }
+            s if s.starts_with("app_integration(") && s.ends_with(')') => {
+                let app = &s["app_integration(".len()..s.len() - 1];
+                result.push(Capability::AppIntegration(app.to_string()));
+            }
             _ => {
                 // Unknown capability, skip silently.
             }

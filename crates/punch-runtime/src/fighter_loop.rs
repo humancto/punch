@@ -159,7 +159,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         .as_ref()
         .and_then(|routing_config| {
             let router = ModelRouter::new(routing_config.clone());
-            router.route_message(&params.user_message)
+            router.route_message_with_context(&params.user_message, &messages)
         })
         .and_then(
             |(tier, model_config)| match ModelRouter::create_tier_driver(&model_config) {

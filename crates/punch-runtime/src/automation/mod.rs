@@ -21,6 +21,7 @@ use punch_types::{PunchError, PunchResult};
 ///
 /// Attributes are used as unquoted identifiers in AppleScript, so they CANNOT
 /// be escaped — they must be validated against this allowlist.
+#[cfg(any(target_os = "macos", test))]
 const ALLOWED_ATTRIBUTES: &[&str] = &[
     "value",
     "name",
@@ -119,6 +120,7 @@ pub fn create_backend() -> Box<dyn AutomationBackend> {
 // ---------------------------------------------------------------------------
 
 /// Escape a string for safe interpolation into AppleScript double-quoted strings.
+#[cfg(any(target_os = "macos", test))]
 fn escape_applescript(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -128,6 +130,7 @@ fn escape_applescript(s: &str) -> String {
 
 /// Validate that a role filter contains only safe characters.
 /// Roles are used as unquoted identifiers in AppleScript.
+#[cfg(any(target_os = "macos", test))]
 fn validate_role_filter(role: &str) -> PunchResult<()> {
     if role
         .chars()
@@ -145,6 +148,7 @@ fn validate_role_filter(role: &str) -> PunchResult<()> {
 }
 
 /// Validate that an attribute name is in the allowlist.
+#[cfg(any(target_os = "macos", test))]
 fn validate_attribute(attribute: &str) -> PunchResult<()> {
     if ALLOWED_ATTRIBUTES.contains(&attribute) {
         Ok(())
@@ -160,13 +164,13 @@ fn validate_attribute(attribute: &str) -> PunchResult<()> {
 }
 
 /// Parse an element ID ("AppName:index") into (app_name, index).
-pub fn parse_element_id(element_id: &str, tool: &str) -> PunchResult<(String, usize)> {
-    let parts: Vec<&str> = element_id.splitn(2, ':').collect();
-    if parts.len() != 2 {
+pub fn parse_element_id(element_id: &str, tool: &str) -> PunchResult<(String, String, usize)> {
+    let parts: Vec<&str> = element_id.splitn(3, ':').collect();
+    if parts.len() != 3 {
         return Err(PunchError::Tool {
             tool: tool.into(),
             message: format!(
-                "invalid element_id format: {element_id:?} — expected \"AppName:index\""
+                "invalid element_id format: {element_id:?} — expected \"AppName:role:index\""
             ),
         });
     }
@@ -177,16 +181,23 @@ pub fn parse_element_id(element_id: &str, tool: &str) -> PunchResult<(String, us
             message: format!("invalid element_id: empty app name in {element_id:?}"),
         });
     }
-    let index: usize = parts[1].parse().map_err(|_| PunchError::Tool {
+    let role = parts[1];
+    if role.is_empty() {
+        return Err(PunchError::Tool {
+            tool: tool.into(),
+            message: format!("invalid element_id: empty role in {element_id:?}"),
+        });
+    }
+    let index: usize = parts[2].parse().map_err(|_| PunchError::Tool {
         tool: tool.into(),
         message: format!("invalid element_id index: {element_id:?} — index must be a number"),
     })?;
-    Ok((app.to_string(), index))
+    Ok((app.to_string(), role.to_string(), index))
 }
 
 /// Extract just the app name from an element ID.
 pub fn extract_app_from_element_id(element_id: &str, tool: &str) -> PunchResult<String> {
-    parse_element_id(element_id, tool).map(|(app, _)| app)
+    parse_element_id(element_id, tool).map(|(app, _, _)| app)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +268,7 @@ impl AutomationBackend for MacOsBackend {
         let path = format!(
             "{}/punch_screenshot_{}.png",
             self.tmp_dir,
-            std::process::id()
+            uuid::Uuid::new_v4()
         );
 
         let mut cmd = tokio::process::Command::new("screencapture");
@@ -362,11 +373,11 @@ end tell"#
             cmd.arg("-R").arg(format!("{x},{y},{w},{h}"));
         } else if let Some(eid) = element_id {
             // Get element bounds via accessibility, then capture that region.
-            let (app, index) = parse_element_id(eid, "ui_screenshot")?;
+            let (app, role, index) = parse_element_id(eid, "ui_screenshot")?;
             let escaped_app = escape_applescript(&app);
             let script = format!(
                 r#"tell application "System Events" to tell process "{escaped_app}"
-set el to UI element {} of window 1
+set el to {role} {} of window 1
 set p to position of el
 set s to size of el
 return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text)
@@ -614,7 +625,7 @@ end tell"#
             }
 
             elements.push(UiElement {
-                element_id: format!("{}:{}", app, parts[0].trim()),
+                element_id: format!("{}:{}:{}", app, parts[1].trim(), parts[0].trim()),
                 role: parts[1].to_string(),
                 label,
                 value,
@@ -626,13 +637,13 @@ end tell"#
     }
 
     async fn click_element(&self, element_id: &str) -> PunchResult<()> {
-        let (app, index) = parse_element_id(element_id, "ui_click")?;
+        let (app, role, index) = parse_element_id(element_id, "ui_click")?;
         let escaped_app = escape_applescript(&app);
         let applescript_index = index + 1; // AppleScript is 1-based
 
         let script = format!(
             r#"tell application "System Events" to tell process "{escaped_app}"
-click UI element {applescript_index} of window 1
+click {role} {applescript_index} of window 1
 end tell"#
         );
 
@@ -641,14 +652,14 @@ end tell"#
     }
 
     async fn type_text(&self, element_id: &str, text: &str) -> PunchResult<()> {
-        let (app, index) = parse_element_id(element_id, "ui_type_text")?;
+        let (app, role, index) = parse_element_id(element_id, "ui_type_text")?;
         let escaped_app = escape_applescript(&app);
         let escaped_text = escape_applescript(text);
         let applescript_index = index + 1;
 
         let script = format!(
             r#"tell application "System Events" to tell process "{escaped_app}"
-set value of UI element {applescript_index} of window 1 to "{escaped_text}"
+set value of {role} {applescript_index} of window 1 to "{escaped_text}"
 end tell"#
         );
 
@@ -662,13 +673,13 @@ end tell"#
         attribute: &str,
     ) -> PunchResult<String> {
         validate_attribute(attribute)?;
-        let (app, index) = parse_element_id(element_id, "ui_read_attribute")?;
+        let (app, role, index) = parse_element_id(element_id, "ui_read_attribute")?;
         let escaped_app = escape_applescript(&app);
         let applescript_index = index + 1;
 
         let script = format!(
             r#"tell application "System Events" to tell process "{escaped_app}"
-return {attribute} of UI element {applescript_index} of window 1 as text
+return {attribute} of {role} {applescript_index} of window 1 as text
 end tell"#
         );
 
@@ -747,10 +758,12 @@ impl AutomationBackend for LinuxBackend {
     }
 
     async fn app_ocr(&self, _app: &str) -> PunchResult<OcrResult> {
+        use base64::Engine;
+
         // Capture full screen then OCR with tesseract.
         let ss = self.screenshot(None).await?;
         let tmp = format!("/tmp/punch_ocr_{}.png", std::process::id());
-        let data = base64::engine::general_purpose::STANDARD
+        let data: Vec<u8> = base64::engine::general_purpose::STANDARD
             .decode(&ss.png_base64)
             .map_err(|e| PunchError::Tool {
                 tool: "app_ocr".into(),
@@ -1020,6 +1033,7 @@ fn parse_png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 }
 
 /// Parse "x,y" into (i64, i64).
+#[cfg(any(target_os = "macos", test))]
 fn parse_xy_pair(s: &str) -> Option<(i64, i64)> {
     let parts: Vec<&str> = s.split(',').collect();
     if parts.len() == 2 {
@@ -1032,6 +1046,7 @@ fn parse_xy_pair(s: &str) -> Option<(i64, i64)> {
 }
 
 /// Parse "w,h" into (u64, u64).
+#[cfg(any(target_os = "macos", test))]
 fn parse_wh_pair(s: &str) -> Option<(u64, u64)> {
     let parts: Vec<&str> = s.split(',').collect();
     if parts.len() == 2 {
@@ -1108,22 +1123,25 @@ mod tests {
 
     #[test]
     fn test_parse_element_id_valid() {
-        let (app, idx) = parse_element_id("Safari:3", "test").unwrap();
+        let (app, role, idx) = parse_element_id("Safari:button:3", "test").unwrap();
         assert_eq!(app, "Safari");
+        assert_eq!(role, "button");
         assert_eq!(idx, 3);
     }
 
     #[test]
     fn test_parse_element_id_zero_index() {
-        let (app, idx) = parse_element_id("Messages:0", "test").unwrap();
+        let (app, role, idx) = parse_element_id("Messages:UI element:0", "test").unwrap();
         assert_eq!(app, "Messages");
+        assert_eq!(role, "UI element");
         assert_eq!(idx, 0);
     }
 
     #[test]
     fn test_parse_element_id_app_with_spaces() {
-        let (app, idx) = parse_element_id("System Preferences:5", "test").unwrap();
+        let (app, role, idx) = parse_element_id("System Preferences:text field:5", "test").unwrap();
         assert_eq!(app, "System Preferences");
+        assert_eq!(role, "text field");
         assert_eq!(idx, 5);
     }
 
@@ -1134,12 +1152,12 @@ mod tests {
 
     #[test]
     fn test_parse_element_id_empty_app() {
-        assert!(parse_element_id(":3", "test").is_err());
+        assert!(parse_element_id(":button:3", "test").is_err());
     }
 
     #[test]
     fn test_parse_element_id_non_numeric_index() {
-        assert!(parse_element_id("Safari:abc", "test").is_err());
+        assert!(parse_element_id("Safari:button:abc", "test").is_err());
     }
 
     #[test]
@@ -1148,8 +1166,13 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_element_id_empty_role() {
+        assert!(parse_element_id("Safari::3", "test").is_err());
+    }
+
+    #[test]
     fn test_extract_app_from_element_id() {
-        let app = extract_app_from_element_id("Messages:0", "test").unwrap();
+        let app = extract_app_from_element_id("Messages:UI element:0", "test").unwrap();
         assert_eq!(app, "Messages");
     }
 
