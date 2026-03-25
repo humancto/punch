@@ -277,10 +277,10 @@ async fn dashboard_audit(
     State(state): State<AppState>,
     Query(params): Query<AuditQuery>,
 ) -> Json<Vec<AuditEntry>> {
-    let events = state.ring.event_bus().recent_events(
-        params.limit as usize,
-        params.since as usize,
-    );
+    let events = state
+        .ring
+        .event_bus()
+        .recent_events(params.limit as usize, params.since as usize);
 
     let mut entries: Vec<AuditEntry> = events
         .into_iter()
@@ -354,10 +354,9 @@ fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
                 format!("{} [{}] ({}ms)", tool_name, status, duration_ms),
             )
         }
-        PunchEvent::BoutStarted { .. } => (
-            "bout_started".to_string(),
-            "New bout started".to_string(),
-        ),
+        PunchEvent::BoutStarted { .. } => {
+            ("bout_started".to_string(), "New bout started".to_string())
+        }
         PunchEvent::BoutEnded {
             messages_exchanged, ..
         } => (
@@ -372,9 +371,7 @@ fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
             format!("Combo '{}' by {}", combo_name, triggered_by),
         ),
         PunchEvent::TroopFormed {
-            name,
-            member_count,
-            ..
+            name, member_count, ..
         } => (
             "troop_formed".to_string(),
             format!("Troop '{}' formed ({} members)", name, member_count),
@@ -391,10 +388,9 @@ fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
             "mcp_stopped".to_string(),
             format!("MCP server '{}' stopped", server_name),
         ),
-        PunchEvent::Error { source, message } => (
-            "error".to_string(),
-            format!("[{}] {}", source, message),
-        ),
+        PunchEvent::Error { source, message } => {
+            ("error".to_string(), format!("[{}] {}", source, message))
+        }
     }
 }
 

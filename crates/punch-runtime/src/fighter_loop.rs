@@ -25,6 +25,7 @@ use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
     AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
     Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
+    capability::Capability,
 };
 
 use crate::mcp::McpClient;
@@ -158,6 +159,24 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         browser_pool: None,
         plugin_registry: None,
         mcp_clients: params.mcp_clients.clone(),
+        automation_backend: if params.manifest.capabilities.iter().any(|c| {
+            matches!(
+                c,
+                Capability::SystemAutomation
+                    | Capability::UiAutomation(_)
+                    | Capability::AppIntegration(_)
+            )
+        }) {
+            match crate::automation::create_backend() {
+                Ok(backend) => Some(Arc::from(backend)),
+                Err(e) => {
+                    warn!(fighter_id = %params.fighter_id, error = %e, "automation backend unavailable — automation tools will be disabled");
+                    None
+                }
+            }
+        } else {
+            None
+        },
     };
 
     // 4. Main loop.

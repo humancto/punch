@@ -59,6 +59,11 @@ pub struct ToolExecutionContext {
     /// When present, tools prefixed with `mcp_{server}_` are routed to the
     /// corresponding MCP server for execution.
     pub mcp_clients: Option<Arc<DashMap<String, Arc<McpClient>>>>,
+    /// Optional automation backend for system/UI/app automation tools.
+    /// When present, desktop automation moves (sys_*, ui_*, app_*) can
+    /// interact with the operating system. Without it, automation tools
+    /// report "automation not available".
+    pub automation_backend: Option<Arc<dyn crate::automation::AutomationBackend>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -210,10 +215,24 @@ async fn execute_tool_inner(
         "wasm_invoke" => tool_wasm_invoke(input, capabilities, context).await,
         // A2A delegation
         "a2a_delegate" => tool_a2a_delegate(input, capabilities).await,
+        // System Automation
+        "sys_open_app" => tool_sys_open_app(input, capabilities, context).await,
+        "sys_list_apps" => tool_sys_list_apps(capabilities, context).await,
+        "sys_clipboard_read" => tool_sys_clipboard_read(capabilities, context).await,
+        "sys_clipboard_write" => tool_sys_clipboard_write(input, capabilities, context).await,
+        "sys_notification" => tool_sys_notification(input, capabilities, context).await,
+        // UI Automation
+        "ui_list_windows" => tool_ui_list_windows(capabilities, context).await,
+        "ui_find_elements" => tool_ui_find_elements(input, capabilities, context).await,
+        "ui_click" => tool_ui_click(input, capabilities, context).await,
+        "ui_type_text" => tool_ui_type_text(input, capabilities, context).await,
+        "ui_read_attribute" => tool_ui_read_attribute(input, capabilities, context).await,
+        // App Integration
+        "app_activate" => tool_app_activate(input, capabilities, context).await,
+        "app_menu_click" => tool_app_menu_click(input, capabilities, context).await,
+        "app_get_state" => tool_app_get_state(input, capabilities, context).await,
         // MCP server tools — dispatched by `mcp_{server}_{tool}` prefix.
-        _ if name.starts_with("mcp_") => {
-            tool_mcp_call(name, input, capabilities, context).await
-        }
+        _ if name.starts_with("mcp_") => tool_mcp_call(name, input, capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -235,6 +254,25 @@ fn require_capability(capabilities: &[Capability], required: &Capability) -> Pun
             required
         )))
     }
+}
+
+/// Extract the application name from a UI element ID.
+///
+/// Element IDs follow the format `"AppName:index"` where `AppName` is a
+/// non-empty application name and `index` is a 0-based element index
+/// produced by `find_ui_elements`. The first segment before the first `:`
+/// is returned. If the app name is empty or the string is empty, returns
+/// an error.
+fn extract_app_from_element_id(element_id: &str, tool: &str) -> PunchResult<String> {
+    element_id
+        .split(':')
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| PunchError::Tool {
+            tool: tool.into(),
+            message: format!("invalid element_id format: {element_id}"),
+        })
 }
 
 /// Resolve a path relative to the working directory.
@@ -317,10 +355,7 @@ async fn tool_mcp_call(
     for entry in clients.iter() {
         if let Some(stripped) = entry.value().strip_namespace(name) {
             // Check capability: the fighter must have McpAccess for this server.
-            require_capability(
-                capabilities,
-                &Capability::McpAccess(entry.key().clone()),
-            )?;
+            require_capability(capabilities, &Capability::McpAccess(entry.key().clone()))?;
             matched_client = Some(Arc::clone(entry.value()));
             raw_tool_name = Some(stripped.to_string());
             break;
@@ -328,10 +363,7 @@ async fn tool_mcp_call(
     }
 
     let client = matched_client.ok_or_else(|| {
-        PunchError::ToolNotFound(format!(
-            "no MCP server matches tool '{}'",
-            name
-        ))
+        PunchError::ToolNotFound(format!("no MCP server matches tool '{}'", name))
     })?;
     let raw_name = raw_tool_name.unwrap();
 
@@ -3937,6 +3969,338 @@ async fn tool_a2a_delegate(
 }
 
 // ---------------------------------------------------------------------------
+// System automation tool handlers
+// ---------------------------------------------------------------------------
+
+/// Helper: get the automation backend or return an error result.
+fn get_automation_backend(
+    context: &ToolExecutionContext,
+) -> PunchResult<&dyn crate::automation::AutomationBackend> {
+    context.automation_backend.as_deref().ok_or_else(|| {
+        debug!(
+            fighter_id = %context.fighter_id,
+            "automation tool called but no backend is configured"
+        );
+        PunchError::Tool {
+            tool: "automation".into(),
+            message: "automation backend not available — desktop automation is not configured"
+                .into(),
+        }
+    })
+}
+
+async fn tool_sys_open_app(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = get_automation_backend(context)?;
+
+    let app_name = input["app_name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "sys_open_app".into(),
+        message: "missing 'app_name' parameter".into(),
+    })?;
+
+    backend.open_app(app_name).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"opened": app_name}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_sys_list_apps(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = get_automation_backend(context)?;
+
+    let apps = backend.list_running_apps().await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::to_value(&apps).unwrap_or(serde_json::json!([])),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_sys_clipboard_read(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = get_automation_backend(context)?;
+
+    let content = backend.clipboard_read().await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::to_value(&content).unwrap_or(serde_json::json!(null)),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_sys_clipboard_write(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = get_automation_backend(context)?;
+
+    let content = input["content"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "sys_clipboard_write".into(),
+        message: "missing 'content' parameter".into(),
+    })?;
+
+    backend.clipboard_write(content).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"written": true}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_sys_notification(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = get_automation_backend(context)?;
+
+    let title = input["title"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "sys_notification".into(),
+        message: "missing 'title' parameter".into(),
+    })?;
+    let body = input["body"].as_str().unwrap_or("");
+
+    backend.send_notification(title, body).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"sent": true}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// UI automation tool handlers
+// ---------------------------------------------------------------------------
+
+async fn tool_ui_list_windows(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
+    let backend = get_automation_backend(context)?;
+
+    let windows = backend.list_windows().await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::to_value(&windows).unwrap_or(serde_json::json!([])),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_find_elements(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input["app"].as_str().unwrap_or("*").to_string();
+    require_capability(capabilities, &Capability::UiAutomation(app.clone()))?;
+    let backend = get_automation_backend(context)?;
+
+    let selector = crate::automation::UiSelector {
+        role: input["role"].as_str().map(|s| s.to_string()),
+        label: input["label"].as_str().map(|s| s.to_string()),
+        value: input["value"].as_str().map(|s| s.to_string()),
+    };
+
+    let elements = backend.find_ui_elements(&app, &selector).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::to_value(&elements).unwrap_or(serde_json::json!([])),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_click(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let backend = get_automation_backend(context)?;
+
+    let element_id = input["element_id"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_click".into(),
+            message: "missing 'element_id' parameter".into(),
+        })?;
+
+    let app = extract_app_from_element_id(element_id, "ui_click")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+
+    backend.click_element(element_id).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"clicked": element_id}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_type_text(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let backend = get_automation_backend(context)?;
+
+    let element_id = input["element_id"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_type_text".into(),
+            message: "missing 'element_id' parameter".into(),
+        })?;
+    let app = extract_app_from_element_id(element_id, "ui_type_text")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "ui_type_text".into(),
+        message: "missing 'text' parameter".into(),
+    })?;
+
+    backend.type_text(element_id, text).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"typed": true, "element_id": element_id}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_read_attribute(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let backend = get_automation_backend(context)?;
+
+    let element_id = input["element_id"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing 'element_id' parameter".into(),
+        })?;
+    let app = extract_app_from_element_id(element_id, "ui_read_attribute")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let attribute = input["attribute"]
+        .as_str()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing 'attribute' parameter".into(),
+        })?;
+
+    let value = backend
+        .read_element_attribute(element_id, attribute)
+        .await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"element_id": element_id, "attribute": attribute, "value": value}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// App integration tool handlers
+// ---------------------------------------------------------------------------
+
+async fn tool_app_activate(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app_name = input["app_name"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "app_activate".into(),
+        message: "missing 'app_name' parameter".into(),
+    })?;
+    require_capability(
+        capabilities,
+        &Capability::AppIntegration(app_name.to_string()),
+    )?;
+    let backend = get_automation_backend(context)?;
+
+    backend.activate_app(app_name).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"activated": app_name}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_app_menu_click(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input["app"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "app_menu_click".into(),
+        message: "missing 'app' parameter".into(),
+    })?;
+    require_capability(capabilities, &Capability::AppIntegration(app.to_string()))?;
+    let backend = get_automation_backend(context)?;
+
+    let menu_path: Vec<String> = input["menu_path"]
+        .as_array()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "app_menu_click".into(),
+            message: "missing 'menu_path' parameter (array of strings)".into(),
+        })?
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    backend.app_menu_click(app, &menu_path).await?;
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({"clicked_menu": menu_path, "app": app}),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_app_get_state(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input["app"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "app_get_state".into(),
+        message: "missing 'app' parameter".into(),
+    })?;
+    require_capability(capabilities, &Capability::AppIntegration(app.to_string()))?;
+    let backend = get_automation_backend(context)?;
+
+    let state = backend.app_get_state(app).await?;
+    Ok(ToolResult {
+        success: true,
+        output: state,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -4005,6 +4369,7 @@ mod tests {
             browser_pool: None,
             plugin_registry: None,
             mcp_clients: None,
+            automation_backend: None,
         }
     }
 
@@ -5930,5 +6295,502 @@ mod tests {
             "error should mention discovery failure: {:?}",
             result.error
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Automation tool tests
+    // -----------------------------------------------------------------------
+
+    /// Mock automation backend for testing.
+    struct MockAutomationBackend;
+
+    #[async_trait]
+    impl crate::automation::AutomationBackend for MockAutomationBackend {
+        async fn list_running_apps(&self) -> PunchResult<Vec<crate::automation::AppInfo>> {
+            Ok(vec![
+                crate::automation::AppInfo {
+                    name: "MockApp".to_string(),
+                    pid: 1234,
+                    is_frontmost: true,
+                },
+                crate::automation::AppInfo {
+                    name: "OtherApp".to_string(),
+                    pid: 5678,
+                    is_frontmost: false,
+                },
+            ])
+        }
+
+        async fn open_app(&self, _app_name: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn clipboard_read(&self) -> PunchResult<crate::automation::ClipboardContent> {
+            Ok(crate::automation::ClipboardContent {
+                text: "mock clipboard content".to_string(),
+            })
+        }
+
+        async fn clipboard_write(&self, _content: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn send_notification(&self, _title: &str, _body: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn list_windows(&self) -> PunchResult<Vec<crate::automation::WindowInfo>> {
+            Ok(vec![crate::automation::WindowInfo {
+                title: "Mock Window".to_string(),
+                app_name: "MockApp".to_string(),
+                position: Some((0, 0)),
+                size: Some((800, 600)),
+                is_minimized: false,
+            }])
+        }
+
+        async fn find_ui_elements(
+            &self,
+            app: &str,
+            _selector: &crate::automation::UiSelector,
+        ) -> PunchResult<Vec<crate::automation::UiElement>> {
+            Ok(vec![crate::automation::UiElement {
+                element_id: format!("{app}:0"),
+                role: "button".to_string(),
+                label: Some("OK".to_string()),
+                value: None,
+                enabled: true,
+            }])
+        }
+
+        async fn click_element(&self, _element_id: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn type_text(&self, _element_id: &str, _text: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn read_element_attribute(
+            &self,
+            _element_id: &str,
+            attribute: &str,
+        ) -> PunchResult<String> {
+            Ok(format!("mock_{attribute}_value"))
+        }
+
+        async fn activate_app(&self, _app_name: &str) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn app_menu_click(&self, _app: &str, _menu_path: &[String]) -> PunchResult<()> {
+            Ok(())
+        }
+
+        async fn app_get_state(&self, app: &str) -> PunchResult<serde_json::Value> {
+            Ok(serde_json::json!({"app": app, "status": "running"}))
+        }
+    }
+
+    fn make_test_context_with_automation() -> ToolExecutionContext {
+        let mut ctx = make_test_context(None);
+        ctx.automation_backend = Some(Arc::new(MockAutomationBackend));
+        ctx
+    }
+
+    #[tokio::test]
+    async fn test_sys_open_app_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({"app_name": "Safari"});
+
+        let result = execute_tool("sys_open_app", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["opened"], "Safari");
+    }
+
+    #[tokio::test]
+    async fn test_sys_open_app_missing_param() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("sys_open_app", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("app_name"));
+    }
+
+    #[tokio::test]
+    async fn test_sys_open_app_no_capability() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::Memory]; // wrong capability
+        let input = serde_json::json!({"app_name": "Safari"});
+
+        let result = execute_tool("sys_open_app", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success, "should fail without SystemAutomation cap");
+        assert!(result.error.as_deref().unwrap_or("").contains("capability"));
+    }
+
+    #[tokio::test]
+    async fn test_sys_open_app_no_backend() {
+        let context = make_test_context(None); // no automation backend
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({"app_name": "Safari"});
+
+        let result = execute_tool("sys_open_app", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("not available")
+                || result
+                    .error
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("not configured"),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sys_list_apps_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("sys_list_apps", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        let apps = result.output.as_array().unwrap();
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0]["name"], "MockApp");
+    }
+
+    #[tokio::test]
+    async fn test_sys_clipboard_read_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("sys_clipboard_read", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["text"], "mock clipboard content");
+    }
+
+    #[tokio::test]
+    async fn test_sys_clipboard_write_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({"content": "hello world"});
+
+        let result = execute_tool("sys_clipboard_write", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["written"], true);
+    }
+
+    #[tokio::test]
+    async fn test_sys_clipboard_write_missing_param() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("sys_clipboard_write", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("content"));
+    }
+
+    #[tokio::test]
+    async fn test_sys_notification_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({"title": "Test", "body": "Hello"});
+
+        let result = execute_tool("sys_notification", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["sent"], true);
+    }
+
+    #[tokio::test]
+    async fn test_sys_notification_missing_title() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::SystemAutomation];
+        let input = serde_json::json!({"body": "no title"});
+
+        let result = execute_tool("sys_notification", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("title"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_list_windows_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("ui_list_windows", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        let windows = result.output.as_array().unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0]["title"], "Mock Window");
+    }
+
+    #[tokio::test]
+    async fn test_ui_find_elements_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"app": "MockApp", "role": "button"});
+
+        let result = execute_tool("ui_find_elements", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        let elements = result.output.as_array().unwrap();
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0]["role"], "button");
+        assert_eq!(elements[0]["label"], "OK");
+    }
+
+    #[tokio::test]
+    async fn test_ui_click_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"element_id": "MockApp:0"});
+
+        let result = execute_tool("ui_click", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["clicked"], "MockApp:0");
+    }
+
+    #[tokio::test]
+    async fn test_ui_click_missing_param() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("ui_click", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("element_id"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_type_text_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"element_id": "App:1", "text": "hello"});
+
+        let result = execute_tool("ui_type_text", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["typed"], true);
+    }
+
+    #[tokio::test]
+    async fn test_ui_type_text_missing_text() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"element_id": "App:1"});
+
+        let result = execute_tool("ui_type_text", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("text"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_read_attribute_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"element_id": "App:0", "attribute": "title"});
+
+        let result = execute_tool("ui_read_attribute", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["value"], "mock_title_value");
+    }
+
+    #[tokio::test]
+    async fn test_ui_read_attribute_missing_attribute() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let input = serde_json::json!({"element_id": "App:0"});
+
+        let result = execute_tool("ui_read_attribute", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("attribute"));
+    }
+
+    #[tokio::test]
+    async fn test_app_activate_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({"app_name": "MockApp"});
+
+        let result = execute_tool("app_activate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["activated"], "MockApp");
+    }
+
+    #[tokio::test]
+    async fn test_app_activate_missing_param() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("app_activate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("app_name"));
+    }
+
+    #[tokio::test]
+    async fn test_app_activate_scoped_capability() {
+        let context = make_test_context_with_automation();
+        // Only allowed for "MockApp", not "OtherApp"
+        let caps = vec![Capability::AppIntegration("MockApp".to_string())];
+        let input = serde_json::json!({"app_name": "MockApp"});
+
+        let result = execute_tool("app_activate", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed for MockApp");
+
+        let input_other = serde_json::json!({"app_name": "OtherApp"});
+        let result_other = execute_tool("app_activate", &input_other, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result_other.success, "should fail for OtherApp");
+        assert!(
+            result_other
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("capability")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_app_menu_click_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({
+            "app": "MockApp",
+            "menu_path": ["File", "Save"]
+        });
+
+        let result = execute_tool("app_menu_click", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        let path = result.output["clicked_menu"].as_array().unwrap();
+        assert_eq!(path.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_app_menu_click_missing_path() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({"app": "MockApp"});
+
+        let result = execute_tool("app_menu_click", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("menu_path"));
+    }
+
+    #[tokio::test]
+    async fn test_app_get_state_success() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({"app": "MockApp"});
+
+        let result = execute_tool("app_get_state", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(result.success, "should succeed: {:?}", result.error);
+        assert_eq!(result.output["app"], "MockApp");
+        assert_eq!(result.output["status"], "running");
+    }
+
+    // --- extract_app_from_element_id tests ---
+
+    #[test]
+    fn test_extract_app_normal() {
+        let app = extract_app_from_element_id("Safari:3", "ui_click").unwrap();
+        assert_eq!(app, "Safari");
+    }
+
+    #[test]
+    fn test_extract_app_colon_in_app_name() {
+        // splitn(2, ':') ensures only the first colon is used as a delimiter.
+        let app = extract_app_from_element_id("My:App:3", "ui_click").unwrap();
+        assert_eq!(app, "My");
+    }
+
+    #[test]
+    fn test_extract_app_empty_string() {
+        let result = extract_app_from_element_id("", "ui_click");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_app_colon_at_start() {
+        // ":0" has empty app name — should fail.
+        let result = extract_app_from_element_id(":0", "ui_click");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_app_no_colon() {
+        // No colon at all — returns the whole string as the app name.
+        let app = extract_app_from_element_id("Safari", "ui_click").unwrap();
+        assert_eq!(app, "Safari");
+    }
+
+    #[tokio::test]
+    async fn test_app_get_state_missing_app() {
+        let context = make_test_context_with_automation();
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let input = serde_json::json!({});
+
+        let result = execute_tool("app_get_state", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap_or("").contains("app"));
     }
 }

@@ -676,11 +676,8 @@ impl Ring {
                     Ok(Some(existing)) => existing,
                     _ => {
                         // No prior bout found — create a fresh one.
-                        let new_id = self
-                            .memory
-                            .create_bout(fighter_id)
-                            .await
-                            .map_err(|e| {
+                        let new_id =
+                            self.memory.create_bout(fighter_id).await.map_err(|e| {
                                 PunchError::Bout(format!("failed to create bout: {e}"))
                             })?;
 
@@ -707,9 +704,10 @@ impl Ring {
         let mut available_tools = tools_for_capabilities(&manifest.capabilities);
 
         // Merge MCP tools if the fighter has McpAccess capability.
-        let has_mcp_access = manifest.capabilities.iter().any(|c| {
-            matches!(c, punch_types::Capability::McpAccess(_))
-        });
+        let has_mcp_access = manifest
+            .capabilities
+            .iter()
+            .any(|c| matches!(c, punch_types::Capability::McpAccess(_)));
         if has_mcp_access && !self.mcp_clients.is_empty() {
             for mcp_entry in self.mcp_clients.iter() {
                 let server_name = mcp_entry.key();

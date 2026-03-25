@@ -80,12 +80,7 @@ impl SlackAdapter {
     ///
     /// Returns `true` if the signature is valid, `false` if verification
     /// fails or no signing secret is configured.
-    pub fn verify_webhook_signature(
-        &self,
-        timestamp: &str,
-        signature: &str,
-        body: &[u8],
-    ) -> bool {
+    pub fn verify_webhook_signature(&self, timestamp: &str, signature: &str, body: &[u8]) -> bool {
         let secret = match &self.signing_secret {
             Some(s) => s,
             None => return false,

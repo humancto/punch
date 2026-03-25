@@ -674,6 +674,274 @@ pub fn builtin_skills() -> Vec<SkillListing> {
             published_at: now,
             source: SkillSource::Builtin,
         },
+        SkillListing {
+            id: Uuid::new_v4(),
+            name: "System Automation".to_string(),
+            description:
+                "Open apps, manage the clipboard, and send desktop notifications on the host OS."
+                    .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "system_automation".to_string(),
+            tags: vec![
+                "automation".to_string(),
+                "desktop".to_string(),
+                "clipboard".to_string(),
+                "notification".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "sys_open_app",
+                    "Open (launch) an application by name on the host OS.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app_name": {
+                                "type": "string",
+                                "description": "The name of the application to open"
+                            }
+                        },
+                        "required": ["app_name"]
+                    }),
+                ),
+                tool(
+                    "sys_list_apps",
+                    "List all currently running GUI applications on the host OS.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                ),
+                tool(
+                    "sys_clipboard_read",
+                    "Read the current text content of the system clipboard.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                ),
+                tool(
+                    "sys_clipboard_write",
+                    "Write text content to the system clipboard.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The text content to write to the clipboard"
+                            }
+                        },
+                        "required": ["content"]
+                    }),
+                ),
+                tool(
+                    "sys_notification",
+                    "Send a desktop notification with a title and optional body.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "The notification title"
+                            },
+                            "body": {
+                                "type": "string",
+                                "description": "The notification body text (optional)"
+                            }
+                        },
+                        "required": ["title"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
+        SkillListing {
+            id: Uuid::new_v4(),
+            name: "UI Automation".to_string(),
+            description:
+                "Find and interact with UI elements using accessibility APIs — click buttons, type text, and read attributes."
+                    .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "ui_automation".to_string(),
+            tags: vec![
+                "automation".to_string(),
+                "accessibility".to_string(),
+                "ui".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "ui_list_windows",
+                    "List all visible windows on the desktop with their titles and owning application.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                ),
+                tool(
+                    "ui_find_elements",
+                    "Find UI elements in an application by accessibility role, label, or value.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": {
+                                "type": "string",
+                                "description": "The application name to search in"
+                            },
+                            "role": {
+                                "type": "string",
+                                "description": "Filter by accessibility role (e.g. 'button', 'text_field')"
+                            },
+                            "label": {
+                                "type": "string",
+                                "description": "Filter by label text (partial match)"
+                            }
+                        }
+                    }),
+                ),
+                tool(
+                    "ui_click",
+                    "Click a UI element by its element ID.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "element_id": {
+                                "type": "string",
+                                "description": "The element ID to click"
+                            }
+                        },
+                        "required": ["element_id"]
+                    }),
+                ),
+                tool(
+                    "ui_type_text",
+                    "Type text into a UI element (text field) by its element ID.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "element_id": {
+                                "type": "string",
+                                "description": "The element ID of the text field"
+                            },
+                            "text": {
+                                "type": "string",
+                                "description": "The text to type"
+                            }
+                        },
+                        "required": ["element_id", "text"]
+                    }),
+                ),
+                tool(
+                    "ui_read_attribute",
+                    "Read an accessibility attribute from a UI element.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "element_id": {
+                                "type": "string",
+                                "description": "The element ID to read from"
+                            },
+                            "attribute": {
+                                "type": "string",
+                                "description": "The attribute name to read (e.g. 'value', 'title')"
+                            }
+                        },
+                        "required": ["element_id", "attribute"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
+        SkillListing {
+            id: Uuid::new_v4(),
+            name: "App Integration".to_string(),
+            description:
+                "Activate applications, click menus, and query app state for deep desktop integration."
+                    .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "app_integration".to_string(),
+            tags: vec![
+                "automation".to_string(),
+                "apps".to_string(),
+                "desktop".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "app_activate",
+                    "Bring an application to the foreground (activate it).",
+                    ToolCategory::AppIntegration,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app_name": {
+                                "type": "string",
+                                "description": "The name of the application to activate"
+                            }
+                        },
+                        "required": ["app_name"]
+                    }),
+                ),
+                tool(
+                    "app_menu_click",
+                    "Click a menu item in an application by path.",
+                    ToolCategory::AppIntegration,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": {
+                                "type": "string",
+                                "description": "The application name"
+                            },
+                            "menu_path": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Menu path as array of strings"
+                            }
+                        },
+                        "required": ["app", "menu_path"]
+                    }),
+                ),
+                tool(
+                    "app_get_state",
+                    "Get the current state of an application.",
+                    ToolCategory::AppIntegration,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": {
+                                "type": "string",
+                                "description": "The application name to query"
+                            }
+                        },
+                        "required": ["app"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
     ]
 }
 
@@ -809,8 +1077,8 @@ mod tests {
     fn test_builtin_skills_populated() {
         let skills = builtin_skills();
         assert!(
-            skills.len() >= 8,
-            "expected at least 8 builtin skills, got {}",
+            skills.len() >= 11,
+            "expected at least 11 builtin skills, got {}",
             skills.len()
         );
 

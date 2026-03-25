@@ -321,8 +321,8 @@ mod tests {
         let registry = SkillRegistry::load_bundled();
         let skills = registry.list_skills();
         assert!(
-            skills.len() >= 8,
-            "expected at least 8 bundled skills, got {}",
+            skills.len() >= 11,
+            "expected at least 11 bundled skills, got {}",
             skills.len()
         );
         assert!(registry.get_skill("Filesystem Tools").is_some());

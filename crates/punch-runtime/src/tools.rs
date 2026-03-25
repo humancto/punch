@@ -109,6 +109,25 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
             Capability::PluginInvoke => {
                 push_unique(&mut tools, wasm_invoke());
             }
+            Capability::SystemAutomation => {
+                push_unique(&mut tools, sys_open_app());
+                push_unique(&mut tools, sys_list_apps());
+                push_unique(&mut tools, sys_clipboard_read());
+                push_unique(&mut tools, sys_clipboard_write());
+                push_unique(&mut tools, sys_notification());
+            }
+            Capability::UiAutomation(_) => {
+                push_unique(&mut tools, ui_list_windows());
+                push_unique(&mut tools, ui_find_elements());
+                push_unique(&mut tools, ui_click());
+                push_unique(&mut tools, ui_type_text());
+                push_unique(&mut tools, ui_read_attribute());
+            }
+            Capability::AppIntegration(_) => {
+                push_unique(&mut tools, app_activate());
+                push_unique(&mut tools, app_menu_click());
+                push_unique(&mut tools, app_get_state());
+            }
             _ => {}
         }
     }
@@ -191,6 +210,22 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         a2a_delegate(),
         // WASM Plugin
         wasm_invoke(),
+        // System Automation
+        sys_open_app(),
+        sys_list_apps(),
+        sys_clipboard_read(),
+        sys_clipboard_write(),
+        sys_notification(),
+        // UI Automation
+        ui_list_windows(),
+        ui_find_elements(),
+        ui_click(),
+        ui_type_text(),
+        ui_read_attribute(),
+        // App Integration
+        app_activate(),
+        app_menu_click(),
+        app_get_state(),
     ]
 }
 
@@ -1561,6 +1596,268 @@ fn wasm_invoke() -> ToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// System Automation tools
+// ---------------------------------------------------------------------------
+
+fn sys_open_app() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_open_app".into(),
+        description: "Open (launch) an application by name on the host OS.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string",
+                    "description": "The name of the application to open (e.g. 'Safari', 'Firefox', 'Code')."
+                }
+            },
+            "required": ["app_name"]
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+fn sys_list_apps() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_list_apps".into(),
+        description: "List all currently running GUI applications on the host OS.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+fn sys_clipboard_read() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_clipboard_read".into(),
+        description: "Read the current text content of the system clipboard.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+fn sys_clipboard_write() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_clipboard_write".into(),
+        description: "Write text content to the system clipboard.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The text content to write to the clipboard."
+                }
+            },
+            "required": ["content"]
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+fn sys_notification() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_notification".into(),
+        description: "Send a desktop notification with a title and optional body.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "The notification title."
+                },
+                "body": {
+                    "type": "string",
+                    "description": "The notification body text (optional)."
+                }
+            },
+            "required": ["title"]
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UI Automation tools
+// ---------------------------------------------------------------------------
+
+fn ui_list_windows() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_list_windows".into(),
+        description:
+            "List all visible windows on the desktop with their titles and owning application."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_find_elements() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_find_elements".into(),
+        description: "Find UI elements in an application by accessibility role, label, or value."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string",
+                    "description": "The application name to search in."
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Filter by accessibility role (e.g. 'button', 'text_field', 'menu_item')."
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Filter by label/title text (partial match)."
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Filter by value text (partial match)."
+                }
+            }
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_click() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_click".into(),
+        description: "Click a UI element by its element ID (obtained from ui_find_elements)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "The element ID to click."
+                }
+            },
+            "required": ["element_id"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_type_text() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_type_text".into(),
+        description: "Type text into a UI element (text field) by its element ID.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "The element ID of the text field to type into."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to type."
+                }
+            },
+            "required": ["element_id", "text"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_read_attribute() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_read_attribute".into(),
+        description: "Read an accessibility attribute from a UI element.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "The element ID to read from."
+                },
+                "attribute": {
+                    "type": "string",
+                    "description": "The attribute name to read (e.g. 'value', 'title', 'role', 'enabled')."
+                }
+            },
+            "required": ["element_id", "attribute"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// App Integration tools
+// ---------------------------------------------------------------------------
+
+fn app_activate() -> ToolDefinition {
+    ToolDefinition {
+        name: "app_activate".into(),
+        description: "Bring an application to the foreground (activate it).".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string",
+                    "description": "The name of the application to activate."
+                }
+            },
+            "required": ["app_name"]
+        }),
+        category: ToolCategory::AppIntegration,
+    }
+}
+
+fn app_menu_click() -> ToolDefinition {
+    ToolDefinition {
+        name: "app_menu_click".into(),
+        description: "Click a menu item in an application by menu path (e.g. ['File', 'Save'])."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string",
+                    "description": "The application name."
+                },
+                "menu_path": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The menu path as an array of strings (e.g. ['File', 'Save As...'])."
+                }
+            },
+            "required": ["app", "menu_path"]
+        }),
+        category: ToolCategory::AppIntegration,
+    }
+}
+
+fn app_get_state() -> ToolDefinition {
+    ToolDefinition {
+        name: "app_get_state".into(),
+        description: "Get the current state of an application (running status, window info, etc.)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string",
+                    "description": "The application name to query."
+                }
+            },
+            "required": ["app"]
+        }),
+        category: ToolCategory::AppIntegration,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2328,5 +2625,217 @@ mod tests {
         let tools = all_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"wasm_invoke"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Automation tool definition tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_sys_open_app_definition() {
+        let tool = sys_open_app();
+        assert_eq!(tool.name, "sys_open_app");
+        assert_eq!(tool.category, ToolCategory::SystemAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "app_name"));
+    }
+
+    #[test]
+    fn test_sys_list_apps_definition() {
+        let tool = sys_list_apps();
+        assert_eq!(tool.name, "sys_list_apps");
+        assert_eq!(tool.category, ToolCategory::SystemAutomation);
+    }
+
+    #[test]
+    fn test_sys_clipboard_read_definition() {
+        let tool = sys_clipboard_read();
+        assert_eq!(tool.name, "sys_clipboard_read");
+        assert_eq!(tool.category, ToolCategory::SystemAutomation);
+    }
+
+    #[test]
+    fn test_sys_clipboard_write_definition() {
+        let tool = sys_clipboard_write();
+        assert_eq!(tool.name, "sys_clipboard_write");
+        assert_eq!(tool.category, ToolCategory::SystemAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "content"));
+    }
+
+    #[test]
+    fn test_sys_notification_definition() {
+        let tool = sys_notification();
+        assert_eq!(tool.name, "sys_notification");
+        assert_eq!(tool.category, ToolCategory::SystemAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "title"));
+    }
+
+    #[test]
+    fn test_ui_list_windows_definition() {
+        let tool = ui_list_windows();
+        assert_eq!(tool.name, "ui_list_windows");
+        assert_eq!(tool.category, ToolCategory::UiAutomation);
+    }
+
+    #[test]
+    fn test_ui_find_elements_definition() {
+        let tool = ui_find_elements();
+        assert_eq!(tool.name, "ui_find_elements");
+        assert_eq!(tool.category, ToolCategory::UiAutomation);
+        assert!(tool.input_schema["properties"]["app"].is_object());
+        assert!(tool.input_schema["properties"]["role"].is_object());
+        assert!(tool.input_schema["properties"]["label"].is_object());
+    }
+
+    #[test]
+    fn test_ui_click_definition() {
+        let tool = ui_click();
+        assert_eq!(tool.name, "ui_click");
+        assert_eq!(tool.category, ToolCategory::UiAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "element_id"));
+    }
+
+    #[test]
+    fn test_ui_type_text_definition() {
+        let tool = ui_type_text();
+        assert_eq!(tool.name, "ui_type_text");
+        assert_eq!(tool.category, ToolCategory::UiAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "element_id"));
+        assert!(required.iter().any(|v| v == "text"));
+    }
+
+    #[test]
+    fn test_ui_read_attribute_definition() {
+        let tool = ui_read_attribute();
+        assert_eq!(tool.name, "ui_read_attribute");
+        assert_eq!(tool.category, ToolCategory::UiAutomation);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "element_id"));
+        assert!(required.iter().any(|v| v == "attribute"));
+    }
+
+    #[test]
+    fn test_app_activate_definition() {
+        let tool = app_activate();
+        assert_eq!(tool.name, "app_activate");
+        assert_eq!(tool.category, ToolCategory::AppIntegration);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "app_name"));
+    }
+
+    #[test]
+    fn test_app_menu_click_definition() {
+        let tool = app_menu_click();
+        assert_eq!(tool.name, "app_menu_click");
+        assert_eq!(tool.category, ToolCategory::AppIntegration);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "app"));
+        assert!(required.iter().any(|v| v == "menu_path"));
+    }
+
+    #[test]
+    fn test_app_get_state_definition() {
+        let tool = app_get_state();
+        assert_eq!(tool.name, "app_get_state");
+        assert_eq!(tool.category, ToolCategory::AppIntegration);
+        let required = tool.input_schema["required"]
+            .as_array()
+            .expect("required should be array");
+        assert!(required.iter().any(|v| v == "app"));
+    }
+
+    #[test]
+    fn test_tools_for_system_automation_capability() {
+        let caps = vec![Capability::SystemAutomation];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"sys_open_app"));
+        assert!(names.contains(&"sys_list_apps"));
+        assert!(names.contains(&"sys_clipboard_read"));
+        assert!(names.contains(&"sys_clipboard_write"));
+        assert!(names.contains(&"sys_notification"));
+        assert_eq!(names.len(), 5);
+    }
+
+    #[test]
+    fn test_tools_for_ui_automation_capability() {
+        let caps = vec![Capability::UiAutomation("*".to_string())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"ui_list_windows"));
+        assert!(names.contains(&"ui_find_elements"));
+        assert!(names.contains(&"ui_click"));
+        assert!(names.contains(&"ui_type_text"));
+        assert!(names.contains(&"ui_read_attribute"));
+        assert_eq!(names.len(), 5);
+    }
+
+    #[test]
+    fn test_tools_for_app_integration_capability() {
+        let caps = vec![Capability::AppIntegration("*".to_string())];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"app_activate"));
+        assert!(names.contains(&"app_menu_click"));
+        assert!(names.contains(&"app_get_state"));
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_all_tools_includes_automation() {
+        let tools = all_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        // System automation
+        assert!(names.contains(&"sys_open_app"));
+        assert!(names.contains(&"sys_list_apps"));
+        assert!(names.contains(&"sys_clipboard_read"));
+        assert!(names.contains(&"sys_clipboard_write"));
+        assert!(names.contains(&"sys_notification"));
+        // UI automation
+        assert!(names.contains(&"ui_list_windows"));
+        assert!(names.contains(&"ui_find_elements"));
+        assert!(names.contains(&"ui_click"));
+        assert!(names.contains(&"ui_type_text"));
+        assert!(names.contains(&"ui_read_attribute"));
+        // App integration
+        assert!(names.contains(&"app_activate"));
+        assert!(names.contains(&"app_menu_click"));
+        assert!(names.contains(&"app_get_state"));
+    }
+
+    #[test]
+    fn test_all_automation_tools_no_duplicates() {
+        let caps = vec![
+            Capability::SystemAutomation,
+            Capability::SystemAutomation, // duplicate cap
+            Capability::UiAutomation("*".to_string()),
+            Capability::AppIntegration("*".to_string()),
+        ];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(names.len(), unique.len(), "should have no duplicates");
     }
 }
