@@ -1,0 +1,24 @@
+[pack]
+name = "research"
+version = "1.0.0"
+description = "Web search, fetch, and summarization tools"
+author = "humancto"
+category = "research"
+tags = ["search", "web", "fetch", "summarize", "browse"]
+
+[[mcp_servers]]
+name = "fetch"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-fetch"]
+install_command = "npm install -g @modelcontextprotocol/server-fetch"
+description = "Fetch and read web pages"
+
+[skill]
+prompt = """You have research tools:
+- web_fetch: Fetch any URL and read its content
+- Use these to research topics, read articles, and gather information
+When the user asks you to look something up or research a topic, USE the fetch tool."""
+
+[env_vars]
+required = []
+optional = []

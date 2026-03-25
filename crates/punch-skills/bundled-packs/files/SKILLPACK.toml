@@ -1,0 +1,26 @@
+[pack]
+name = "files"
+version = "1.0.0"
+description = "Local file system access and management"
+author = "humancto"
+category = "system"
+tags = ["files", "filesystem", "read", "write", "search"]
+
+[[mcp_servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users"]
+install_command = "npm install -g @modelcontextprotocol/server-filesystem"
+description = "Read, write, and search local files"
+
+[skill]
+prompt = """You have filesystem tools:
+- read_file: Read contents of any file
+- write_file: Write or update files
+- list_directory: List files in a directory
+- search_files: Search for files by name or content
+When the user asks about files on their machine, USE these tools."""
+
+[env_vars]
+required = []
+optional = []

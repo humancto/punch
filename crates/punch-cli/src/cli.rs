@@ -289,6 +289,16 @@ pub enum MoveCommands {
 
     /// Show or update the lock file
     Lock,
+
+    /// List available skill packs (bundled MCP server configurations)
+    Packs,
+
+    /// Install a skill pack (bundled MCP server + skill prompt)
+    #[command(name = "add")]
+    Add {
+        /// Pack name (e.g. productivity, developer, research, files)
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -17,7 +17,7 @@ use crate::registry::{IndexEntry, IndexMeta, index_path_for_name};
 // ---------------------------------------------------------------------------
 
 /// Default index repository URL.
-pub const DEFAULT_INDEX_URL: &str = "https://github.com/humancto/punch-index.git";
+pub const DEFAULT_INDEX_URL: &str = "https://github.com/humancto/punch-marketplace.git";
 
 /// Default cache directory name under ~/.punch/
 const INDEX_DIR_NAME: &str = "index";

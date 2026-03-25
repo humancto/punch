@@ -1,0 +1,24 @@
+[pack]
+name = "developer"
+version = "1.0.0"
+description = "GitHub, shell access, and code tools"
+author = "humancto"
+category = "developer"
+tags = ["github", "git", "shell", "code", "ci"]
+
+[[mcp_servers]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+install_command = "npm install -g @modelcontextprotocol/server-github"
+description = "GitHub repository access, issues, PRs"
+
+[skill]
+prompt = """You have developer tools:
+- GitHub: search repos, read issues, create PRs, review code
+- Shell: execute commands, read files, manage projects
+Use these tools when the user asks about code, repos, or development tasks."""
+
+[env_vars]
+required = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+optional = []

@@ -22,6 +22,8 @@ pub async fn run(command: MoveCommands) -> i32 {
         MoveCommands::Scan { path } => run_scan(path),
         MoveCommands::Sync => run_sync(),
         MoveCommands::Lock => run_lock(),
+        MoveCommands::Packs => run_packs(),
+        MoveCommands::Add { name } => run_add_pack(name),
     }
 }
 
@@ -380,7 +382,7 @@ fn run_publish(dir: String, dry_run: bool) -> i32 {
         println!();
         println!("  Skill validated. To publish to the index:");
         println!("  1. Run: punch move keygen (if you haven't already)");
-        println!("  2. Submit a PR to the punch-index repository");
+        println!("  2. Submit a PR to the punch-marketplace repository");
         println!("  3. CI will run security scans before merge");
         println!();
         0
@@ -636,6 +638,144 @@ fn run_lock() -> i32 {
         }
         Err(e) => {
             eprintln!("  [X] Failed to read lock file: {}", e);
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Skill pack command handlers
+// ---------------------------------------------------------------------------
+
+fn run_packs() -> i32 {
+    let packs = punch_skills::available_packs();
+
+    println!();
+    println!("  AVAILABLE SKILL PACKS");
+    println!("  =====================");
+    println!();
+
+    if packs.is_empty() {
+        println!("  No skill packs available.");
+        println!();
+        return 0;
+    }
+
+    println!("  {:<16}  DESCRIPTION", "NAME");
+    println!("  {}", "-".repeat(60));
+
+    for (name, description) in &packs {
+        println!("  {:<16}  {}", name, description);
+    }
+
+    println!();
+    println!("  Install a pack: punch move add <name>");
+    println!();
+
+    0
+}
+
+fn run_add_pack(name: String) -> i32 {
+    // Look up the pack in bundled packs
+    let pack = match punch_skills::find_bundled_pack(&name) {
+        Some(p) => p,
+        None => {
+            eprintln!("  [X] Skill pack '{}' not found.", name);
+            eprintln!();
+            eprintln!("  Available packs:");
+            for (pname, pdesc) in punch_skills::available_packs() {
+                eprintln!("    - {:<16} {}", pname, pdesc);
+            }
+            eprintln!();
+            eprintln!("  Usage: punch move add <pack-name>");
+            return 1;
+        }
+    };
+
+    println!();
+    println!("  Installing skill pack: {}", pack.name);
+    println!("  {}", pack.description);
+    println!();
+
+    // Show MCP servers being installed
+    for server in &pack.mcp_servers {
+        println!("  + MCP server: {} ({})", server.name, server.description);
+        if let Some(ref cmd) = server.install_command {
+            println!("    Install: {}", cmd);
+        }
+    }
+    println!();
+
+    // Install the pack
+    let punch_home = super::punch_home();
+    match punch_skills::install_pack(&punch_home, &pack) {
+        Ok(result) => {
+            println!("  Skill pack '{}' installed.", result.pack_name);
+            println!();
+            println!("  MCP servers added to: {}", punch_home.join("config.toml").display());
+            for srv in &result.servers_added {
+                println!("    - {}", srv);
+            }
+            println!();
+            println!("  Skill prompt written to: {}", result.skill_path.display());
+
+            // Show install commands if available
+            let servers_with_install: Vec<_> = pack
+                .mcp_servers
+                .iter()
+                .filter(|s| s.install_command.is_some())
+                .collect();
+            if !servers_with_install.is_empty() {
+                println!();
+                println!("  Next steps — install MCP server dependencies:");
+                for server in &servers_with_install {
+                    if let Some(ref cmd) = server.install_command {
+                        println!("    $ {}", cmd);
+                    }
+                }
+            }
+
+            // Show setup commands if available
+            let servers_with_setup: Vec<_> = pack
+                .mcp_servers
+                .iter()
+                .filter(|s| s.setup_command.is_some())
+                .collect();
+            if !servers_with_setup.is_empty() {
+                println!();
+                println!("  Then run setup:");
+                for server in &servers_with_setup {
+                    if let Some(ref cmd) = server.setup_command {
+                        println!("    $ {}", cmd);
+                    }
+                }
+            }
+
+            // Show missing env vars
+            if !result.missing_env_vars.is_empty() {
+                println!();
+                println!("  Required environment variables (not yet set):");
+                for var in &result.missing_env_vars {
+                    println!("    export {}=<your-value>", var);
+                }
+                println!();
+                println!("  Add them to ~/.punch/.env or your shell profile.");
+            }
+
+            // Show optional env vars
+            if !pack.optional_env_vars.is_empty() {
+                println!();
+                println!("  Optional environment variables:");
+                for var in &pack.optional_env_vars {
+                    println!("    {}", var);
+                }
+            }
+
+            println!();
+            0
+        }
+        Err(e) => {
+            eprintln!("  [X] Failed to install pack: {}", e);
             1
         }
     }

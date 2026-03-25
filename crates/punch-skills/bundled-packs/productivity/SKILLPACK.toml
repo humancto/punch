@@ -1,0 +1,28 @@
+[pack]
+name = "productivity"
+version = "1.0.0"
+description = "Calendar, email, and task management via LocalMind MCP server"
+author = "humancto"
+category = "productivity"
+tags = ["calendar", "email", "tasks", "gmail", "google-calendar"]
+
+[[mcp_servers]]
+name = "localmind"
+command = "python3"
+args = ["-m", "localmind.mcp_server"]
+install_command = "pip install localmind"
+setup_command = "python3 -m localmind auth google"
+description = "Calendar and email access via Google APIs"
+
+[skill]
+prompt = """You have access to productivity tools via the localmind MCP server:
+- localmind_calendar: List, create, update, delete calendar events
+- localmind_email: Read, send, reply to emails
+- localmind_calendar_create: Create new calendar events
+- localmind_email_send: Send new emails
+
+When the user asks about their schedule, meetings, or emails, USE these tools. Don't say you can't access them."""
+
+[env_vars]
+required = []
+optional = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
