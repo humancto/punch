@@ -6424,10 +6424,7 @@ mod tests {
         let result = execute_tool("sys_open_app", &input, &caps, &context)
             .await
             .unwrap();
-        assert!(
-            !result.success,
-            "should fail without SystemAutomation cap"
-        );
+        assert!(!result.success, "should fail without SystemAutomation cap");
         assert!(result.error.as_deref().unwrap_or("").contains("capability"));
     }
 
@@ -6686,11 +6683,14 @@ mod tests {
         let result_other = execute_tool("app_activate", &input_other, &caps, &context)
             .await
             .unwrap();
+        assert!(!result_other.success, "should fail for OtherApp");
         assert!(
-            !result_other.success,
-            "should fail for OtherApp"
+            result_other
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("capability")
         );
-        assert!(result_other.error.as_deref().unwrap_or("").contains("capability"));
     }
 
     #[tokio::test]
@@ -6735,6 +6735,41 @@ mod tests {
         assert!(result.success, "should succeed: {:?}", result.error);
         assert_eq!(result.output["app"], "MockApp");
         assert_eq!(result.output["status"], "running");
+    }
+
+    // --- extract_app_from_element_id tests ---
+
+    #[test]
+    fn test_extract_app_normal() {
+        let app = extract_app_from_element_id("Safari:3", "ui_click").unwrap();
+        assert_eq!(app, "Safari");
+    }
+
+    #[test]
+    fn test_extract_app_colon_in_app_name() {
+        // splitn(2, ':') ensures only the first colon is used as a delimiter.
+        let app = extract_app_from_element_id("My:App:3", "ui_click").unwrap();
+        assert_eq!(app, "My");
+    }
+
+    #[test]
+    fn test_extract_app_empty_string() {
+        let result = extract_app_from_element_id("", "ui_click");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_app_colon_at_start() {
+        // ":0" has empty app name — should fail.
+        let result = extract_app_from_element_id(":0", "ui_click");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_app_no_colon() {
+        // No colon at all — returns the whole string as the app name.
+        let app = extract_app_from_element_id("Safari", "ui_click").unwrap();
+        assert_eq!(app, "Safari");
     }
 
     #[tokio::test]

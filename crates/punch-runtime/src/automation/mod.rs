@@ -111,7 +111,10 @@ pub fn create_backend() -> PunchResult<Box<dyn AutomationBackend>> {
 /// first, then double quotes, preventing injection of arbitrary AppleScript.
 #[cfg(target_os = "macos")]
 fn escape_applescript(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 #[cfg(target_os = "macos")]
@@ -222,9 +225,7 @@ impl AutomationBackend for MacOsBackend {
     async fn send_notification(&self, title: &str, body: &str) -> PunchResult<()> {
         let safe_title = escape_applescript(title);
         let safe_body = escape_applescript(body);
-        let script = format!(
-            r#"display notification "{safe_body}" with title "{safe_title}""#,
-        );
+        let script = format!(r#"display notification "{safe_body}" with title "{safe_title}""#,);
         self.osascript(&script).await?;
         Ok(())
     }
@@ -255,9 +256,21 @@ impl AutomationBackend for MacOsBackend {
     ) -> PunchResult<Vec<UiElement>> {
         let role_filter = selector.role.as_deref().unwrap_or("UI element");
         let safe_app = escape_applescript(app);
-        let safe_role = escape_applescript(role_filter);
+        // Role is used as an unquoted AppleScript identifier (e.g. "button",
+        // "UI element"), so we must NOT escape it — that would insert
+        // backslashes into an identifier position and break parsing.  Instead
+        // we validate that it contains only safe characters.
+        if !role_filter
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == ' ' || c == '_')
+        {
+            return Err(punch_types::PunchError::Tool {
+                tool: "automation".into(),
+                message: format!("invalid role filter: {role_filter}"),
+            });
+        }
         let script = format!(
-            r#"tell application "System Events" to tell process "{safe_app}" to get {{role, name, value, enabled}} of every {safe_role} of window 1"#,
+            r#"tell application "System Events" to tell process "{safe_app}" to get {{role, name, value, enabled}} of every {role_filter} of window 1"#,
         );
         let raw = self.osascript(&script).await?;
         let mut elements = Vec::new();
@@ -294,7 +307,8 @@ impl AutomationBackend for MacOsBackend {
         let safe_app = escape_applescript(parts[0]);
         let script = format!(
             r#"tell application "System Events" to tell process "{safe_app}" to click UI element {} of window 1"#,
-            parts[1].parse::<usize>().unwrap_or(1) + 1,
+            // element_id indices are 0-based (from find_ui_elements); AppleScript is 1-based.
+            parts[1].parse::<usize>().unwrap_or(0) + 1,
         );
         self.osascript(&script).await?;
         Ok(())
@@ -312,7 +326,8 @@ impl AutomationBackend for MacOsBackend {
         let safe_text = escape_applescript(text);
         let script = format!(
             r#"tell application "System Events" to tell process "{safe_app}" to set value of UI element {} of window 1 to "{safe_text}""#,
-            parts[1].parse::<usize>().unwrap_or(1) + 1,
+            // element_id indices are 0-based; AppleScript is 1-based.
+            parts[1].parse::<usize>().unwrap_or(0) + 1,
         );
         self.osascript(&script).await?;
         Ok(())
@@ -334,7 +349,8 @@ impl AutomationBackend for MacOsBackend {
         let safe_attr = escape_applescript(attribute);
         let script = format!(
             r#"tell application "System Events" to tell process "{safe_app}" to get {safe_attr} of UI element {} of window 1"#,
-            parts[1].parse::<usize>().unwrap_or(1) + 1,
+            // element_id indices are 0-based; AppleScript is 1-based.
+            parts[1].parse::<usize>().unwrap_or(0) + 1,
         );
         self.osascript(&script).await
     }
@@ -356,8 +372,9 @@ impl AutomationBackend for MacOsBackend {
         for (i, item) in menu_path.iter().enumerate() {
             let safe_item = escape_applescript(item);
             if i == 0 {
-                click_chain
-                    .push_str(&format!(r#"click menu bar item "{safe_item}" of menu bar 1"#));
+                click_chain.push_str(&format!(
+                    r#"click menu bar item "{safe_item}" of menu bar 1"#
+                ));
             } else {
                 click_chain.push_str(&format!(
                     r#"
@@ -453,15 +470,15 @@ impl AutomationBackend for LinuxBackend {
     }
 
     async fn open_app(&self, app_name: &str) -> PunchResult<()> {
-        self.run_cmd("xdg-open", &[app_name]).await.map_err(|_| {
-            punch_types::PunchError::Tool {
+        self.run_cmd("xdg-open", &[app_name])
+            .await
+            .map_err(|_| punch_types::PunchError::Tool {
                 tool: "automation".into(),
                 message: format!(
                     "failed to open application '{}': xdg-open not available or app not found",
                     app_name
                 ),
-            }
-        })?;
+            })?;
         Ok(())
     }
 
@@ -774,6 +791,40 @@ impl AutomationBackend for WindowsBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // escape_applescript is cfg(macos) but we can test the logic directly.
+    fn escape_applescript_portable(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+    }
+
+    #[test]
+    fn test_escape_applescript_quotes_and_backslashes() {
+        assert_eq!(
+            escape_applescript_portable(r#"hello"world"#),
+            r#"hello\"world"#
+        );
+        assert_eq!(escape_applescript_portable(r"a\b"), r"a\\b");
+        assert_eq!(
+            escape_applescript_portable(r#"he said "hi\there""#),
+            r#"he said \"hi\\there\""#
+        );
+    }
+
+    #[test]
+    fn test_escape_applescript_newlines() {
+        assert_eq!(escape_applescript_portable("line1\nline2"), r"line1\nline2");
+        assert_eq!(escape_applescript_portable("cr\rhere"), r"cr\rhere");
+        assert_eq!(escape_applescript_portable("both\r\nends"), r"both\r\nends");
+    }
+
+    #[test]
+    fn test_escape_applescript_empty_and_plain() {
+        assert_eq!(escape_applescript_portable(""), "");
+        assert_eq!(escape_applescript_portable("safe string"), "safe string");
+    }
 
     #[test]
     fn test_create_backend_returns_result() {

@@ -23,9 +23,9 @@ use tracing::{debug, error, info, instrument, warn};
 use dashmap::DashMap;
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    capability::Capability, AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine,
-    PunchError, PunchResult, Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult,
-    ToolDefinition,
+    AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
+    Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
+    capability::Capability,
 };
 
 use crate::mcp::McpClient;
@@ -167,9 +167,13 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     | Capability::AppIntegration(_)
             )
         }) {
-            crate::automation::create_backend()
-                .ok()
-                .map(Arc::from)
+            match crate::automation::create_backend() {
+                Ok(backend) => Some(Arc::from(backend)),
+                Err(e) => {
+                    warn!(fighter_id = %params.fighter_id, error = %e, "automation backend unavailable — automation tools will be disabled");
+                    None
+                }
+            }
         } else {
             None
         },
