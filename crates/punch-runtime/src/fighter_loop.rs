@@ -23,9 +23,9 @@ use tracing::{debug, error, info, instrument, warn};
 use dashmap::DashMap;
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    AgentCoordinator, ChannelNotifier, FighterId, FighterManifest, Message, PolicyEngine,
-    PunchError, PunchResult, Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult,
-    ToolDefinition,
+    AgentCoordinator, Capability, ChannelNotifier, FighterId, FighterManifest, Message,
+    PolicyEngine, PunchError, PunchResult, Role, SandboxEnforcer, ShellBleedDetector,
+    ToolCallResult, ToolDefinition,
 };
 
 use punch_types::config::ModelRoutingConfig;
@@ -191,7 +191,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         build_system_prompt(&params.manifest, &params.fighter_id, &params.memory).await;
 
     // Build the tool execution context.
-    let tool_context = ToolExecutionContext {
+    let mut tool_context = ToolExecutionContext {
         working_dir: std::env::current_dir().unwrap_or_default(),
         fighter_id: params.fighter_id,
         memory: Arc::clone(&params.memory),
@@ -203,7 +203,24 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         plugin_registry: None,
         mcp_clients: params.mcp_clients.clone(),
         channel_notifier: params.channel_notifier.clone(),
+        automation_backend: None, // Initialized below if fighter has automation capabilities.
     };
+
+    // Initialize automation backend if the fighter has any automation capability.
+    {
+        let has_automation = params.manifest.capabilities.iter().any(|c| {
+            matches!(
+                c,
+                Capability::SystemAutomation
+                    | Capability::UiAutomation(_)
+                    | Capability::AppIntegration(_)
+            )
+        });
+        if has_automation {
+            tool_context.automation_backend = Some(Arc::from(crate::automation::create_backend()));
+            debug!("automation backend initialized for fighter");
+        }
+    }
 
     // 4. Main loop.
     loop {
@@ -475,6 +492,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                             id: tc.id.clone(),
                             content: format!("Error: {}", reason),
                             is_error: true,
+                            image: None,
                         });
                         tool_calls_made += 1;
                         continue;
@@ -518,10 +536,25 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                                 content
                             };
 
+                            // Extract image from screenshot tool results.
+                            let image = if tool_result.success {
+                                tool_result
+                                    .output
+                                    .get("png_base64")
+                                    .and_then(|v| v.as_str())
+                                    .map(|b64| punch_types::ContentPart::Image {
+                                        media_type: "image/png".to_string(),
+                                        data: b64.to_string(),
+                                    })
+                            } else {
+                                None
+                            };
+
                             ToolCallResult {
                                 id: tc.id.clone(),
                                 content,
                                 is_error: !tool_result.success,
+                                image,
                             }
                         }
                         Ok(Err(e)) => {
@@ -530,6 +563,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                                 id: tc.id.clone(),
                                 content: format!("Error: {}", e),
                                 is_error: true,
+                                image: None,
                             }
                         }
                         Err(_) => {
@@ -545,6 +579,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                                     tc.name, tool_timeout
                                 ),
                                 is_error: true,
+                                image: None,
                             }
                         }
                     };
@@ -560,6 +595,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     tool_calls: Vec::new(),
                     tool_results,
                     timestamp: chrono::Utc::now(),
+                    content_parts: Vec::new(),
                 };
 
                 params

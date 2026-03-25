@@ -293,6 +293,7 @@ pub fn oai_message_to_punch(msg: &ChatMessage) -> punch_types::Message {
             id: tool_call_id.clone(),
             content: msg.content.clone().unwrap_or_default(),
             is_error: false,
+            image: None,
         }];
     }
 
@@ -987,6 +988,7 @@ mod tests {
                 input: serde_json::json!({"expression": "2+2"}),
             }],
             tool_results: vec![],
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
         let oai = punch_message_to_oai(&punch_msg);
@@ -1319,6 +1321,7 @@ mod tests {
             id: "call_xyz".to_string(),
             content: "result data".to_string(),
             is_error: false,
+            image: None,
         }];
         let oai = punch_message_to_oai(&msg);
         assert_eq!(oai.role, "tool");

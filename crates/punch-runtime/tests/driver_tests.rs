@@ -41,6 +41,7 @@ impl LlmDriver for MockLlmDriver {
             message: Message {
                 role: Role::Assistant,
                 content: "Mock response.".to_string(),
+                content_parts: Vec::new(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
                 timestamp: chrono::Utc::now(),
@@ -437,6 +438,7 @@ fn test_completion_response_serde_roundtrip() {
         message: Message {
             role: Role::Assistant,
             content: "Test".to_string(),
+            content_parts: Vec::new(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
             timestamp: chrono::Utc::now(),

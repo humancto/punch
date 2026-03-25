@@ -21,6 +21,7 @@ use punch_types::{
     ToolResult, capability::capability_matches,
 };
 
+use crate::automation::{self, AutomationBackend, UiSelector};
 use crate::mcp::McpClient;
 
 /// Context passed to every tool execution.
@@ -63,6 +64,11 @@ pub struct ToolExecutionContext {
     /// When present, the `channel_notify` tool can send messages to
     /// connected channels (Telegram, Slack, Discord, etc.).
     pub channel_notifier: Option<Arc<dyn ChannelNotifier>>,
+    /// Optional desktop automation backend for screenshot, OCR, and UI tools.
+    /// When present, automation tools (sys_screenshot, ui_click, etc.) can
+    /// interact with the desktop. Without it, automation tools report
+    /// "automation backend not configured".
+    pub automation_backend: Option<Arc<dyn AutomationBackend>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -223,6 +229,15 @@ async fn execute_tool_inner(
         "creed_view" => tool_creed_view(capabilities, context).await,
         "skill_list" => tool_skill_list(capabilities).await,
         "skill_recommend" => tool_skill_recommend(input, capabilities).await,
+        // Desktop automation
+        "sys_screenshot" => tool_sys_screenshot(input, capabilities, context).await,
+        "ui_screenshot" => tool_ui_screenshot(input, capabilities, context).await,
+        "app_ocr" => tool_app_ocr(input, capabilities, context).await,
+        "ui_find_elements" => tool_ui_find_elements(input, capabilities, context).await,
+        "ui_click" => tool_ui_click(input, capabilities, context).await,
+        "ui_type_text" => tool_ui_type_text(input, capabilities, context).await,
+        "ui_list_windows" => tool_ui_list_windows(capabilities, context).await,
+        "ui_read_attribute" => tool_ui_read_attribute(input, capabilities, context).await,
         // MCP server tools — dispatched by `mcp_{server}_{tool}` prefix.
         _ if name.starts_with("mcp_") => tool_mcp_call(name, input, capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
@@ -4350,6 +4365,301 @@ async fn tool_skill_recommend(
 }
 
 // ---------------------------------------------------------------------------
+// Desktop automation tool handlers
+// ---------------------------------------------------------------------------
+
+/// Helper: get the automation backend or return a helpful error.
+fn require_automation_backend(
+    context: &ToolExecutionContext,
+    tool: &str,
+) -> PunchResult<Arc<dyn AutomationBackend>> {
+    context.automation_backend.clone().ok_or_else(|| {
+        PunchError::Tool {
+            tool: tool.into(),
+            message: "Automation backend not configured. Spawn the fighter with --capabilities system_automation,ui_automation(*),app_integration(*) to enable desktop automation.".into(),
+        }
+    })
+}
+
+async fn tool_sys_screenshot(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::SystemAutomation)?;
+    let backend = require_automation_backend(context, "sys_screenshot")?;
+
+    let window = input.get("window").and_then(|v| v.as_str());
+    let result = backend.screenshot(window).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "description": format!(
+                "Screenshot captured{}",
+                window.map(|w| format!(" of window: {w}")).unwrap_or_default()
+            ),
+            "width": result.width,
+            "height": result.height,
+            "png_base64": result.png_base64,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_screenshot(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input.get("element_id").and_then(|v| v.as_str());
+    // Check UiAutomation capability scoped to the app in element_id.
+    if let Some(eid) = element_id {
+        let app = automation::extract_app_from_element_id(eid, "ui_screenshot")?;
+        require_capability(capabilities, &Capability::UiAutomation(app))?;
+    } else {
+        require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
+    }
+    let backend = require_automation_backend(context, "ui_screenshot")?;
+
+    let bounds = input.get("bounds").and_then(|b| {
+        let x = b.get("x")?.as_i64()? as i32;
+        let y = b.get("y")?.as_i64()? as i32;
+        let w = b.get("width")?.as_u64()? as u32;
+        let h = b.get("height")?.as_u64()? as u32;
+        Some((x, y, w, h))
+    });
+
+    let result = backend.ui_screenshot(element_id, bounds).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "description": "UI region screenshot captured",
+            "width": result.width,
+            "height": result.height,
+            "png_base64": result.png_base64,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_app_ocr(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input
+        .get("app")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "app_ocr".into(),
+            message: "missing required field: app".into(),
+        })?;
+
+    require_capability(capabilities, &Capability::AppIntegration(app.to_string()))?;
+    let backend = require_automation_backend(context, "app_ocr")?;
+
+    let result = backend.app_ocr(app).await?;
+
+    // Check confidence and provide guidance if low.
+    let avg_confidence = if result.regions.is_empty() {
+        0.0
+    } else {
+        result.regions.iter().map(|r| r.confidence).sum::<f32>() / result.regions.len() as f32
+    };
+
+    let mut output = serde_json::json!({
+        "text": result.text,
+        "regions": result.regions.len(),
+        "average_confidence": avg_confidence,
+    });
+
+    if avg_confidence < 0.3 {
+        output["warning"] = serde_json::json!(
+            "Low OCR confidence (likely non-text content). Use sys_screenshot for visual inspection instead."
+        );
+    }
+
+    Ok(ToolResult {
+        success: true,
+        output,
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_find_elements(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let app = input
+        .get("app")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_find_elements".into(),
+            message: "missing required field: app".into(),
+        })?;
+
+    require_capability(capabilities, &Capability::UiAutomation(app.to_string()))?;
+    let backend = require_automation_backend(context, "ui_find_elements")?;
+
+    let selector = UiSelector {
+        role: input.get("role").and_then(|v| v.as_str()).map(String::from),
+        label: input
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        value: input
+            .get("value")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    };
+
+    let elements = backend.find_ui_elements(app, &selector).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "app": app,
+            "count": elements.len(),
+            "elements": elements,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_click(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_click".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_click")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_click")?;
+
+    backend.click_element(element_id).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "clicked": element_id,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_type_text(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_type_text".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+    let text = input
+        .get("text")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_type_text".into(),
+            message: "missing required field: text".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_type_text")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_type_text")?;
+
+    backend.type_text(element_id, text).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "typed_into": element_id,
+            "text_length": text.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_list_windows(
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
+    let backend = require_automation_backend(context, "ui_list_windows")?;
+
+    let windows = backend.list_windows().await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "count": windows.len(),
+            "windows": windows,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+async fn tool_ui_read_attribute(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    let element_id = input
+        .get("element_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing required field: element_id".into(),
+        })?;
+    let attribute = input
+        .get("attribute")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PunchError::Tool {
+            tool: "ui_read_attribute".into(),
+            message: "missing required field: attribute".into(),
+        })?;
+
+    let app = automation::extract_app_from_element_id(element_id, "ui_read_attribute")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
+    let backend = require_automation_backend(context, "ui_read_attribute")?;
+
+    let value = backend
+        .read_element_attribute(element_id, attribute)
+        .await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "element_id": element_id,
+            "attribute": attribute,
+            "value": value,
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -4419,6 +4729,7 @@ mod tests {
             plugin_registry: None,
             mcp_clients: None,
             channel_notifier: None,
+            automation_backend: None,
         }
     }
 

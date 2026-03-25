@@ -81,6 +81,7 @@ impl LlmDriver for ScriptedMockDriver {
             message: Message {
                 role: Role::Assistant,
                 content: entry.content,
+                content_parts: Vec::new(),
                 tool_calls: entry.tool_calls,
                 tool_results: Vec::new(),
                 timestamp: chrono::Utc::now(),

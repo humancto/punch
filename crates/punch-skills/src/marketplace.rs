@@ -640,6 +640,173 @@ pub fn builtin_skills() -> Vec<SkillListing> {
         },
         SkillListing {
             id: Uuid::new_v4(),
+            name: "Desktop Vision".to_string(),
+            description: "Capture screenshots and extract text from app windows via OCR."
+                .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "automation".to_string(),
+            tags: vec![
+                "screenshot".to_string(),
+                "ocr".to_string(),
+                "vision".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "sys_screenshot",
+                    "Capture a screenshot of the full screen or a specific window. Returns a base64-encoded PNG image that the vision model can interpret.",
+                    ToolCategory::SystemAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "window": {
+                                "type": "string",
+                                "description": "Name of the window to capture (omit for full screen)"
+                            }
+                        }
+                    }),
+                ),
+                tool(
+                    "app_ocr",
+                    "Extract text from an application window using local OCR (macOS Vision / tesseract). Returns plain text without requiring a vision model.",
+                    ToolCategory::AppIntegration,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": {
+                                "type": "string",
+                                "description": "Name of the application to extract text from"
+                            }
+                        },
+                        "required": ["app"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
+        SkillListing {
+            id: Uuid::new_v4(),
+            name: "UI Automation".to_string(),
+            description:
+                "Find, click, and type in application UI elements via the accessibility API."
+                    .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "automation".to_string(),
+            tags: vec![
+                "accessibility".to_string(),
+                "click".to_string(),
+                "type".to_string(),
+                "ui".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "ui_find_elements",
+                    "Query the accessibility tree of an application to find buttons, text fields, rows, and other UI elements.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": { "type": "string", "description": "Application name" },
+                            "role": { "type": "string", "description": "Accessibility role filter (e.g. button, text field, row)" }
+                        },
+                        "required": ["app"]
+                    }),
+                ),
+                tool(
+                    "ui_click",
+                    "Click a UI element identified by its element ID (e.g. 'Messages:3').",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "element_id": { "type": "string", "description": "Element ID in 'AppName:index' format" }
+                        },
+                        "required": ["element_id"]
+                    }),
+                ),
+                tool(
+                    "ui_type_text",
+                    "Type text into a focused UI element or a specific element by ID.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "text": { "type": "string", "description": "Text to type" },
+                            "element_id": { "type": "string", "description": "Optional element ID to focus first" }
+                        },
+                        "required": ["text"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
+        SkillListing {
+            id: Uuid::new_v4(),
+            name: "Window Management".to_string(),
+            description: "List open windows and read UI element attributes for desktop inspection."
+                .to_string(),
+            author: "Punch Team".to_string(),
+            version: "0.1.0".to_string(),
+            category: "automation".to_string(),
+            tags: vec![
+                "windows".to_string(),
+                "inspect".to_string(),
+                "desktop".to_string(),
+                "builtin".to_string(),
+            ],
+            tool_definitions: vec![
+                tool(
+                    "ui_list_windows",
+                    "List all open windows with their titles, application names, and IDs.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                ),
+                tool(
+                    "ui_read_attribute",
+                    "Read a specific accessibility attribute from a UI element.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "element_id": { "type": "string", "description": "Element ID in 'AppName:index' format" },
+                            "attribute": { "type": "string", "description": "Attribute to read (e.g. value, title, description)" }
+                        },
+                        "required": ["element_id", "attribute"]
+                    }),
+                ),
+                tool(
+                    "ui_screenshot",
+                    "Capture a screenshot of a specific UI region or element for targeted visual inspection.",
+                    ToolCategory::UiAutomation,
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "app": { "type": "string", "description": "Application name" },
+                            "bounds": { "type": "string", "description": "Region as 'x,y,width,height'" }
+                        },
+                        "required": ["app"]
+                    }),
+                ),
+            ],
+            install_count: 0,
+            rating: 0.0,
+            published_at: now,
+            source: SkillSource::Builtin,
+        },
+        SkillListing {
+            id: Uuid::new_v4(),
             name: "Patch Tools".to_string(),
             description: "Apply unified diffs and patches to files.".to_string(),
             author: "Punch Team".to_string(),
@@ -809,8 +976,8 @@ mod tests {
     fn test_builtin_skills_populated() {
         let skills = builtin_skills();
         assert!(
-            skills.len() >= 8,
-            "expected at least 8 builtin skills, got {}",
+            skills.len() >= 11,
+            "expected at least 11 builtin skills, got {}",
             skills.len()
         );
 
@@ -823,6 +990,9 @@ mod tests {
         assert!(names.contains(&"Agent Coordination"));
         assert!(names.contains(&"Browser Tools"));
         assert!(names.contains(&"Patch Tools"));
+        assert!(names.contains(&"Desktop Vision"));
+        assert!(names.contains(&"UI Automation"));
+        assert!(names.contains(&"Window Management"));
     }
 
     #[test]

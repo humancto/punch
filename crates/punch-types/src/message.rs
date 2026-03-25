@@ -1,6 +1,27 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// A content part within a message — text or image.
+///
+/// Enables multimodal messages: screenshots from desktop automation,
+/// photos from Telegram, or any other image content that needs to flow
+/// through the LLM pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentPart {
+    /// Plain text content.
+    #[serde(rename = "text")]
+    Text { text: String },
+    /// Base64-encoded image content.
+    #[serde(rename = "image")]
+    Image {
+        /// MIME type (e.g. "image/png", "image/jpeg").
+        media_type: String,
+        /// Base64-encoded image data.
+        data: String,
+    },
+}
+
 /// The role of a message participant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +58,10 @@ pub struct Message {
     pub tool_results: Vec<ToolCallResult>,
     /// When the message was created.
     pub timestamp: DateTime<Utc>,
+    /// Multimodal content parts (images, etc.). When non-empty, drivers should
+    /// use these instead of `content` for multimodal-capable providers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_parts: Vec<ContentPart>,
 }
 
 impl Message {
@@ -48,7 +73,27 @@ impl Message {
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
             timestamp: Utc::now(),
+            content_parts: Vec::new(),
         }
+    }
+
+    /// Create a message with multimodal content parts.
+    pub fn with_parts(role: Role, content: impl Into<String>, parts: Vec<ContentPart>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            timestamp: Utc::now(),
+            content_parts: parts,
+        }
+    }
+
+    /// Returns true if this message contains any image content parts.
+    pub fn has_images(&self) -> bool {
+        self.content_parts
+            .iter()
+            .any(|p| matches!(p, ContentPart::Image { .. }))
     }
 }
 
@@ -73,6 +118,11 @@ pub struct ToolCallResult {
     /// Whether the tool execution resulted in an error.
     #[serde(default)]
     pub is_error: bool,
+    /// Optional image content returned by the tool (e.g. screenshots).
+    /// When present, drivers should include this as a vision input alongside
+    /// the text content so the LLM can "see" it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<ContentPart>,
 }
 
 #[cfg(test)]
@@ -161,6 +211,7 @@ mod tests {
             id: "call_123".to_string(),
             content: "file contents here".to_string(),
             is_error: false,
+            image: None,
         };
         let json = serde_json::to_string(&result).expect("serialize");
         let deser: ToolCallResult = serde_json::from_str(&json).expect("deserialize");
@@ -175,6 +226,7 @@ mod tests {
             id: "call_456".to_string(),
             content: "Permission denied".to_string(),
             is_error: true,
+            image: None,
         };
         assert!(result.is_error);
     }
@@ -215,5 +267,93 @@ mod tests {
         set.insert(Role::Assistant);
         set.insert(Role::User);
         assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_content_part_text_serde() {
+        let part = ContentPart::Text {
+            text: "hello".to_string(),
+        };
+        let json = serde_json::to_string(&part).expect("serialize");
+        assert!(json.contains("\"type\":\"text\""));
+        let deser: ContentPart = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            ContentPart::Text { text } => assert_eq!(text, "hello"),
+            _ => panic!("expected Text variant"),
+        }
+    }
+
+    #[test]
+    fn test_content_part_image_serde() {
+        let part = ContentPart::Image {
+            media_type: "image/png".to_string(),
+            data: "iVBORw0KGgo=".to_string(),
+        };
+        let json = serde_json::to_string(&part).expect("serialize");
+        assert!(json.contains("\"type\":\"image\""));
+        let deser: ContentPart = serde_json::from_str(&json).expect("deserialize");
+        match deser {
+            ContentPart::Image { media_type, data } => {
+                assert_eq!(media_type, "image/png");
+                assert_eq!(data, "iVBORw0KGgo=");
+            }
+            _ => panic!("expected Image variant"),
+        }
+    }
+
+    #[test]
+    fn test_message_with_parts() {
+        let msg = Message::with_parts(
+            Role::User,
+            "What's in this image?",
+            vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "abc123".to_string(),
+            }],
+        );
+        assert!(msg.has_images());
+        assert_eq!(msg.content_parts.len(), 1);
+    }
+
+    #[test]
+    fn test_message_has_images_false() {
+        let msg = Message::new(Role::User, "just text");
+        assert!(!msg.has_images());
+    }
+
+    #[test]
+    fn test_message_content_parts_skipped_when_empty() {
+        let msg = Message::new(Role::User, "hi");
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(!json.contains("content_parts"));
+    }
+
+    #[test]
+    fn test_tool_call_result_with_image() {
+        let result = ToolCallResult {
+            id: "tc1".to_string(),
+            content: "Screenshot captured".to_string(),
+            is_error: false,
+            image: Some(ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "base64data".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&result).expect("serialize");
+        assert!(json.contains("image"));
+        let deser: ToolCallResult = serde_json::from_str(&json).expect("deserialize");
+        assert!(deser.image.is_some());
+    }
+
+    #[test]
+    fn test_tool_call_result_image_skipped_when_none() {
+        let result = ToolCallResult {
+            id: "tc1".to_string(),
+            content: "ok".to_string(),
+            is_error: false,
+            image: None,
+        };
+        let json = serde_json::to_string(&result).expect("serialize");
+        assert!(!json.contains("image"));
     }
 }

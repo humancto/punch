@@ -57,6 +57,7 @@ impl LlmDriver for MockLlmDriver {
                 content: response,
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
+                content_parts: Vec::new(),
                 timestamp: chrono::Utc::now(),
             },
             usage: TokenUsage {

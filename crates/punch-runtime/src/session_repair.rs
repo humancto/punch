@@ -173,6 +173,7 @@ fn insert_synthetic_results(messages: &mut Vec<Message>, stats: &mut RepairStats
                             tc.name
                         ),
                         is_error: true,
+                        image: None,
                     }
                 })
                 .collect();
@@ -195,6 +196,7 @@ fn insert_synthetic_results(messages: &mut Vec<Message>, stats: &mut RepairStats
             tool_calls: Vec::new(),
             tool_results: results,
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         };
 
         // Insert right after the assistant message.
@@ -297,6 +299,7 @@ mod tests {
             }],
             tool_results: Vec::new(),
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         }
     }
 
@@ -309,8 +312,10 @@ mod tests {
                 id: id.to_string(),
                 content: content.to_string(),
                 is_error: false,
+                image: None,
             }],
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         }
     }
 
@@ -321,6 +326,7 @@ mod tests {
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
             timestamp: chrono::Utc::now(),
+            content_parts: Vec::new(),
         }
     }
 

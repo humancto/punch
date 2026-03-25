@@ -120,6 +120,20 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
                 push_unique(&mut tools, skill_list());
                 push_unique(&mut tools, skill_recommend());
             }
+            Capability::SystemAutomation => {
+                push_unique(&mut tools, sys_screenshot());
+            }
+            Capability::UiAutomation(_) => {
+                push_unique(&mut tools, ui_screenshot());
+                push_unique(&mut tools, ui_find_elements());
+                push_unique(&mut tools, ui_click());
+                push_unique(&mut tools, ui_type_text());
+                push_unique(&mut tools, ui_list_windows());
+                push_unique(&mut tools, ui_read_attribute());
+            }
+            Capability::AppIntegration(_) => {
+                push_unique(&mut tools, app_ocr());
+            }
             _ => {}
         }
     }
@@ -211,6 +225,15 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         creed_view(),
         skill_list(),
         skill_recommend(),
+        // Desktop automation
+        sys_screenshot(),
+        ui_screenshot(),
+        app_ocr(),
+        ui_find_elements(),
+        ui_click(),
+        ui_type_text(),
+        ui_list_windows(),
+        ui_read_attribute(),
     ]
 }
 
@@ -1729,6 +1752,177 @@ fn skill_recommend() -> ToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop automation tool definitions
+// ---------------------------------------------------------------------------
+
+fn sys_screenshot() -> ToolDefinition {
+    ToolDefinition {
+        name: "sys_screenshot".into(),
+        description: "Capture a screenshot of the full screen or a specific window. Returns a base64-encoded PNG image that the vision model can read. Use this to see what's currently on screen.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "window": {
+                    "type": "string",
+                    "description": "Optional window title to capture. If omitted, captures the full screen."
+                }
+            }
+        }),
+        category: ToolCategory::SystemAutomation,
+    }
+}
+
+fn ui_screenshot() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_screenshot".into(),
+        description: "Capture a screenshot of a specific UI region by element ID or bounds. More targeted than sys_screenshot for inspecting specific parts of the screen.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "Element ID from ui_find_elements (e.g. \"Safari:3\"). Captures the region of that element."
+                },
+                "bounds": {
+                    "type": "object",
+                    "description": "Explicit bounds to capture: {x, y, width, height} in pixels.",
+                    "properties": {
+                        "x": {"type": "integer"},
+                        "y": {"type": "integer"},
+                        "width": {"type": "integer"},
+                        "height": {"type": "integer"}
+                    },
+                    "required": ["x", "y", "width", "height"]
+                }
+            }
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn app_ocr() -> ToolDefinition {
+    ToolDefinition {
+        name: "app_ocr".into(),
+        description: "Extract text from an app window using OCR (optical character recognition). Returns plain text — cheaper than a screenshot + vision model for text-heavy content. Use this first for reading text, fall back to sys_screenshot for visual/spatial understanding.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string",
+                    "description": "Name of the application to OCR (e.g. \"Messages\", \"Safari\")."
+                }
+            },
+            "required": ["app"]
+        }),
+        category: ToolCategory::AppIntegration,
+    }
+}
+
+fn ui_find_elements() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_find_elements".into(),
+        description: "Query the accessibility tree of an app to find UI elements (buttons, text fields, rows, etc.). Returns structured element IDs that can be used with ui_click, ui_type_text, and ui_read_attribute. Re-query if the app state changes, as element IDs are session-ephemeral.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string",
+                    "description": "Name of the application to query (e.g. \"Messages\", \"Safari\")."
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Optional: filter by accessibility role (e.g. \"button\", \"text field\", \"row\", \"menu item\")."
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Optional: filter by accessibility label (substring match)."
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Optional: filter by current value (substring match)."
+                }
+            },
+            "required": ["app"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_click() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_click".into(),
+        description: "Click a UI element by its element ID (from ui_find_elements). Safe, validated accessibility click — not a raw coordinate click.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "Element ID from ui_find_elements (e.g. \"Messages:0\")."
+                }
+            },
+            "required": ["element_id"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_type_text() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_type_text".into(),
+        description: "Type text into a UI element by its element ID (from ui_find_elements). Sets the value of a text field or input element.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "Element ID of the text field (e.g. \"Messages:2\")."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to type into the element."
+                }
+            },
+            "required": ["element_id", "text"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_list_windows() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_list_windows".into(),
+        description: "List all visible windows with their titles and owning apps. Use this to discover what's on screen before taking a screenshot or interacting with specific apps.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+fn ui_read_attribute() -> ToolDefinition {
+    ToolDefinition {
+        name: "ui_read_attribute".into(),
+        description: "Read an accessibility attribute (value, enabled, focused, etc.) from a UI element. Useful for checking element state without a screenshot.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "element_id": {
+                    "type": "string",
+                    "description": "Element ID from ui_find_elements (e.g. \"Safari:3\")."
+                },
+                "attribute": {
+                    "type": "string",
+                    "description": "The attribute to read. Allowed: value, name, role, role description, title, description, enabled, focused, position, size, selected, help, subrole, identifier, minimum value, maximum value, orientation, placeholder value."
+                }
+            },
+            "required": ["element_id", "attribute"]
+        }),
+        category: ToolCategory::UiAutomation,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2568,5 +2762,136 @@ mod tests {
         assert!(names.contains(&"creed_view"));
         assert!(names.contains(&"skill_list"));
         assert!(names.contains(&"skill_recommend"));
+    }
+
+    // --- Desktop automation tool definition tests ---
+
+    #[test]
+    fn test_sys_screenshot_definition() {
+        let t = sys_screenshot();
+        assert_eq!(t.name, "sys_screenshot");
+        assert_eq!(t.category, ToolCategory::SystemAutomation);
+        // window is optional (not in required)
+        assert!(t.input_schema.get("required").is_none());
+    }
+
+    #[test]
+    fn test_ui_screenshot_definition() {
+        let t = ui_screenshot();
+        assert_eq!(t.name, "ui_screenshot");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+    }
+
+    #[test]
+    fn test_app_ocr_definition() {
+        let t = app_ocr();
+        assert_eq!(t.name, "app_ocr");
+        assert_eq!(t.category, ToolCategory::AppIntegration);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "app"));
+    }
+
+    #[test]
+    fn test_ui_find_elements_definition() {
+        let t = ui_find_elements();
+        assert_eq!(t.name, "ui_find_elements");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "app"));
+    }
+
+    #[test]
+    fn test_ui_click_definition() {
+        let t = ui_click();
+        assert_eq!(t.name, "ui_click");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "element_id"));
+    }
+
+    #[test]
+    fn test_ui_type_text_definition() {
+        let t = ui_type_text();
+        assert_eq!(t.name, "ui_type_text");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "element_id"));
+        assert!(required.iter().any(|v| v == "text"));
+    }
+
+    #[test]
+    fn test_ui_list_windows_definition() {
+        let t = ui_list_windows();
+        assert_eq!(t.name, "ui_list_windows");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+    }
+
+    #[test]
+    fn test_ui_read_attribute_definition() {
+        let t = ui_read_attribute();
+        assert_eq!(t.name, "ui_read_attribute");
+        assert_eq!(t.category, ToolCategory::UiAutomation);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "element_id"));
+        assert!(required.iter().any(|v| v == "attribute"));
+    }
+
+    #[test]
+    fn test_all_tools_includes_automation() {
+        let tools = all_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"sys_screenshot"));
+        assert!(names.contains(&"ui_screenshot"));
+        assert!(names.contains(&"app_ocr"));
+        assert!(names.contains(&"ui_find_elements"));
+        assert!(names.contains(&"ui_click"));
+        assert!(names.contains(&"ui_type_text"));
+        assert!(names.contains(&"ui_list_windows"));
+        assert!(names.contains(&"ui_read_attribute"));
+    }
+
+    #[test]
+    fn test_tools_for_system_automation_capability() {
+        let tools = tools_for_capabilities(&[Capability::SystemAutomation]);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"sys_screenshot"));
+        assert!(!names.contains(&"ui_click")); // not included without UiAutomation
+    }
+
+    #[test]
+    fn test_tools_for_ui_automation_capability() {
+        let tools = tools_for_capabilities(&[Capability::UiAutomation("*".to_string())]);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"ui_find_elements"));
+        assert!(names.contains(&"ui_click"));
+        assert!(names.contains(&"ui_type_text"));
+        assert!(names.contains(&"ui_list_windows"));
+        assert!(names.contains(&"ui_read_attribute"));
+        assert!(names.contains(&"ui_screenshot"));
+        assert!(!names.contains(&"sys_screenshot")); // not included without SystemAutomation
+        assert!(!names.contains(&"app_ocr")); // not included without AppIntegration
+    }
+
+    #[test]
+    fn test_tools_for_app_integration_capability() {
+        let tools = tools_for_capabilities(&[Capability::AppIntegration("*".to_string())]);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"app_ocr"));
+        assert!(!names.contains(&"ui_click")); // not included without UiAutomation
+    }
+
+    #[test]
+    fn test_automation_tool_no_duplicates() {
+        // Granting all automation capabilities should not produce duplicate tools.
+        let tools = tools_for_capabilities(&[
+            Capability::SystemAutomation,
+            Capability::UiAutomation("*".to_string()),
+            Capability::AppIntegration("*".to_string()),
+        ]);
+        let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        let before = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(before, names.len(), "duplicate tools found");
     }
 }

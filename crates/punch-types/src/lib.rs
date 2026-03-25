@@ -75,7 +75,7 @@ pub use link::{LinkContent, LinkContentType, LinkExtractor, LinkMetadata};
 pub use media::{
     AudioMimeType, ImageMimeType, MediaAnalysis, MediaAnalyzer, MediaInput, MediaType,
 };
-pub use message::{Message, Role, ToolCall, ToolCallResult};
+pub use message::{ContentPart, Message, Role, ToolCall, ToolCallResult};
 pub use model_catalog::{
     ModelCapability, ModelCatalog, ModelInfo, ModelPricing, ModelRequirements, ModelUsageStats,
 };

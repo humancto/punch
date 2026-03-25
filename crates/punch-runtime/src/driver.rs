@@ -306,10 +306,45 @@ impl AnthropicDriver {
         for msg in &request.messages {
             match msg.role {
                 Role::User => {
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": msg.content,
-                    }));
+                    if msg.content_parts.is_empty() {
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": msg.content,
+                        }));
+                    } else {
+                        // Multimodal: build content blocks from parts.
+                        let mut content_blocks: Vec<serde_json::Value> = Vec::new();
+                        if !msg.content.is_empty() {
+                            content_blocks.push(serde_json::json!({
+                                "type": "text",
+                                "text": msg.content,
+                            }));
+                        }
+                        for part in &msg.content_parts {
+                            match part {
+                                punch_types::ContentPart::Text { text } => {
+                                    content_blocks.push(serde_json::json!({
+                                        "type": "text",
+                                        "text": text,
+                                    }));
+                                }
+                                punch_types::ContentPart::Image { media_type, data } => {
+                                    content_blocks.push(serde_json::json!({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": data,
+                                        },
+                                    }));
+                                }
+                            }
+                        }
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": content_blocks,
+                        }));
+                    }
                 }
                 Role::Assistant => {
                     let mut content_blocks: Vec<serde_json::Value> = Vec::new();
@@ -345,12 +380,36 @@ impl AnthropicDriver {
                 Role::Tool => {
                     let mut result_blocks: Vec<serde_json::Value> = Vec::new();
                     for tr in &msg.tool_results {
-                        result_blocks.push(serde_json::json!({
-                            "type": "tool_result",
-                            "tool_use_id": tr.id,
-                            "content": tr.content,
-                            "is_error": tr.is_error,
-                        }));
+                        // Build content for this tool result — may include an image.
+                        if let Some(ref image) = tr.image {
+                            let mut content: Vec<serde_json::Value> = vec![serde_json::json!({
+                                "type": "text",
+                                "text": tr.content,
+                            })];
+                            if let punch_types::ContentPart::Image { media_type, data } = image {
+                                content.push(serde_json::json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": data,
+                                    },
+                                }));
+                            }
+                            result_blocks.push(serde_json::json!({
+                                "type": "tool_result",
+                                "tool_use_id": tr.id,
+                                "content": content,
+                                "is_error": tr.is_error,
+                            }));
+                        } else {
+                            result_blocks.push(serde_json::json!({
+                                "type": "tool_result",
+                                "tool_use_id": tr.id,
+                                "content": tr.content,
+                                "is_error": tr.is_error,
+                            }));
+                        }
                     }
                     messages.push(serde_json::json!({
                         "role": "user",
@@ -445,6 +504,7 @@ impl AnthropicDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -714,6 +774,7 @@ impl LlmDriver for AnthropicDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -788,10 +849,43 @@ impl OpenAiCompatibleDriver {
                     }));
                 }
                 Role::User => {
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": msg.content,
-                    }));
+                    if msg.content_parts.is_empty() {
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": msg.content,
+                        }));
+                    } else {
+                        // Multimodal: OpenAI format with content array.
+                        let mut content_blocks: Vec<serde_json::Value> = Vec::new();
+                        if !msg.content.is_empty() {
+                            content_blocks.push(serde_json::json!({
+                                "type": "text",
+                                "text": msg.content,
+                            }));
+                        }
+                        for part in &msg.content_parts {
+                            match part {
+                                punch_types::ContentPart::Text { text } => {
+                                    content_blocks.push(serde_json::json!({
+                                        "type": "text",
+                                        "text": text,
+                                    }));
+                                }
+                                punch_types::ContentPart::Image { media_type, data } => {
+                                    content_blocks.push(serde_json::json!({
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": format!("data:{media_type};base64,{data}"),
+                                        },
+                                    }));
+                                }
+                            }
+                        }
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": content_blocks,
+                        }));
+                    }
                 }
                 Role::Assistant => {
                     let mut m = serde_json::json!({
@@ -919,6 +1013,7 @@ impl OpenAiCompatibleDriver {
             content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1166,6 +1261,7 @@ impl OpenAiCompatibleDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1228,6 +1324,7 @@ impl GeminiDriver {
                     system_text = Some(combined);
                 }
                 Role::User => {
+                    let mut parts: Vec<serde_json::Value> = Vec::new();
                     let mut text = String::new();
                     if let Some(sys) = system_text.take()
                         && !sys.is_empty()
@@ -1236,9 +1333,31 @@ impl GeminiDriver {
                         text.push_str("\n\n");
                     }
                     text.push_str(&msg.content);
+                    if !text.is_empty() {
+                        parts.push(serde_json::json!({"text": text}));
+                    }
+                    // Add multimodal parts for Gemini.
+                    for part in &msg.content_parts {
+                        match part {
+                            punch_types::ContentPart::Text { text: t } => {
+                                parts.push(serde_json::json!({"text": t}));
+                            }
+                            punch_types::ContentPart::Image { media_type, data } => {
+                                parts.push(serde_json::json!({
+                                    "inline_data": {
+                                        "mime_type": media_type,
+                                        "data": data,
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                    if parts.is_empty() {
+                        parts.push(serde_json::json!({"text": ""}));
+                    }
                     contents.push(serde_json::json!({
                         "role": "user",
-                        "parts": [{"text": text}],
+                        "parts": parts,
                     }));
                 }
                 Role::Assistant => {
@@ -1406,6 +1525,7 @@ impl GeminiDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1586,6 +1706,7 @@ impl LlmDriver for GeminiDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1649,10 +1770,23 @@ impl OllamaDriver {
                     }));
                 }
                 Role::User => {
-                    messages.push(serde_json::json!({
+                    // Ollama multimodal: images go in a separate "images" array.
+                    let images: Vec<&str> = msg
+                        .content_parts
+                        .iter()
+                        .filter_map(|p| match p {
+                            punch_types::ContentPart::Image { data, .. } => Some(data.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    let mut m = serde_json::json!({
                         "role": "user",
                         "content": msg.content,
-                    }));
+                    });
+                    if !images.is_empty() {
+                        m["images"] = serde_json::json!(images);
+                    }
+                    messages.push(m);
                 }
                 Role::Assistant => {
                     let mut m = serde_json::json!({
@@ -1769,6 +1903,7 @@ impl OllamaDriver {
             content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1937,6 +2072,7 @@ impl OllamaDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -1993,9 +2129,34 @@ impl BedrockDriver {
         for msg in &request.messages {
             match msg.role {
                 Role::User => {
+                    let mut content: Vec<serde_json::Value> = Vec::new();
+                    if !msg.content.is_empty() {
+                        content.push(serde_json::json!({"text": msg.content}));
+                    }
+                    // Add multimodal parts for Bedrock (same as Anthropic).
+                    for part in &msg.content_parts {
+                        match part {
+                            punch_types::ContentPart::Text { text } => {
+                                content.push(serde_json::json!({"text": text}));
+                            }
+                            punch_types::ContentPart::Image { media_type, data } => {
+                                content.push(serde_json::json!({
+                                    "image": {
+                                        "format": media_type.rsplit('/').next().unwrap_or("png"),
+                                        "source": {
+                                            "bytes": data,
+                                        }
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                    if content.is_empty() {
+                        content.push(serde_json::json!({"text": ""}));
+                    }
                     messages.push(serde_json::json!({
                         "role": "user",
-                        "content": [{"text": msg.content}],
+                        "content": content,
                     }));
                 }
                 Role::Assistant => {
@@ -2137,6 +2298,7 @@ impl BedrockDriver {
             content: text_content,
             tool_calls,
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
             timestamp: chrono::Utc::now(),
         };
 
@@ -3361,6 +3523,7 @@ mod tests {
                 Message {
                     role: Role::Assistant,
                     content: "I'll check".into(),
+                    content_parts: Vec::new(),
                     tool_calls: vec![ToolCall {
                         id: "call_1".into(),
                         name: "file_read".into(),
@@ -3372,11 +3535,13 @@ mod tests {
                 Message {
                     role: Role::Tool,
                     content: String::new(),
+                    content_parts: Vec::new(),
                     tool_calls: Vec::new(),
                     tool_results: vec![punch_types::ToolCallResult {
                         id: "call_1".into(),
                         content: "file contents".into(),
                         is_error: false,
+                        image: None,
                     }],
                     timestamp: chrono::Utc::now(),
                 },
@@ -3591,6 +3756,7 @@ mod tests {
                 Message {
                     role: Role::Assistant,
                     content: "Let me help".into(),
+                    content_parts: Vec::new(),
                     tool_calls: vec![ToolCall {
                         id: "tc1".into(),
                         name: "get_weather".into(),
@@ -3736,11 +3902,13 @@ mod tests {
                 Message {
                     role: Role::Tool,
                     content: String::new(),
+                    content_parts: Vec::new(),
                     tool_calls: Vec::new(),
                     tool_results: vec![punch_types::ToolCallResult {
                         id: "tu_1".into(),
                         content: "result data".into(),
                         is_error: false,
+                        image: None,
                     }],
                     timestamp: chrono::Utc::now(),
                 },
