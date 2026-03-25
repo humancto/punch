@@ -92,6 +92,7 @@ fn test_config() -> PunchConfig {
         tunnel: None,
         channels: Default::default(),
         mcp_servers: Default::default(),
+            model_routing: Default::default(),
     }
 }
 

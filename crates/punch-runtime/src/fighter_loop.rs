@@ -23,11 +23,15 @@ use tracing::{debug, error, info, instrument, warn};
 use dashmap::DashMap;
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
-    Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
+    AgentCoordinator, ChannelNotifier, FighterId, FighterManifest, Message, PolicyEngine,
+    PunchError, PunchResult, Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult,
+    ToolDefinition,
 };
 
+use punch_types::config::ModelRoutingConfig;
+
 use crate::mcp::McpClient;
+use crate::model_router::ModelRouter;
 
 use crate::context_budget::ContextBudget;
 use crate::driver::{CompletionRequest, LlmDriver, StopReason, TokenUsage};
@@ -74,6 +78,13 @@ pub struct FighterLoopParams {
     /// Active MCP server clients shared across fighters.
     /// When present, MCP tools are available for dispatch.
     pub mcp_clients: Option<Arc<DashMap<String, Arc<McpClient>>>>,
+    /// Smart model routing configuration. When enabled, the router selects
+    /// cheap / mid / expensive models based on the user's message complexity.
+    pub model_routing: Option<ModelRoutingConfig>,
+    /// Optional channel notifier for proactive outbound messaging.
+    /// When present, the `channel_notify` tool can send messages to
+    /// connected channels (Telegram, Slack, Discord, etc.).
+    pub channel_notifier: Option<Arc<dyn ChannelNotifier>>,
 }
 
 /// Result of a completed fighter loop run.
@@ -142,6 +153,39 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         .await?;
     messages.push(user_msg);
 
+    // 2b. Model routing: check if we should use a tier-specific driver.
+    let routed_driver: Option<Arc<dyn LlmDriver>> = params
+        .model_routing
+        .as_ref()
+        .and_then(|routing_config| {
+            let router = ModelRouter::new(routing_config.clone());
+            router.route_message(&params.user_message)
+        })
+        .and_then(
+            |(tier, model_config)| match ModelRouter::create_tier_driver(&model_config) {
+                Ok(driver) => {
+                    info!(
+                        tier = %tier,
+                        model = %model_config.model,
+                        "model router: using tier-specific driver"
+                    );
+                    Some(driver)
+                }
+                Err(e) => {
+                    warn!(
+                        tier = %tier,
+                        error = %e,
+                        "model router: failed to create tier driver, falling back to default"
+                    );
+                    None
+                }
+            },
+        );
+    let active_driver: &dyn LlmDriver = match &routed_driver {
+        Some(d) => d.as_ref(),
+        None => params.driver.as_ref(),
+    };
+
     // 3. Recall relevant memories and build an enriched system prompt.
     let system_prompt =
         build_system_prompt(&params.manifest, &params.fighter_id, &params.memory).await;
@@ -158,6 +202,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         browser_pool: None,
         plugin_registry: None,
         mcp_clients: params.mcp_clients.clone(),
+        channel_notifier: params.channel_notifier.clone(),
     };
 
     // 4. Main loop.
@@ -194,8 +239,8 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             system_prompt: Some(system_prompt.clone()),
         };
 
-        // Call the LLM.
-        let completion = match params.driver.complete(request).await {
+        // Call the LLM (using routed driver if model routing selected one).
+        let completion = match active_driver.complete(request).await {
             Ok(c) => c,
             Err(e) => {
                 error!(error = %e, "LLM completion failed");

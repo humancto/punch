@@ -43,6 +43,7 @@ async fn main() {
         Commands::Workflow { command } => commands::workflow::run(command).await,
         Commands::Channel { command } => commands::channel::run(command, cli.config).await,
         Commands::Trigger { command } => commands::trigger::run(command).await,
+        Commands::Heartbeat { command } => commands::heartbeat::run(command).await,
         Commands::Config { command } => commands::config::run(command).await,
         Commands::Tui => commands::tui::run_tui("http://127.0.0.1:3000").await,
         Commands::Desktop { port, native } => {

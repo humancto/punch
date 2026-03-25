@@ -1398,6 +1398,8 @@ impl WorkflowEngine {
             approval_engine: None,
             sandbox: None,
             mcp_clients: None,
+            model_routing: None,
+            channel_notifier: None,
         };
 
         let loop_result = tokio::time::timeout(

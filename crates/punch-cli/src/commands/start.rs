@@ -140,10 +140,7 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
     println!("  Model:        {}", config.default_model.model);
     println!("  Gorillas:     {} registered", gorilla_count);
     println!("  Workflows:    {} registered", workflow_count);
-    println!(
-        "  MCP Servers:  {} active",
-        ring.mcp_clients().len()
-    );
+    println!("  MCP Servers:  {} active", ring.mcp_clients().len());
     let fighter_count = ring.list_fighters().len();
     println!("  Fighters:     {} ready", fighter_count);
     println!("  Channels:     {} configured", config.channels.len());

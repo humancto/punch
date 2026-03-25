@@ -108,6 +108,12 @@ pub enum Commands {
         command: TriggerCommands,
     },
 
+    /// Manage proactive heartbeat tasks
+    Heartbeat {
+        #[command(subcommand)]
+        command: HeartbeatCommands,
+    },
+
     /// Launch the interactive ringside monitor (TUI dashboard)
     Tui,
 
@@ -392,6 +398,36 @@ pub enum TriggerCommands {
     Test {
         /// Trigger ID (UUID)
         id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HeartbeatCommands {
+    /// List all heartbeat tasks across fighters
+    List,
+
+    /// Add a heartbeat task to a fighter's creed
+    Add {
+        /// The task description (what to check or do)
+        task: String,
+
+        /// Cadence: every_bout, hourly, daily, on_wake
+        #[arg(short, long, default_value = "hourly")]
+        cadence: String,
+
+        /// Fighter name to add the heartbeat to (default fighter if omitted)
+        #[arg(short, long)]
+        fighter: Option<String>,
+    },
+
+    /// Remove a heartbeat task by index
+    Remove {
+        /// Index of the heartbeat task to remove (from `punch heartbeat list`)
+        index: usize,
+
+        /// Fighter name to remove the heartbeat from
+        #[arg(short, long)]
+        fighter: Option<String>,
     },
 }
 

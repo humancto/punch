@@ -89,6 +89,7 @@ fn test_config() -> PunchConfig {
         tunnel: None,
         channels: Default::default(),
         mcp_servers: Default::default(),
+            model_routing: Default::default(),
     }
 }
 
@@ -158,10 +159,7 @@ async fn test_ensure_creed_does_not_overwrite() {
     let mut creed = punch_types::Creed::new("Existing-Fighter");
     creed.identity = "I have a custom identity".to_string();
     creed.bout_count = 42;
-    ring.memory()
-        .save_creed(&creed)
-        .await
-        .expect("save creed");
+    ring.memory().save_creed(&creed).await.expect("save creed");
 
     // Spawn fighter with the same name — should not overwrite
     let manifest = test_manifest("Existing-Fighter");
@@ -212,9 +210,7 @@ async fn test_send_message_nonexistent_fighter() {
     let ring = create_ring(Arc::new(MockLlmDriver::new()));
 
     let fake_id = punch_types::FighterId::new();
-    let result = ring
-        .send_message(&fake_id, "Hello?".to_string())
-        .await;
+    let result = ring.send_message(&fake_id, "Hello?".to_string()).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -304,10 +300,7 @@ async fn test_update_fighter_relationships() {
         .expect("load")
         .expect("exists");
 
-    let rel_to_b = creed_a
-        .relationships
-        .iter()
-        .find(|r| r.entity == "RelB");
+    let rel_to_b = creed_a.relationships.iter().find(|r| r.entity == "RelB");
     assert!(
         rel_to_b.is_some(),
         "RelA should have a relationship to RelB"
@@ -321,10 +314,7 @@ async fn test_update_fighter_relationships() {
         .expect("load")
         .expect("exists");
 
-    let rel_to_a = creed_b
-        .relationships
-        .iter()
-        .find(|r| r.entity == "RelA");
+    let rel_to_a = creed_b.relationships.iter().find(|r| r.entity == "RelA");
     assert!(
         rel_to_a.is_some(),
         "RelB should have a relationship to RelA"

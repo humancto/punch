@@ -27,6 +27,10 @@ pub struct PunchConfig {
     /// MCP server definitions keyed by server name.
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+    /// Smart model routing configuration. When enabled, messages are routed
+    /// to cheap / mid / expensive models based on query complexity.
+    #[serde(default)]
+    pub model_routing: ModelRoutingConfig,
 }
 
 /// Configuration for a language model.
@@ -164,6 +168,25 @@ fn default_true() -> bool {
 
 fn default_rate_limit_rpm() -> u32 {
     60
+}
+
+/// Configuration for smart model routing based on query complexity.
+///
+/// When enabled, messages are classified into tiers (cheap / mid / expensive)
+/// using keyword heuristics, and routed to the appropriate model. If a tier's
+/// model is not configured, the default model is used as fallback.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelRoutingConfig {
+    /// Whether model routing is enabled. When `false`, the default model is
+    /// used for all messages (backward-compatible default).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Model for simple messages (greetings, yes/no answers). Cheap nano-tier.
+    pub cheap: Option<ModelConfig>,
+    /// Model for tool-calling messages (search, email, calendar, etc.).
+    pub mid: Option<ModelConfig>,
+    /// Model for complex reasoning (analysis, comparison, code review, etc.).
+    pub expensive: Option<ModelConfig>,
 }
 
 #[cfg(test)]

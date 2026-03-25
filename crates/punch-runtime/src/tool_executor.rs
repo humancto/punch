@@ -16,9 +16,9 @@ use tracing::{debug, instrument, warn};
 use punch_extensions::plugin::PluginRegistry;
 use punch_memory::MemorySubstrate;
 use punch_types::{
-    AgentCoordinator, ApprovalDecision, BrowserPool, Capability, FighterId, PolicyEngine,
-    PunchError, PunchResult, SandboxEnforcer, Sensitivity, ShellBleedDetector, ToolResult,
-    capability::capability_matches,
+    AgentCoordinator, ApprovalDecision, BrowserPool, Capability, ChannelNotifier, FighterId,
+    PolicyEngine, PunchError, PunchResult, SandboxEnforcer, Sensitivity, ShellBleedDetector,
+    ToolResult, capability::capability_matches,
 };
 
 use crate::mcp::McpClient;
@@ -59,6 +59,10 @@ pub struct ToolExecutionContext {
     /// When present, tools prefixed with `mcp_{server}_` are routed to the
     /// corresponding MCP server for execution.
     pub mcp_clients: Option<Arc<DashMap<String, Arc<McpClient>>>>,
+    /// Optional channel notifier for proactive outbound messaging.
+    /// When present, the `channel_notify` tool can send messages to
+    /// connected channels (Telegram, Slack, Discord, etc.).
+    pub channel_notifier: Option<Arc<dyn ChannelNotifier>>,
 }
 
 /// Default per-tool timeout in seconds.
@@ -210,10 +214,10 @@ async fn execute_tool_inner(
         "wasm_invoke" => tool_wasm_invoke(input, capabilities, context).await,
         // A2A delegation
         "a2a_delegate" => tool_a2a_delegate(input, capabilities).await,
+        // Channel notification
+        "channel_notify" => tool_channel_notify(input, capabilities, context).await,
         // MCP server tools — dispatched by `mcp_{server}_{tool}` prefix.
-        _ if name.starts_with("mcp_") => {
-            tool_mcp_call(name, input, capabilities, context).await
-        }
+        _ if name.starts_with("mcp_") => tool_mcp_call(name, input, capabilities, context).await,
         _ => Err(PunchError::ToolNotFound(name.to_string())),
     }
 }
@@ -289,6 +293,63 @@ fn is_sensitive_path(path: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Channel notification
+// ---------------------------------------------------------------------------
+
+/// Send a proactive message to an external channel (Telegram, Slack, Discord, etc.).
+async fn tool_channel_notify(
+    input: &serde_json::Value,
+    capabilities: &[Capability],
+    context: &ToolExecutionContext,
+) -> PunchResult<ToolResult> {
+    require_capability(capabilities, &Capability::ChannelNotify)?;
+
+    let notifier = context
+        .channel_notifier
+        .as_ref()
+        .ok_or_else(|| PunchError::Tool {
+            tool: "channel_notify".into(),
+            message: "channel notifier not configured — no channel adapters are available".into(),
+        })?;
+
+    let channel = input["channel"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "channel_notify".into(),
+        message: "missing 'channel' parameter (e.g., \"telegram\", \"discord\", \"slack\")".into(),
+    })?;
+
+    let chat_id = input["chat_id"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "channel_notify".into(),
+        message: "missing 'chat_id' parameter (the channel/conversation ID to send to)".into(),
+    })?;
+
+    let message = input["message"].as_str().ok_or_else(|| PunchError::Tool {
+        tool: "channel_notify".into(),
+        message: "missing 'message' parameter (the text to send)".into(),
+    })?;
+
+    debug!(
+        channel = %channel,
+        chat_id = %chat_id,
+        message_len = message.len(),
+        "channel_notify: sending proactive message"
+    );
+
+    notifier.notify(channel, chat_id, message).await?;
+
+    Ok(ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "sent": true,
+            "channel": channel,
+            "chat_id": chat_id,
+            "message_length": message.len(),
+        }),
+        error: None,
+        duration_ms: 0,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // MCP tool dispatch
 // ---------------------------------------------------------------------------
 
@@ -317,10 +378,7 @@ async fn tool_mcp_call(
     for entry in clients.iter() {
         if let Some(stripped) = entry.value().strip_namespace(name) {
             // Check capability: the fighter must have McpAccess for this server.
-            require_capability(
-                capabilities,
-                &Capability::McpAccess(entry.key().clone()),
-            )?;
+            require_capability(capabilities, &Capability::McpAccess(entry.key().clone()))?;
             matched_client = Some(Arc::clone(entry.value()));
             raw_tool_name = Some(stripped.to_string());
             break;
@@ -328,10 +386,7 @@ async fn tool_mcp_call(
     }
 
     let client = matched_client.ok_or_else(|| {
-        PunchError::ToolNotFound(format!(
-            "no MCP server matches tool '{}'",
-            name
-        ))
+        PunchError::ToolNotFound(format!("no MCP server matches tool '{}'", name))
     })?;
     let raw_name = raw_tool_name.unwrap();
 
@@ -4005,6 +4060,7 @@ mod tests {
             browser_pool: None,
             plugin_registry: None,
             mcp_clients: None,
+            channel_notifier: None,
         }
     }
 

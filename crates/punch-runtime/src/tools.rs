@@ -109,6 +109,9 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
             Capability::PluginInvoke => {
                 push_unique(&mut tools, wasm_invoke());
             }
+            Capability::ChannelNotify => {
+                push_unique(&mut tools, channel_notify());
+            }
             _ => {}
         }
     }
@@ -191,6 +194,8 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         a2a_delegate(),
         // WASM Plugin
         wasm_invoke(),
+        // Channel notification
+        channel_notify(),
     ]
 }
 
@@ -1557,6 +1562,35 @@ fn wasm_invoke() -> ToolDefinition {
             "required": ["plugin", "function"]
         }),
         category: ToolCategory::Plugin,
+    }
+}
+
+fn channel_notify() -> ToolDefinition {
+    ToolDefinition {
+        name: "channel_notify".into(),
+        description: "Send a proactive message to an external channel (Telegram, Slack, Discord, \
+                      etc.). Use this to push notifications, briefings, alerts, and heartbeat \
+                      results to connected messaging platforms."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "The channel adapter name (e.g., \"telegram\", \"discord\", \"slack\")."
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "The channel/conversation ID to send the message to."
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The text message to send. Keep it concise and actionable."
+                }
+            },
+            "required": ["channel", "chat_id", "message"]
+        }),
+        category: ToolCategory::Channel,
     }
 }
 

@@ -4,6 +4,7 @@ pub mod audit;
 pub mod browser;
 pub mod capability;
 pub mod cdp;
+pub mod channel_notify;
 pub mod config;
 pub mod coordinator;
 pub mod creed;
@@ -52,7 +53,8 @@ pub use cdp::{
     build_navigate_command, build_screenshot_command, build_type_text_command,
     build_wait_for_selector_command, chrome_candidate_paths, find_chrome,
 };
-pub use config::{ModelConfig, Provider, PunchConfig};
+pub use channel_notify::ChannelNotifier;
+pub use config::{ModelConfig, ModelRoutingConfig, Provider, PunchConfig};
 pub use coordinator::{AgentCoordinator, AgentInfo, AgentMessageResult};
 pub use creed::{
     Creed, CreedId, DelegationRule, HeartbeatTask, InteractionStyle, LearnedBehavior, Relationship,

@@ -12,11 +12,11 @@
 
 use std::sync::Arc;
 
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
-use axum::body::Bytes;
 use axum::{Json, Router};
 use serde::Serialize;
 use tracing::{info, warn};
@@ -130,6 +130,42 @@ impl ChannelBridgeHandle for RingBridgeHandle {
 
     async fn spawn_fighter_by_name(&self, _manifest_name: &str) -> Result<FighterId, String> {
         Err("Auto-spawn not available in webhook mode. Create a fighter first via `punch fighter spawn`.".to_string())
+    }
+}
+
+/// Channel bridge notifier — implements `ChannelNotifier` by delegating
+/// to the `ChannelBridge`'s `send_message` method.
+///
+/// This is the concrete implementation that gets passed as
+/// `Arc<dyn ChannelNotifier>` into the tool execution context, bridging
+/// the gap between `punch-runtime` (which defines the trait in
+/// `punch-types`) and `punch-channels` (which has the actual adapters).
+pub struct ChannelBridgeNotifier {
+    bridge: Arc<punch_channels::ChannelBridge>,
+}
+
+impl ChannelBridgeNotifier {
+    /// Create a new notifier wrapping a channel bridge.
+    pub fn new(bridge: Arc<punch_channels::ChannelBridge>) -> Self {
+        Self { bridge }
+    }
+}
+
+#[async_trait::async_trait]
+impl punch_types::ChannelNotifier for ChannelBridgeNotifier {
+    async fn notify(
+        &self,
+        adapter_name: &str,
+        chat_id: &str,
+        message: &str,
+    ) -> punch_types::PunchResult<()> {
+        self.bridge
+            .send_message(adapter_name, chat_id, message)
+            .await
+    }
+
+    async fn list_channels(&self) -> punch_types::PunchResult<Vec<String>> {
+        Ok(self.bridge.list_adapters().await)
     }
 }
 

@@ -6,6 +6,7 @@ pub mod config;
 pub mod desktop;
 pub mod fighter;
 pub mod gorilla;
+pub mod heartbeat;
 pub mod init;
 pub mod moves;
 pub mod start;

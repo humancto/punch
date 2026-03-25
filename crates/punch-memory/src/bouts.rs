@@ -500,10 +500,7 @@ mod tests {
         let bout_a = substrate.create_bout(&fighter_a).await.unwrap();
         let _bout_b = substrate.create_bout(&fighter_b).await.unwrap();
 
-        let latest = substrate
-            .latest_bout_for_fighter(&fighter_a)
-            .await
-            .unwrap();
+        let latest = substrate.latest_bout_for_fighter(&fighter_a).await.unwrap();
         assert_eq!(latest, Some(bout_a));
     }
 }

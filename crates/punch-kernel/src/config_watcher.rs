@@ -305,6 +305,7 @@ mod tests {
             tunnel: None,
             channels: HashMap::new(),
             mcp_servers: HashMap::new(),
+            model_routing: Default::default(),
         }
     }
 

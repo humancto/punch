@@ -51,6 +51,8 @@ pub enum Capability {
     A2ADelegate,
     /// Access MCP servers matching the given name pattern (e.g., "*" for all, "github" for specific).
     McpAccess(String),
+    /// Send proactive notifications to connected channels (Telegram, Slack, Discord, etc.).
+    ChannelNotify,
 }
 
 impl std::fmt::Display for Capability {
@@ -77,6 +79,7 @@ impl std::fmt::Display for Capability {
             Self::PluginInvoke => write!(f, "plugin_invoke"),
             Self::A2ADelegate => write!(f, "a2a_delegate"),
             Self::McpAccess(p) => write!(f, "mcp_access({})", p),
+            Self::ChannelNotify => write!(f, "channel_notify"),
         }
     }
 }
@@ -133,6 +136,7 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
         (Capability::McpAccess(granted_pat), Capability::McpAccess(required_name)) => {
             pattern_matches(granted_pat, required_name)
         }
+        (Capability::ChannelNotify, Capability::ChannelNotify) => true,
         _ => false,
     }
 }

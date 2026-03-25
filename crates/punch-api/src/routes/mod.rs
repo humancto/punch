@@ -11,6 +11,7 @@ pub mod docs;
 pub mod fighters;
 pub mod gorillas;
 pub mod health;
+pub mod heartbeats;
 pub mod metrics;
 pub mod moves;
 pub mod openai_compat;
@@ -40,6 +41,7 @@ pub fn api_router() -> Router<AppState> {
         .merge(a2a::router())
         .merge(budget::router())
         .merge(creed::router())
+        .merge(heartbeats::router())
         .merge(communication::router())
         .merge(tenants::router())
         .merge(moves::router())
