@@ -33,7 +33,7 @@ cargo fmt --all
 cargo fmt --all -- --check
 
 # Run the binary
-cargo run -- <command>
+cargo run --bin punch -- <command>
 
 # Build tasks via xtask
 cargo xtask <task>
