@@ -669,18 +669,30 @@ impl Ring {
         let bout_id = match entry.current_bout {
             Some(id) => id,
             None => {
-                // Create the bout in the database.
-                let id = self
-                    .memory
-                    .create_bout(fighter_id)
-                    .await
-                    .map_err(|e| PunchError::Bout(format!("failed to create bout: {e}")))?;
-                entry.current_bout = Some(id);
+                // Try to restore the most recent bout from the database first
+                // (handles daemon restart — the in-memory map was lost but the
+                // bout still exists on disk).
+                let id = match self.memory.latest_bout_for_fighter(fighter_id).await {
+                    Ok(Some(existing)) => existing,
+                    _ => {
+                        // No prior bout found — create a fresh one.
+                        let new_id = self
+                            .memory
+                            .create_bout(fighter_id)
+                            .await
+                            .map_err(|e| {
+                                PunchError::Bout(format!("failed to create bout: {e}"))
+                            })?;
 
-                self.event_bus.publish(PunchEvent::BoutStarted {
-                    bout_id: id.0,
-                    fighter_id: *fighter_id,
-                });
+                        self.event_bus.publish(PunchEvent::BoutStarted {
+                            bout_id: new_id.0,
+                            fighter_id: *fighter_id,
+                        });
+
+                        new_id
+                    }
+                };
+                entry.current_bout = Some(id);
 
                 id
             }

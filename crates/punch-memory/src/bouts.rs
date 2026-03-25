@@ -204,6 +204,37 @@ impl MemorySubstrate {
         Ok(summaries)
     }
 
+    /// Return the most recent bout for a fighter, if any exists.
+    ///
+    /// This is used to restore conversation continuity across daemon restarts:
+    /// when a user messages a fighter whose `current_bout` was lost from memory,
+    /// we look up the latest bout from the database instead of creating a new one.
+    pub async fn latest_bout_for_fighter(
+        &self,
+        fighter_id: &FighterId,
+    ) -> PunchResult<Option<BoutId>> {
+        let fighter_str = fighter_id.to_string();
+        let conn = self.conn.lock().await;
+
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT id FROM bouts WHERE fighter_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+                [&fighter_str],
+                |row| row.get(0),
+            )
+            .ok();
+
+        match result {
+            Some(id_str) => {
+                let uuid = Uuid::parse_str(&id_str)
+                    .map_err(|e| PunchError::Bout(format!("invalid bout id: {e}")))?;
+                debug!(bout_id = %id_str, fighter_id = %fighter_id, "restored latest bout from database");
+                Ok(Some(BoutId(uuid)))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Delete a bout and all its messages (cascading).
     pub async fn delete_bout(&self, bout_id: &BoutId) -> PunchResult<()> {
         let bout_str = bout_id.to_string();
@@ -415,5 +446,64 @@ mod tests {
 
         let bouts = substrate.list_bouts(&fighter_id).await.unwrap();
         assert!(bouts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_latest_bout_for_fighter_none_when_empty() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        // No bouts yet — should return None.
+        let latest = substrate
+            .latest_bout_for_fighter(&fighter_id)
+            .await
+            .unwrap();
+        assert!(latest.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_latest_bout_for_fighter_returns_a_bout() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_id = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_id, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        let bout_id = substrate.create_bout(&fighter_id).await.unwrap();
+
+        let latest = substrate
+            .latest_bout_for_fighter(&fighter_id)
+            .await
+            .unwrap();
+        assert_eq!(latest, Some(bout_id));
+    }
+
+    #[tokio::test]
+    async fn test_latest_bout_for_fighter_ignores_other_fighters() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fighter_a = punch_types::FighterId::new();
+        let fighter_b = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fighter_a, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        substrate
+            .save_fighter(&fighter_b, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        let bout_a = substrate.create_bout(&fighter_a).await.unwrap();
+        let _bout_b = substrate.create_bout(&fighter_b).await.unwrap();
+
+        let latest = substrate
+            .latest_bout_for_fighter(&fighter_a)
+            .await
+            .unwrap();
+        assert_eq!(latest, Some(bout_a));
     }
 }

@@ -145,6 +145,7 @@ async fn register_telegram_webhook(
         .json(&serde_json::json!({
             "url": url,
             "secret_token": secret,
+            "drop_pending_updates": true,
         }))
         .send()
         .await
@@ -676,10 +677,31 @@ async fn run_setup(platform: Option<String>) -> i32 {
     let mut allowed_user_ids: Vec<String> = Vec::new();
     if platform == "telegram" {
         println!();
-        let user_id = prompt("Enter your Telegram user ID (send /start to @userinfobot)");
-        if !user_id.is_empty() {
+        println!("  To find your numeric user ID, message @userinfobot on Telegram.");
+        println!("  It will reply with your ID (e.g., 8514018060).");
+        println!("  Do NOT use your @username — Telegram webhooks use numeric IDs.");
+        loop {
+            let user_id = prompt("Enter your Telegram numeric user ID");
+            if user_id.is_empty() {
+                println!("  [!] Skipping allowlist — anyone can message this bot.");
+                break;
+            }
+            if user_id.starts_with('@') {
+                println!("  [!] That looks like a username, not a numeric ID.");
+                println!("      Message @userinfobot on Telegram to get your numeric ID.");
+                continue;
+            }
+            if user_id.parse::<i64>().is_err() {
+                println!("  [!] User ID must be numeric (e.g., 8514018060).");
+                continue;
+            }
             println!("  [+] Allowlist: {}", user_id);
             allowed_user_ids.push(user_id);
+
+            let more = prompt_default("Add another user ID? [y/N]", "N");
+            if !more.eq_ignore_ascii_case("y") {
+                break;
+            }
         }
     }
 
