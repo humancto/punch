@@ -158,6 +158,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         browser_pool: None,
         plugin_registry: None,
         mcp_clients: params.mcp_clients.clone(),
+        automation_backend: None,
     };
 
     // 4. Main loop.

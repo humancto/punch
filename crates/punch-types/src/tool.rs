@@ -22,6 +22,9 @@ pub enum ToolCategory {
     Template,
     Crypto,
     Plugin,
+    SystemAutomation,
+    UiAutomation,
+    AppIntegration,
 }
 
 impl std::fmt::Display for ToolCategory {
@@ -45,6 +48,9 @@ impl std::fmt::Display for ToolCategory {
             Self::Template => write!(f, "template"),
             Self::Crypto => write!(f, "crypto"),
             Self::Plugin => write!(f, "plugin"),
+            Self::SystemAutomation => write!(f, "system_automation"),
+            Self::UiAutomation => write!(f, "ui_automation"),
+            Self::AppIntegration => write!(f, "app_integration"),
         }
     }
 }
@@ -99,6 +105,12 @@ mod tests {
         assert_eq!(ToolCategory::Template.to_string(), "template");
         assert_eq!(ToolCategory::Crypto.to_string(), "crypto");
         assert_eq!(ToolCategory::Plugin.to_string(), "plugin");
+        assert_eq!(
+            ToolCategory::SystemAutomation.to_string(),
+            "system_automation"
+        );
+        assert_eq!(ToolCategory::UiAutomation.to_string(), "ui_automation");
+        assert_eq!(ToolCategory::AppIntegration.to_string(), "app_integration");
     }
 
     #[test]
@@ -122,6 +134,9 @@ mod tests {
             ToolCategory::Template,
             ToolCategory::Crypto,
             ToolCategory::Plugin,
+            ToolCategory::SystemAutomation,
+            ToolCategory::UiAutomation,
+            ToolCategory::AppIntegration,
         ];
         for cat in &categories {
             let json = serde_json::to_string(cat).expect("serialize");
@@ -143,6 +158,22 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ToolCategory::CodeAnalysis).unwrap(),
             "\"code_analysis\""
+        );
+    }
+
+    #[test]
+    fn test_tool_category_serde_automation_values() {
+        assert_eq!(
+            serde_json::to_string(&ToolCategory::SystemAutomation).unwrap(),
+            "\"system_automation\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolCategory::UiAutomation).unwrap(),
+            "\"ui_automation\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolCategory::AppIntegration).unwrap(),
+            "\"app_integration\""
         );
     }
 

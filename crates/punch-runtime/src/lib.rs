@@ -13,6 +13,7 @@
 //! - **Bout**: A session / conversation
 //! - **Move**: A tool invocation
 
+pub mod automation;
 pub mod circuit_breaker;
 pub mod context_budget;
 pub mod driver;
@@ -24,6 +25,9 @@ pub mod session_repair;
 pub mod tool_executor;
 pub mod tools;
 
+pub use automation::{
+    AppInfo, AutomationBackend, ClipboardContent, UiElement, UiSelector, WindowInfo, create_backend,
+};
 pub use circuit_breaker::{CircuitState, CircuitStatus, ProviderCircuitBreaker};
 pub use context_budget::{ContextBudget, TrimAction};
 pub use driver::{
