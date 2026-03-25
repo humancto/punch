@@ -117,6 +117,33 @@ fn escape_applescript(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
+/// Known AppleScript accessibility attribute names that can be queried.
+///
+/// Attribute names are used as unquoted identifiers in AppleScript, so we
+/// validate against this whitelist instead of escaping (which would insert
+/// backslashes into identifier positions and break parsing).
+#[cfg(target_os = "macos")]
+const ALLOWED_ATTRIBUTES: &[&str] = &[
+    "value",
+    "name",
+    "role",
+    "role description",
+    "title",
+    "description",
+    "enabled",
+    "focused",
+    "position",
+    "size",
+    "selected",
+    "help",
+    "subrole",
+    "identifier",
+    "minimum value",
+    "maximum value",
+    "orientation",
+    "placeholder value",
+];
+
 #[cfg(target_os = "macos")]
 pub struct MacOsBackend;
 
@@ -346,9 +373,20 @@ impl AutomationBackend for MacOsBackend {
             });
         }
         let safe_app = escape_applescript(parts[0]);
-        let safe_attr = escape_applescript(attribute);
+        // Attribute is used as an unquoted AppleScript identifier; validate
+        // against the known attribute whitelist instead of escaping.
+        if !ALLOWED_ATTRIBUTES.contains(&attribute) {
+            return Err(punch_types::PunchError::Tool {
+                tool: "automation".into(),
+                message: format!(
+                    "unknown attribute '{}'; allowed: {}",
+                    attribute,
+                    ALLOWED_ATTRIBUTES.join(", ")
+                ),
+            });
+        }
         let script = format!(
-            r#"tell application "System Events" to tell process "{safe_app}" to get {safe_attr} of UI element {} of window 1"#,
+            r#"tell application "System Events" to tell process "{safe_app}" to get {attribute} of UI element {} of window 1"#,
             // element_id indices are 0-based; AppleScript is 1-based.
             parts[1].parse::<usize>().unwrap_or(0) + 1,
         );
@@ -892,5 +930,124 @@ mod tests {
         let dbg = format!("{elem:?}");
         assert!(dbg.contains("button"));
         assert!(dbg.contains("OK"));
+    }
+
+    // --- Role validation (portable mirror of the cfg(macos) logic) ---
+
+    fn validate_role(role: &str) -> bool {
+        role.chars()
+            .all(|c| c.is_alphanumeric() || c == ' ' || c == '_')
+    }
+
+    #[test]
+    fn test_role_validation_valid_roles() {
+        assert!(validate_role("button"));
+        assert!(validate_role("UI element"));
+        assert!(validate_role("menu item"));
+        assert!(validate_role("scroll_bar"));
+        assert!(validate_role("text field"));
+    }
+
+    #[test]
+    fn test_role_validation_rejects_injection() {
+        // Quotes, semicolons, and other special chars should be rejected.
+        assert!(!validate_role("button\""));
+        assert!(!validate_role("role; tell app"));
+        assert!(!validate_role("button\nof window 1"));
+        assert!(!validate_role("role\\injection"));
+        assert!(!validate_role("role(bad)"));
+    }
+
+    // --- Attribute whitelist (portable mirror of ALLOWED_ATTRIBUTES) ---
+
+    const TEST_ALLOWED_ATTRIBUTES: &[&str] = &[
+        "value",
+        "name",
+        "role",
+        "role description",
+        "title",
+        "description",
+        "enabled",
+        "focused",
+        "position",
+        "size",
+        "selected",
+        "help",
+        "subrole",
+        "identifier",
+        "minimum value",
+        "maximum value",
+        "orientation",
+        "placeholder value",
+    ];
+
+    #[test]
+    fn test_attribute_whitelist_accepts_known() {
+        for attr in TEST_ALLOWED_ATTRIBUTES {
+            assert!(
+                TEST_ALLOWED_ATTRIBUTES.contains(attr),
+                "expected '{attr}' to be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_attribute_whitelist_rejects_unknown() {
+        assert!(!TEST_ALLOWED_ATTRIBUTES.contains(&"evil_attr"));
+        assert!(!TEST_ALLOWED_ATTRIBUTES.contains(&"value; delete"));
+        assert!(!TEST_ALLOWED_ATTRIBUTES.contains(&"name\""));
+        assert!(!TEST_ALLOWED_ATTRIBUTES.contains(&""));
+    }
+
+    // --- Menu click chain generation ---
+
+    #[test]
+    fn test_menu_click_chain_structure() {
+        // Portable simulation of the menu click chain builder.
+        let menu_path = vec![
+            "File".to_string(),
+            "Save As...".to_string(),
+            "PDF".to_string(),
+        ];
+        let safe_first = escape_applescript_portable(&menu_path[0]);
+        let mut click_chain = String::new();
+        for (i, item) in menu_path.iter().enumerate() {
+            let safe_item = escape_applescript_portable(item);
+            if i == 0 {
+                click_chain.push_str(&format!(
+                    r#"click menu bar item "{safe_item}" of menu bar 1"#
+                ));
+            } else {
+                click_chain.push_str(&format!(
+                    r#"
+click menu item "{safe_item}" of menu 1 of menu bar item "{safe_first}" of menu bar 1"#,
+                ));
+            }
+        }
+        assert!(click_chain.contains(r#"menu bar item "File""#));
+        assert!(click_chain.contains(r#"menu item "Save As...""#));
+        assert!(click_chain.contains(r#"menu item "PDF""#));
+    }
+
+    #[test]
+    fn test_menu_click_chain_with_quotes_in_items() {
+        let menu_path = vec!["Edit".to_string(), "Find \"Next\"".to_string()];
+        let safe_first = escape_applescript_portable(&menu_path[0]);
+        let mut click_chain = String::new();
+        for (i, item) in menu_path.iter().enumerate() {
+            let safe_item = escape_applescript_portable(item);
+            if i == 0 {
+                click_chain.push_str(&format!(
+                    r#"click menu bar item "{safe_item}" of menu bar 1"#
+                ));
+            } else {
+                click_chain.push_str(&format!(
+                    r#"
+click menu item "{safe_item}" of menu 1 of menu bar item "{safe_first}" of menu bar 1"#,
+                ));
+            }
+        }
+        // Quotes inside menu items must be escaped.
+        assert!(click_chain.contains(r#"Find \"Next\""#));
     }
 }

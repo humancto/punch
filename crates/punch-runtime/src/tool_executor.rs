@@ -256,7 +256,13 @@ fn require_capability(capabilities: &[Capability], required: &Capability) -> Pun
     }
 }
 
-/// Extract the application name from a UI element ID (format: "AppName:index").
+/// Extract the application name from a UI element ID.
+///
+/// Element IDs follow the format `"AppName:index"` where `AppName` is a
+/// non-empty application name and `index` is a 0-based element index
+/// produced by `find_ui_elements`. The first segment before the first `:`
+/// is returned. If the app name is empty or the string is empty, returns
+/// an error.
 fn extract_app_from_element_id(element_id: &str, tool: &str) -> PunchResult<String> {
     element_id
         .split(':')
@@ -3970,14 +3976,17 @@ async fn tool_a2a_delegate(
 fn get_automation_backend(
     context: &ToolExecutionContext,
 ) -> PunchResult<&dyn crate::automation::AutomationBackend> {
-    context
-        .automation_backend
-        .as_deref()
-        .ok_or_else(|| PunchError::Tool {
+    context.automation_backend.as_deref().ok_or_else(|| {
+        debug!(
+            fighter_id = %context.fighter_id,
+            "automation tool called but no backend is configured"
+        );
+        PunchError::Tool {
             tool: "automation".into(),
             message: "automation backend not available — desktop automation is not configured"
                 .into(),
-        })
+        }
+    })
 }
 
 async fn tool_sys_open_app(
