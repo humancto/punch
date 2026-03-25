@@ -29,12 +29,12 @@ pub use loader::{
     render_skills_prompt,
 };
 pub use lockfile::{LockedMove, MoveLockfile};
+pub use marketplace::{
+    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
+};
 pub use packs::{
     InstallResult, PackMcpServer, SkillPack, available_packs, find_bundled_pack, install_pack,
     load_bundled_packs, load_pack_from_path,
-};
-pub use marketplace::{
-    InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
 };
 pub use registry::{IndexEntry, IndexMeta, ScanFinding, ScanVerdict};
 pub use scanner::SkillScanner;

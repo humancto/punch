@@ -474,9 +474,10 @@ mod tests {
         assert_eq!(pack.name, "developer");
         assert_eq!(pack.mcp_servers[0].name, "github");
         assert!(!pack.required_env_vars.is_empty());
-        assert!(pack
-            .required_env_vars
-            .contains(&"GITHUB_PERSONAL_ACCESS_TOKEN".to_string()));
+        assert!(
+            pack.required_env_vars
+                .contains(&"GITHUB_PERSONAL_ACCESS_TOKEN".to_string())
+        );
     }
 
     #[test]

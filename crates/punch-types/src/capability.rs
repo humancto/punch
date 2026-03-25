@@ -53,6 +53,8 @@ pub enum Capability {
     McpAccess(String),
     /// Send proactive notifications to connected channels (Telegram, Slack, Discord, etc.).
     ChannelNotify,
+    /// Self-configuration: modify own creed, heartbeats, and install skill packs.
+    SelfConfig,
 }
 
 impl std::fmt::Display for Capability {
@@ -80,6 +82,7 @@ impl std::fmt::Display for Capability {
             Self::A2ADelegate => write!(f, "a2a_delegate"),
             Self::McpAccess(p) => write!(f, "mcp_access({})", p),
             Self::ChannelNotify => write!(f, "channel_notify"),
+            Self::SelfConfig => write!(f, "self_config"),
         }
     }
 }
@@ -137,6 +140,7 @@ pub fn capability_matches(granted: &Capability, required: &Capability) -> bool {
             pattern_matches(granted_pat, required_name)
         }
         (Capability::ChannelNotify, Capability::ChannelNotify) => true,
+        (Capability::SelfConfig, Capability::SelfConfig) => true,
         _ => false,
     }
 }
@@ -299,6 +303,7 @@ mod tests {
         assert_eq!(Capability::Crypto.to_string(), "crypto");
         assert_eq!(Capability::A2ADelegate.to_string(), "a2a_delegate");
         assert_eq!(Capability::PluginInvoke.to_string(), "plugin_invoke");
+        assert_eq!(Capability::SelfConfig.to_string(), "self_config");
     }
 
     #[test]
@@ -320,6 +325,7 @@ mod tests {
             Capability::Crypto,
             Capability::A2ADelegate,
             Capability::PluginInvoke,
+            Capability::SelfConfig,
         ];
         for cap in &scopeless {
             assert!(capability_matches(cap, cap), "{} should match itself", cap);

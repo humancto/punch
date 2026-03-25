@@ -112,6 +112,14 @@ pub fn tools_for_capabilities(capabilities: &[Capability]) -> Vec<ToolDefinition
             Capability::ChannelNotify => {
                 push_unique(&mut tools, channel_notify());
             }
+            Capability::SelfConfig => {
+                push_unique(&mut tools, heartbeat_add());
+                push_unique(&mut tools, heartbeat_list());
+                push_unique(&mut tools, heartbeat_remove());
+                push_unique(&mut tools, creed_view());
+                push_unique(&mut tools, skill_list());
+                push_unique(&mut tools, skill_recommend());
+            }
             _ => {}
         }
     }
@@ -196,6 +204,13 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         wasm_invoke(),
         // Channel notification
         channel_notify(),
+        // Self-configuration
+        heartbeat_add(),
+        heartbeat_list(),
+        heartbeat_remove(),
+        creed_view(),
+        skill_list(),
+        skill_recommend(),
     ]
 }
 
@@ -1595,6 +1610,125 @@ fn channel_notify() -> ToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// Self-Configuration Tools
+// ---------------------------------------------------------------------------
+
+fn heartbeat_add() -> ToolDefinition {
+    ToolDefinition {
+        name: "heartbeat_add".into(),
+        description: "Add a proactive heartbeat task to your creed. Heartbeat tasks fire on a \
+                      cadence (every_bout, on_wake, hourly, daily) and remind you to perform \
+                      recurring actions like morning briefings, health checks, or summaries."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "What to do when the heartbeat fires (e.g., \"Morning briefing: summarize calendar and emails\")."
+                },
+                "cadence": {
+                    "type": "string",
+                    "enum": ["every_bout", "on_wake", "hourly", "daily"],
+                    "description": "How often: every_bout (every conversation), on_wake (first bout after restart), hourly, daily."
+                }
+            },
+            "required": ["task", "cadence"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn heartbeat_list() -> ToolDefinition {
+    ToolDefinition {
+        name: "heartbeat_list".into(),
+        description: "List all heartbeat tasks in your creed. Shows task description, cadence, \
+                      active status, execution count, and last checked time."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn heartbeat_remove() -> ToolDefinition {
+    ToolDefinition {
+        name: "heartbeat_remove".into(),
+        description: "Remove a heartbeat task from your creed by its index (0-based). Use \
+                      heartbeat_list first to see the indices."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "The 0-based index of the heartbeat task to remove."
+                }
+            },
+            "required": ["index"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn creed_view() -> ToolDefinition {
+    ToolDefinition {
+        name: "creed_view".into(),
+        description: "View your current creed — identity, personality traits, directives, \
+                      learned behaviors, relationships, heartbeat tasks, and stats. Use this \
+                      to understand who you are and what you're configured to do."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn skill_list() -> ToolDefinition {
+    ToolDefinition {
+        name: "skill_list".into(),
+        description: "List available skill packs that can be installed. Skill packs bundle MCP \
+                      server configurations with prompts and tools. Available packs: productivity \
+                      (calendar/email), developer (GitHub), research (web tools), files (filesystem)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+fn skill_recommend() -> ToolDefinition {
+    ToolDefinition {
+        name: "skill_recommend".into(),
+        description: "Recommend a skill pack to the user based on what they need. Looks up the \
+                      pack details (what it provides, required setup, install command) and returns \
+                      a recommendation the user can act on. Use this when the user asks for \
+                      capabilities you don't currently have (e.g., calendar, email, GitHub)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "pack_name": {
+                    "type": "string",
+                    "description": "The skill pack name to recommend (e.g., \"productivity\", \"developer\", \"research\", \"files\")."
+                }
+            },
+            "required": ["pack_name"]
+        }),
+        category: ToolCategory::Agent,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2362,5 +2496,77 @@ mod tests {
         let tools = all_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"wasm_invoke"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-configuration tool definition tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_self_config_tools_registered() {
+        let caps = vec![Capability::SelfConfig];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"heartbeat_add"), "missing heartbeat_add");
+        assert!(names.contains(&"heartbeat_list"), "missing heartbeat_list");
+        assert!(
+            names.contains(&"heartbeat_remove"),
+            "missing heartbeat_remove"
+        );
+        assert!(names.contains(&"creed_view"), "missing creed_view");
+        assert!(names.contains(&"skill_list"), "missing skill_list");
+        assert!(
+            names.contains(&"skill_recommend"),
+            "missing skill_recommend"
+        );
+        assert_eq!(names.len(), 6);
+    }
+
+    #[test]
+    fn test_self_config_tools_absent_without_capability() {
+        let caps = vec![Capability::Memory];
+        let tools = tools_for_capabilities(&caps);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(!names.contains(&"heartbeat_add"));
+        assert!(!names.contains(&"creed_view"));
+        assert!(!names.contains(&"skill_list"));
+    }
+
+    #[test]
+    fn test_heartbeat_add_definition() {
+        let t = heartbeat_add();
+        assert_eq!(t.name, "heartbeat_add");
+        assert_eq!(t.category, ToolCategory::Agent);
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "task"));
+        assert!(required.iter().any(|v| v == "cadence"));
+    }
+
+    #[test]
+    fn test_heartbeat_remove_definition() {
+        let t = heartbeat_remove();
+        assert_eq!(t.name, "heartbeat_remove");
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "index"));
+    }
+
+    #[test]
+    fn test_skill_recommend_definition() {
+        let t = skill_recommend();
+        assert_eq!(t.name, "skill_recommend");
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "pack_name"));
+    }
+
+    #[test]
+    fn test_all_tools_includes_self_config() {
+        let tools = all_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"heartbeat_add"));
+        assert!(names.contains(&"heartbeat_list"));
+        assert!(names.contains(&"heartbeat_remove"));
+        assert!(names.contains(&"creed_view"));
+        assert!(names.contains(&"skill_list"));
+        assert!(names.contains(&"skill_recommend"));
     }
 }
