@@ -67,6 +67,20 @@ Good for: verifying the bot responds, testing message flow, demos.
 
 If you don't have `cloudflared` installed, the wizard tells you how. You can also use `npx cloudflared tunnel --url http://127.0.0.1:6660` and paste the URL.
 
+**Installing cloudflared:**
+
+```bash
+# macOS
+brew install cloudflare/cloudflare/cloudflared
+
+# Linux (Debian/Ubuntu)
+curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+
+# Other platforms
+# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+```
+
 ### Option 2: Persistent Access (Named Tunnel)
 
 A stable URL that survives restarts. Requires a free Cloudflare account and a domain on Cloudflare. This is how you message your fighter from your phone while your machine is at home.
@@ -183,6 +197,9 @@ punch channel setup telegram
 1. Guides you through @BotFather bot creation
 2. Collects your bot token
 3. Asks for your Telegram user ID (for allowlisting)
+
+**Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram — it replies with your numeric ID (e.g., `8514018060`). Use this number, NOT your @username.
+
 4. Generates a webhook secret
 5. Registers the webhook via the Telegram Bot API
 
@@ -281,6 +298,63 @@ webhook_secret_env = "DISCORD_WEBHOOK_SECRET"
 allowed_user_ids = []
 rate_limit_per_user = 20
 ```
+
+### WhatsApp
+
+WhatsApp requires a Meta Business account and the WhatsApp Cloud API.
+
+```bash
+punch channel setup whatsapp
+```
+
+**What you need:**
+
+- A Meta Business account
+- A WhatsApp Business phone number
+- Access to the Meta Developer Portal
+
+**Setup steps:**
+
+1. Create an app at developers.facebook.com
+2. Add the WhatsApp product
+3. Get a test phone number (or verify your own)
+4. Copy the access token and phone number ID
+5. The wizard registers the webhook automatically
+
+**Config:**
+
+```toml
+[channels.whatsapp]
+channel_type = "whatsapp"
+token_env = "WHATSAPP_ACCESS_TOKEN"
+webhook_secret_env = "WHATSAPP_VERIFY_TOKEN"
+allowed_user_ids = []
+rate_limit_per_user = 20
+```
+
+**Free tier:** 1,000 service conversations per month.
+
+### SMS (Twilio)
+
+SMS via Twilio — your fighter responds to text messages.
+
+**What you need:**
+
+- A Twilio account (free trial available)
+- A Twilio phone number (~$1/month)
+
+**Config:**
+
+```toml
+[channels.sms]
+channel_type = "sms"
+token_env = "TWILIO_AUTH_TOKEN"
+webhook_secret_env = "TWILIO_ACCOUNT_SID"
+allowed_user_ids = []
+rate_limit_per_user = 20
+```
+
+**Note:** iMessage is not supported — Apple does not offer a public bot API.
 
 ## Configuration Reference
 
@@ -437,6 +511,20 @@ Just run the wizard again. It reuses your existing tunnel automatically:
 ```bash
 punch channel setup slack    # sees [tunnel] in config, skips tunnel setup
 ```
+
+### Model ignores tools / says "I can't"
+
+Use `gpt-4.1-mini` or better. Nano and lite models don't reliably invoke tools. Edit `[default_model]` in `~/.punch/config.toml`.
+
+### Port 6660 already in use
+
+Kill the existing process:
+
+```bash
+kill $(lsof -t -i :6660)
+```
+
+Then restart with `punch start`.
 
 ### Platform-specific bot token errors
 

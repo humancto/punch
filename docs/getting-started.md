@@ -101,6 +101,8 @@ api_key_env = "GROQ_API_KEY"
 
 > **Tip:** Store API keys in `~/.punch/.env` — the daemon loads them automatically on startup. Example: `echo 'GOOGLE_API_KEY=your-key' >> ~/.punch/.env`
 
+> **Model tip:** For reliable tool use (calendar, email, file access), use `gpt-4.1-mini` or better. Smaller models like `gpt-4.1-nano` or `gemini-2.0-flash-lite` may ignore tools entirely.
+
 ## Step 3: Start the Daemon
 
 ```bash
@@ -319,3 +321,38 @@ See [architecture.md](architecture.md) for the internal architecture deep-dive.
 ## Security
 
 See [security.md](security.md) for the 18-layer security model.
+
+## Troubleshooting
+
+**Port 6660 already in use**
+Kill the existing process and restart:
+
+```bash
+kill $(lsof -t -i :6660)
+punch start
+```
+
+**Bot not responding on Telegram**
+
+1. Check the daemon is running: `punch status`
+2. Check cloudflared tunnel is running: `punch channel tunnel`
+3. Verify the webhook URL matches your tunnel URL: `punch channel status telegram`
+
+**Bot says "I can't" instead of using tools**
+Switch to a larger model. Nano/lite models (`gpt-4.1-nano`, `gemini-2.0-flash-lite`) don't reliably call tools. Use `gpt-4.1-mini`, `claude-haiku`, or `gpt-4.1` instead.
+
+**Telegram allowlist 403**
+Use your numeric user ID, not your `@username`. Send `/start` to [@userinfobot](https://t.me/userinfobot) on Telegram to get your numeric ID.
+
+**cloudflared not installed**
+
+```bash
+# macOS
+brew install cloudflare/cloudflare/cloudflared
+
+# Linux
+curl -L https://pkg.cloudflare.com/cloudflared-stable-linux-amd64.deb -o cloudflared.deb && sudo dpkg -i cloudflared.deb
+```
+
+**Quick tunnel URL changed**
+Re-run `punch channel setup telegram` to re-register the webhook. For a permanent URL, use a named tunnel (`punch channel tunnel --mode named`).
