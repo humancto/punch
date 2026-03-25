@@ -256,6 +256,19 @@ fn require_capability(capabilities: &[Capability], required: &Capability) -> Pun
     }
 }
 
+/// Extract the application name from a UI element ID (format: "AppName:index").
+fn extract_app_from_element_id(element_id: &str, tool: &str) -> PunchResult<String> {
+    element_id
+        .split(':')
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| PunchError::Tool {
+            tool: tool.into(),
+            message: format!("invalid element_id format: {element_id}"),
+        })
+}
+
 /// Resolve a path relative to the working directory.
 fn resolve_path(working_dir: &Path, requested: &str) -> PunchResult<PathBuf> {
     let path = if Path::new(requested).is_absolute() {
@@ -4115,7 +4128,6 @@ async fn tool_ui_click(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
     let backend = get_automation_backend(context)?;
 
     let element_id = input["element_id"]
@@ -4124,6 +4136,9 @@ async fn tool_ui_click(
             tool: "ui_click".into(),
             message: "missing 'element_id' parameter".into(),
         })?;
+
+    let app = extract_app_from_element_id(element_id, "ui_click")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
 
     backend.click_element(element_id).await?;
     Ok(ToolResult {
@@ -4139,7 +4154,6 @@ async fn tool_ui_type_text(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
     let backend = get_automation_backend(context)?;
 
     let element_id = input["element_id"]
@@ -4148,6 +4162,8 @@ async fn tool_ui_type_text(
             tool: "ui_type_text".into(),
             message: "missing 'element_id' parameter".into(),
         })?;
+    let app = extract_app_from_element_id(element_id, "ui_type_text")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
     let text = input["text"].as_str().ok_or_else(|| PunchError::Tool {
         tool: "ui_type_text".into(),
         message: "missing 'text' parameter".into(),
@@ -4167,7 +4183,6 @@ async fn tool_ui_read_attribute(
     capabilities: &[Capability],
     context: &ToolExecutionContext,
 ) -> PunchResult<ToolResult> {
-    require_capability(capabilities, &Capability::UiAutomation("*".to_string()))?;
     let backend = get_automation_backend(context)?;
 
     let element_id = input["element_id"]
@@ -4176,6 +4191,8 @@ async fn tool_ui_read_attribute(
             tool: "ui_read_attribute".into(),
             message: "missing 'element_id' parameter".into(),
         })?;
+    let app = extract_app_from_element_id(element_id, "ui_read_attribute")?;
+    require_capability(capabilities, &Capability::UiAutomation(app))?;
     let attribute = input["attribute"]
         .as_str()
         .ok_or_else(|| PunchError::Tool {
@@ -6404,8 +6421,14 @@ mod tests {
         let caps = vec![Capability::Memory]; // wrong capability
         let input = serde_json::json!({"app_name": "Safari"});
 
-        let result = execute_tool("sys_open_app", &input, &caps, &context).await;
-        assert!(result.is_err(), "should fail without SystemAutomation cap");
+        let result = execute_tool("sys_open_app", &input, &caps, &context)
+            .await
+            .unwrap();
+        assert!(
+            !result.success,
+            "should fail without SystemAutomation cap"
+        );
+        assert!(result.error.as_deref().unwrap_or("").contains("capability"));
     }
 
     #[tokio::test]
@@ -6660,8 +6683,14 @@ mod tests {
         assert!(result.success, "should succeed for MockApp");
 
         let input_other = serde_json::json!({"app_name": "OtherApp"});
-        let result_other = execute_tool("app_activate", &input_other, &caps, &context).await;
-        assert!(result_other.is_err(), "should fail for OtherApp");
+        let result_other = execute_tool("app_activate", &input_other, &caps, &context)
+            .await
+            .unwrap();
+        assert!(
+            !result_other.success,
+            "should fail for OtherApp"
+        );
+        assert!(result_other.error.as_deref().unwrap_or("").contains("capability"));
     }
 
     #[tokio::test]

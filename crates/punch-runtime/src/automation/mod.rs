@@ -105,6 +105,15 @@ pub fn create_backend() -> PunchResult<Box<dyn AutomationBackend>> {
 // macOS backend
 // ---------------------------------------------------------------------------
 
+/// Escape a string for safe interpolation into AppleScript double-quoted strings.
+///
+/// AppleScript uses backslash escapes inside `"..."`. We escape backslashes
+/// first, then double quotes, preventing injection of arbitrary AppleScript.
+#[cfg(target_os = "macos")]
+fn escape_applescript(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(target_os = "macos")]
 pub struct MacOsBackend;
 
@@ -164,7 +173,8 @@ impl AutomationBackend for MacOsBackend {
     }
 
     async fn open_app(&self, app_name: &str) -> PunchResult<()> {
-        let script = format!(r#"tell application "{app_name}" to activate"#);
+        let safe = escape_applescript(app_name);
+        let script = format!(r#"tell application "{safe}" to activate"#);
         self.osascript(&script).await?;
         Ok(())
     }
@@ -210,7 +220,11 @@ impl AutomationBackend for MacOsBackend {
     }
 
     async fn send_notification(&self, title: &str, body: &str) -> PunchResult<()> {
-        let script = format!(r#"display notification "{body}" with title "{title}""#,);
+        let safe_title = escape_applescript(title);
+        let safe_body = escape_applescript(body);
+        let script = format!(
+            r#"display notification "{safe_body}" with title "{safe_title}""#,
+        );
         self.osascript(&script).await?;
         Ok(())
     }
@@ -240,8 +254,10 @@ impl AutomationBackend for MacOsBackend {
         selector: &UiSelector,
     ) -> PunchResult<Vec<UiElement>> {
         let role_filter = selector.role.as_deref().unwrap_or("UI element");
+        let safe_app = escape_applescript(app);
+        let safe_role = escape_applescript(role_filter);
         let script = format!(
-            r#"tell application "System Events" to tell process "{app}" to get {{role, name, value, enabled}} of every {role_filter} of window 1"#,
+            r#"tell application "System Events" to tell process "{safe_app}" to get {{role, name, value, enabled}} of every {safe_role} of window 1"#,
         );
         let raw = self.osascript(&script).await?;
         let mut elements = Vec::new();
@@ -275,9 +291,9 @@ impl AutomationBackend for MacOsBackend {
                 message: format!("invalid element_id: {element_id}"),
             });
         }
+        let safe_app = escape_applescript(parts[0]);
         let script = format!(
-            r#"tell application "System Events" to tell process "{}" to click UI element {} of window 1"#,
-            parts[0],
+            r#"tell application "System Events" to tell process "{safe_app}" to click UI element {} of window 1"#,
             parts[1].parse::<usize>().unwrap_or(1) + 1,
         );
         self.osascript(&script).await?;
@@ -292,9 +308,10 @@ impl AutomationBackend for MacOsBackend {
                 message: format!("invalid element_id: {element_id}"),
             });
         }
+        let safe_app = escape_applescript(parts[0]);
+        let safe_text = escape_applescript(text);
         let script = format!(
-            r#"tell application "System Events" to tell process "{}" to set value of UI element {} of window 1 to "{text}""#,
-            parts[0],
+            r#"tell application "System Events" to tell process "{safe_app}" to set value of UI element {} of window 1 to "{safe_text}""#,
             parts[1].parse::<usize>().unwrap_or(1) + 1,
         );
         self.osascript(&script).await?;
@@ -313,9 +330,10 @@ impl AutomationBackend for MacOsBackend {
                 message: format!("invalid element_id: {element_id}"),
             });
         }
+        let safe_app = escape_applescript(parts[0]);
+        let safe_attr = escape_applescript(attribute);
         let script = format!(
-            r#"tell application "System Events" to tell process "{}" to get {attribute} of UI element {} of window 1"#,
-            parts[0],
+            r#"tell application "System Events" to tell process "{safe_app}" to get {safe_attr} of UI element {} of window 1"#,
             parts[1].parse::<usize>().unwrap_or(1) + 1,
         );
         self.osascript(&script).await
@@ -332,28 +350,32 @@ impl AutomationBackend for MacOsBackend {
                 message: "menu_path cannot be empty".into(),
             });
         }
+        let safe_app = escape_applescript(app);
         let mut click_chain = String::new();
+        let safe_first = escape_applescript(&menu_path[0]);
         for (i, item) in menu_path.iter().enumerate() {
+            let safe_item = escape_applescript(item);
             if i == 0 {
-                click_chain.push_str(&format!(r#"click menu bar item "{item}" of menu bar 1"#));
+                click_chain
+                    .push_str(&format!(r#"click menu bar item "{safe_item}" of menu bar 1"#));
             } else {
                 click_chain.push_str(&format!(
                     r#"
-click menu item "{item}" of menu 1 of menu bar item "{}" of menu bar 1"#,
-                    menu_path[0]
+click menu item "{safe_item}" of menu 1 of menu bar item "{safe_first}" of menu bar 1"#,
                 ));
             }
         }
         let script = format!(
-            r#"tell application "System Events" to tell process "{app}" to {click_chain}"#,
+            r#"tell application "System Events" to tell process "{safe_app}" to {click_chain}"#,
         );
         self.osascript(&script).await?;
         Ok(())
     }
 
     async fn app_get_state(&self, app: &str) -> PunchResult<serde_json::Value> {
+        let safe_app = escape_applescript(app);
         let script = format!(
-            r#"tell application "System Events" to get {{name, frontmost}} of application process "{app}""#,
+            r#"tell application "System Events" to get {{name, frontmost}} of application process "{safe_app}""#,
         );
         let raw = self.osascript(&script).await?;
         Ok(serde_json::json!({
@@ -431,10 +453,15 @@ impl AutomationBackend for LinuxBackend {
     }
 
     async fn open_app(&self, app_name: &str) -> PunchResult<()> {
-        // Try xdg-open first, fall back to direct launch
-        if self.run_cmd("xdg-open", &[app_name]).await.is_err() {
-            // Fallback: ignore error (app may not exist or xdg-open not available)
-        }
+        self.run_cmd("xdg-open", &[app_name]).await.map_err(|_| {
+            punch_types::PunchError::Tool {
+                tool: "automation".into(),
+                message: format!(
+                    "failed to open application '{}': xdg-open not available or app not found",
+                    app_name
+                ),
+            }
+        })?;
         Ok(())
     }
 

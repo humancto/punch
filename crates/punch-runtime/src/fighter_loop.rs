@@ -23,8 +23,9 @@ use tracing::{debug, error, info, instrument, warn};
 use dashmap::DashMap;
 use punch_memory::{BoutId, MemorySubstrate};
 use punch_types::{
-    AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine, PunchError, PunchResult,
-    Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult, ToolDefinition,
+    capability::Capability, AgentCoordinator, FighterId, FighterManifest, Message, PolicyEngine,
+    PunchError, PunchResult, Role, SandboxEnforcer, ShellBleedDetector, ToolCallResult,
+    ToolDefinition,
 };
 
 use crate::mcp::McpClient;
@@ -158,7 +159,20 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         browser_pool: None,
         plugin_registry: None,
         mcp_clients: params.mcp_clients.clone(),
-        automation_backend: None,
+        automation_backend: if params.manifest.capabilities.iter().any(|c| {
+            matches!(
+                c,
+                Capability::SystemAutomation
+                    | Capability::UiAutomation(_)
+                    | Capability::AppIntegration(_)
+            )
+        }) {
+            crate::automation::create_backend()
+                .ok()
+                .map(Arc::from)
+        } else {
+            None
+        },
     };
 
     // 4. Main loop.
