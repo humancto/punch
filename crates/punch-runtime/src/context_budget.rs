@@ -31,6 +31,16 @@ const SINGLE_RESULT_MAX_FRACTION: f64 = 0.50;
 /// Total fraction of window available for all tool results combined.
 const TOTAL_TOOL_HEADROOM_FRACTION: f64 = 0.75;
 
+/// Minimum messages before sliding window summarization is considered.
+const SUMMARIZE_THRESHOLD: usize = 12;
+
+/// Number of recent messages to preserve (not summarized).
+const SUMMARIZE_KEEP_RECENT: usize = 6;
+
+/// Maximum characters to feed into the summarization prompt (from old messages).
+/// Keeps the summarization LLM call cheap.
+const SUMMARIZE_INPUT_MAX_CHARS: usize = 8_000;
+
 /// Context budget configuration and enforcement.
 #[derive(Debug, Clone)]
 pub struct ContextBudget {
@@ -295,6 +305,120 @@ pub enum TrimAction {
     Moderate,
     /// Keep last 4 messages + insert summary marker (>90% usage).
     Aggressive,
+}
+
+/// Check whether messages are eligible for sliding window summarization.
+///
+/// Returns `true` if there are enough messages to warrant summarization
+/// (i.e., more than the threshold and not already summarized).
+pub fn needs_summarization(messages: &[Message]) -> bool {
+    if messages.len() < SUMMARIZE_THRESHOLD {
+        return false;
+    }
+    // Don't re-summarize if we already have a summary marker.
+    !messages
+        .iter()
+        .any(|m| m.role == Role::System && m.content.starts_with("[Earlier in this conversation"))
+}
+
+/// Build a compact text representation of old messages for the summarization prompt.
+///
+/// Takes the messages that will be summarized (everything except the first
+/// and the last `SUMMARIZE_KEEP_RECENT` messages). Truncates to `SUMMARIZE_INPUT_MAX_CHARS`.
+pub fn build_summarization_input(messages: &[Message]) -> (String, usize) {
+    let keep_recent = SUMMARIZE_KEEP_RECENT.min(messages.len().saturating_sub(1));
+    let end = messages.len().saturating_sub(keep_recent);
+
+    // Skip first message (initial user prompt, preserved separately).
+    let old_messages = &messages[1..end];
+    let old_count = old_messages.len();
+
+    let mut text = String::with_capacity(SUMMARIZE_INPUT_MAX_CHARS);
+    for msg in old_messages {
+        let role_label = match msg.role {
+            Role::User => "User",
+            Role::Assistant => "Assistant",
+            Role::System => "System",
+            Role::Tool => "Tool",
+        };
+
+        // Append message content compactly.
+        let content = if msg.content.len() > 500 {
+            let boundary = msg.content.floor_char_boundary(500);
+            format!("{}...", &msg.content[..boundary])
+        } else {
+            msg.content.clone()
+        };
+
+        text.push_str(role_label);
+        text.push_str(": ");
+        text.push_str(&content);
+        text.push('\n');
+
+        // Include tool call names (but not full args).
+        for tc in &msg.tool_calls {
+            text.push_str("  [called: ");
+            text.push_str(&tc.name);
+            text.push_str("]\n");
+        }
+
+        // Include short tool results.
+        for tr in &msg.tool_results {
+            let snippet = if tr.content.len() > 200 {
+                let boundary = tr.content.floor_char_boundary(200);
+                format!("{}...", &tr.content[..boundary])
+            } else {
+                tr.content.clone()
+            };
+            text.push_str("  [result: ");
+            text.push_str(&snippet);
+            text.push_str("]\n");
+        }
+
+        if text.len() >= SUMMARIZE_INPUT_MAX_CHARS {
+            text.truncate(text.floor_char_boundary(SUMMARIZE_INPUT_MAX_CHARS));
+            break;
+        }
+    }
+
+    (text, old_count)
+}
+
+/// Apply a summary to the message history: replace old messages with the summary.
+///
+/// Preserves: first message + summary marker + last `SUMMARIZE_KEEP_RECENT` messages.
+pub fn apply_summary(messages: &mut Vec<Message>, summary: &str) {
+    let keep_recent = SUMMARIZE_KEEP_RECENT.min(messages.len().saturating_sub(1));
+    let original_len = messages.len();
+
+    let first = messages[0].clone();
+    let tail: Vec<Message> = messages
+        .iter()
+        .rev()
+        .take(keep_recent)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    messages.clear();
+    messages.push(first);
+    messages.push(Message::new(
+        Role::System,
+        format!(
+            "[Earlier in this conversation ({} messages summarized):\n{}]",
+            original_len - 1 - tail.len(),
+            summary
+        ),
+    ));
+    messages.extend(tail);
+
+    info!(
+        original = original_len,
+        summarized_to = messages.len(),
+        "sliding window summarization applied"
+    );
 }
 
 /// Find a valid UTF-8 char boundary at or before `pos`.
@@ -683,5 +807,104 @@ mod tests {
         assert_eq!(TrimAction::Moderate, TrimAction::Moderate);
         assert_eq!(TrimAction::Aggressive, TrimAction::Aggressive);
         assert_ne!(TrimAction::Moderate, TrimAction::Aggressive);
+    }
+
+    // -----------------------------------------------------------------------
+    // Sliding window summarization tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_needs_summarization_below_threshold() {
+        let msgs: Vec<Message> = (0..10)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+        assert!(!needs_summarization(&msgs));
+    }
+
+    #[test]
+    fn test_needs_summarization_above_threshold() {
+        let msgs: Vec<Message> = (0..15)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+        assert!(needs_summarization(&msgs));
+    }
+
+    #[test]
+    fn test_needs_summarization_skips_if_already_summarized() {
+        let mut msgs: Vec<Message> = (0..15)
+            .map(|i| make_message(Role::User, &format!("msg {}", i)))
+            .collect();
+        // Insert a summary marker.
+        msgs.insert(
+            1,
+            make_message(Role::System, "[Earlier in this conversation: some summary]"),
+        );
+        assert!(!needs_summarization(&msgs));
+    }
+
+    #[test]
+    fn test_build_summarization_input_basic() {
+        let mut msgs: Vec<Message> = Vec::new();
+        msgs.push(make_message(Role::User, "initial question"));
+        for i in 1..=10 {
+            msgs.push(make_message(Role::Assistant, &format!("response {}", i)));
+            msgs.push(make_message(Role::User, &format!("follow-up {}", i)));
+        }
+        // 21 messages total: first + 10 pairs
+
+        let (text, old_count) = build_summarization_input(&msgs);
+        // Should have summarized messages between first and last 6.
+        assert!(old_count > 0);
+        assert!(text.contains("response"));
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_build_summarization_input_truncates_long_content() {
+        let mut msgs: Vec<Message> = Vec::new();
+        msgs.push(make_message(Role::User, "start"));
+        for _ in 0..15 {
+            msgs.push(make_message(Role::Assistant, &"x".repeat(1000)));
+        }
+        msgs.push(make_message(Role::User, "end"));
+
+        let (text, _) = build_summarization_input(&msgs);
+        // Each message content is 1000 chars but truncated to 500, so text should be manageable.
+        assert!(text.len() <= 12_000); // generous upper bound
+    }
+
+    #[test]
+    fn test_apply_summary_preserves_structure() {
+        let mut msgs: Vec<Message> = (0..15)
+            .map(|i| {
+                if i % 2 == 0 {
+                    make_message(Role::User, &format!("user msg {}", i))
+                } else {
+                    make_message(Role::Assistant, &format!("assistant msg {}", i))
+                }
+            })
+            .collect();
+
+        apply_summary(&mut msgs, "- Key point 1\n- Key point 2");
+
+        // Should have: first msg + summary marker + last 6 = 8
+        assert_eq!(msgs.len(), 8);
+        assert!(msgs[0].content.contains("user msg 0")); // first preserved
+        assert_eq!(msgs[1].role, Role::System);
+        assert!(msgs[1].content.contains("Key point 1"));
+        assert!(msgs[1].content.contains("Earlier in this conversation"));
+        assert!(msgs.last().unwrap().content.contains("msg 14")); // last preserved
+    }
+
+    #[test]
+    fn test_apply_summary_small_history_no_panic() {
+        let mut msgs = vec![
+            make_message(Role::User, "hello"),
+            make_message(Role::Assistant, "hi"),
+        ];
+        // Should not panic even with very small history.
+        apply_summary(&mut msgs, "summary");
+        // With only 2 messages, keep_recent=min(6,1)=1, so: first + summary + last 1 = 3
+        assert!(msgs.len() <= 4);
     }
 }
