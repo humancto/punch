@@ -224,24 +224,71 @@ Keyword-based classifier (no LLM call overhead): "check my calendar" hits cheap,
 
 ---
 
+## Token Efficiency
+
+Input tokens slashed 60-90% through four techniques working together:
+
+- **Prompt caching** — repeated system prompt fragments served from cache instead of re-tokenized
+- **Dynamic tool selection** — only tools relevant to the current message are injected (not all 103)
+- **Compact creeds** — creed rendering strips verbose fields, keeps only what the LLM needs
+- **Adaptive max_tokens** — simple questions get small output budgets, complex ones get full allocation
+
+Long conversations are compressed via sliding window summarization — older turns are condensed into a summary block so context stays within budget. Post-bout reflection is skipped for simple exchanges (one-shot Q&A doesn't need a debrief).
+
+A "hello" went from ~8,000 to <2,000 input tokens.
+
+---
+
+## Cost Controls
+
+Track and cap spend across fighters and models.
+
+```bash
+punch stats                            # Per-fighter, per-model daily/monthly spend
+```
+
+```toml
+[budget]
+daily_cost_limit_usd = 5.0
+monthly_cost_limit_usd = 50.0
+eco_mode_threshold_percent = 80
+```
+
+When spend crosses the `eco_mode_threshold_percent`, **eco mode** kicks in: forces cheap tier routing, caps `max_tokens` to minimum, and skips post-bout reflection. Hard limits pause all LLM calls until the next period resets.
+
+---
+
+## Desktop Automation
+
+Fighters can see and interact with your desktop through screenshot-based vision analysis and UI control tools.
+
+- **Screenshot + vision** — `sys_screenshot` captures the screen, LLM analyzes the image to understand what's on display
+- **8 desktop tools** — `sys_screenshot`, `ui_click`, `ui_type_text`, `ui_press_key`, `ui_scroll`, `ui_move_mouse`, `ui_drag`, `ui_read_screen`
+- **Permissions required** — macOS Accessibility and Screen Recording must be granted to the Punch process
+
+---
+
 ## Feature Comparison
 
-| Feature                 | **Punch**                        | **CrewAI** | **AutoGen** |
-| ----------------------- | -------------------------------- | ---------- | ----------- |
-| **Language**            | Rust (single binary)             | Python     | Python      |
-| **Autonomous agents**   | Gorillas (cron + human schedule) | —          | —           |
-| **Agent consciousness** | Creeds (DB-backed, evolving)     | —          | —           |
-| **Agent coordination**  | Troops (6 strategies)            | Crews      | Groups      |
-| **Built-in memory**     | SQLite + confidence decay        | —          | —           |
-| **HTTP API**            | Arena (25+ endpoint groups)      | —          | —           |
-| **Proactive agents**    | Heartbeats + channel_notify      | —          | —           |
-| **Model routing**       | Auto cheap/mid/expensive tiers   | —          | —           |
-| **Skills marketplace**  | Git-index + signed + scanned     | —          | —           |
-| **Channel adapters**    | 26                               | 0          | 0           |
-| **LLM providers**       | 15                               | 5          | 4           |
-| **Plugin system**       | WASM sandbox (fuel-metered)      | Python     | Python      |
-| **Startup**             | <50ms                            | ~3s        | ~5s         |
-| **Memory footprint**    | ~15MB                            | ~200MB     | ~300MB      |
+| Feature                 | **Punch**                              | **CrewAI** | **AutoGen** |
+| ----------------------- | -------------------------------------- | ---------- | ----------- |
+| **Language**            | Rust (single binary)                   | Python     | Python      |
+| **Autonomous agents**   | Gorillas (cron + human schedule)       | —          | —           |
+| **Agent consciousness** | Creeds (DB-backed, evolving)           | —          | —           |
+| **Agent coordination**  | Troops (6 strategies)                  | Crews      | Groups      |
+| **Built-in memory**     | SQLite + confidence decay              | —          | —           |
+| **HTTP API**            | Arena (25+ endpoint groups)            | —          | —           |
+| **Proactive agents**    | Heartbeats + channel_notify            | —          | —           |
+| **Model routing**       | Auto cheap/mid/expensive tiers         | —          | —           |
+| **Skills marketplace**  | Git-index + signed + scanned           | —          | —           |
+| **Channel adapters**    | 26                                     | 0          | 0           |
+| **LLM providers**       | 15                                     | 5          | 4           |
+| **Token efficiency**    | Prompt caching + dynamic tools         | —          | —           |
+| **Budget controls**     | Per-fighter + global limits + eco mode | —          | —           |
+| **Desktop automation**  | Screenshot + vision + UI control       | —          | —           |
+| **Plugin system**       | WASM sandbox (fuel-metered)            | Python     | Python      |
+| **Startup**             | <50ms                                  | ~3s        | ~5s         |
+| **Memory footprint**    | ~15MB                                  | ~200MB     | ~300MB      |
 
 ---
 

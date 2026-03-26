@@ -2160,7 +2160,7 @@ dependencies = [
 
 [[package]]
 name = "punch-arena"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "punch-channels"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "punch-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "punch-desktop"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2255,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "punch-extensions"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2278,7 +2278,7 @@ dependencies = [
 
 [[package]]
 name = "punch-gorillas"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "punch-kernel"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2320,7 +2320,7 @@ dependencies = [
 
 [[package]]
 name = "punch-memory"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "flate2",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "punch-runtime"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "punch-skills"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "punch-types"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "punch-wire"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -4655,7 +4655,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "clap",
 ]

@@ -166,6 +166,65 @@ Fighters with `Capability::SelfConfig` can manage their own configuration throug
 
 `ModelRouter::classify()` in `punch-runtime` uses keyword heuristics to route prompts to cheap/mid/expensive model tiers. Configured via `[routing]` in config. Transparent to the agent — no tool or capability needed.
 
+## Token Efficiency
+
+The runtime minimizes token waste through several layers:
+
+| Layer                        | Savings                     | How                                                               |
+| ---------------------------- | --------------------------- | ----------------------------------------------------------------- |
+| Anthropic prompt caching     | 90% on system prompt        | `cache_control: ephemeral` on system + tool blocks                |
+| Dynamic tool selection       | 50-75% of tool tokens       | `ToolSelector` loads only relevant tool groups per turn           |
+| Compact creed                | 40-60% of creed tokens      | `Creed::render_compact()` for cheap/mid tiers                     |
+| Adaptive max_tokens          | Variable output savings     | Cheap: 1024, Mid: 2048, Expensive: 4096, Ollama: 16384            |
+| Conditional reflection       | ~80% fewer reflection calls | Skipped for <6 messages and no tool use                           |
+| Sliding window summarization | 20-40% on long bouts        | After 10+ messages, early messages compressed to ~200 token recap |
+
+### Key files
+
+- `punch-runtime/src/tool_selector.rs` — 17 tool groups with keyword activation
+- `punch-runtime/src/context_budget.rs` — Token estimation and message trimming
+- `punch-runtime/src/fighter_loop.rs` — Eco mode, adaptive max_tokens, conditional reflection
+- `punch-types/src/creed.rs` — `render_compact()` method
+
+## Budget Enforcement
+
+Optional cost controls via `[budget]` in config. The `BudgetEnforcer` checks spending before each LLM call.
+
+### Config
+
+```toml
+[budget]
+daily_cost_limit_usd = 5.0
+monthly_cost_limit_usd = 50.0
+eco_mode_threshold_percent = 80
+```
+
+### Eco Mode
+
+When spending reaches the threshold percentage of any limit, fighters enter eco mode:
+
+- Forces cheap model tier (if routing configured) or caps max_tokens to 1024
+- Skips post-bout reflection
+- Uses compact creed rendering
+- At 100%, the fighter is blocked entirely (`BudgetVerdict::Blocked`)
+
+### Key types
+
+- `punch-types::config::BudgetConfig` — Config struct with daily/monthly limits
+- `punch-kernel::budget::BudgetEnforcer` — Per-fighter and global limit checking
+- `punch-kernel::budget::BudgetVerdict` — Allowed / Warning / Blocked
+- `punch-kernel::metering::MeteringEngine` — Cost recording per model with pricing table
+
+### API endpoints
+
+| Endpoint                    | Method  | What                            |
+| --------------------------- | ------- | ------------------------------- |
+| `/api/budget`               | GET     | Global budget status            |
+| `/api/budget/global`        | PUT     | Set global limits               |
+| `/api/budget/fighters/{id}` | GET/PUT | Per-fighter budget              |
+| `/api/stats`                | GET     | Token usage stats (global)      |
+| `/api/stats/fighters/{id}`  | GET     | Token usage stats (per-fighter) |
+
 ## Troop Coordination
 
 Troops provide multi-agent task coordination with 6 strategies, all with real result collection:
@@ -229,14 +288,15 @@ Channels connect fighters to external messaging platforms (Telegram, Slack, Disc
 
 ### CLI commands
 
-| Command                           | What it does                         |
-| --------------------------------- | ------------------------------------ |
-| `punch channel setup <platform>`  | Interactive setup wizard             |
-| `punch channel list`              | Show configured channels             |
-| `punch channel tunnel`            | Show/update/remove shared tunnel URL |
-| `punch channel remove <platform>` | Remove channel config + secrets      |
-| `punch channel test <platform>`   | Send test payload to webhook         |
-| `punch channel status <name>`     | Query daemon for live channel status |
+| Command                           | What it does                                     |
+| --------------------------------- | ------------------------------------------------ |
+| `punch channel setup <platform>`  | Interactive setup wizard                         |
+| `punch channel list`              | Show configured channels                         |
+| `punch channel tunnel`            | Show/update/remove shared tunnel URL             |
+| `punch channel remove <platform>` | Remove channel config + secrets                  |
+| `punch channel test <platform>`   | Send test payload to webhook                     |
+| `punch channel status <name>`     | Query daemon for live channel status             |
+| `punch stats`                     | Show per-fighter, per-model token usage and cost |
 
 ### Documentation
 
