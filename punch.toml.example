@@ -40,6 +40,32 @@ api_key_env = "ANTHROPIC_API_KEY"
 # api_key_env = "OPENAI_API_KEY"
 
 # ---------------------------------------------------------------------------
+# Smart model routing (optional)
+# ---------------------------------------------------------------------------
+# Route messages to different models based on complexity. Each tier can use
+# a different provider. When disabled, all messages go to [default_model].
+# Tiers: cheap (greetings, quick lookups), mid (tool calling, standard tasks),
+# expensive (complex reasoning, vision, analysis).
+
+# [model_routing]
+# enabled = true
+#
+# [model_routing.cheap]
+# provider = "google"
+# model = "gemini-2.0-flash-lite"
+# api_key_env = "GOOGLE_API_KEY"
+#
+# [model_routing.mid]
+# provider = "google"
+# model = "gemini-2.5-flash"
+# api_key_env = "GOOGLE_API_KEY"
+#
+# [model_routing.expensive]
+# provider = "google"
+# model = "gemini-2.5-pro"
+# api_key_env = "GOOGLE_API_KEY"
+
+# ---------------------------------------------------------------------------
 # Memory substrate
 # ---------------------------------------------------------------------------
 
