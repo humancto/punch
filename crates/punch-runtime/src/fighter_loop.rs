@@ -259,9 +259,17 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         None
     };
 
+    // Pre-build static tool list (avoids cloning per loop iteration for static path).
+    let static_tools: Option<Vec<ToolDefinition>> = if !use_dynamic_tools {
+        Some(params.available_tools)
+    } else {
+        None
+    };
+
+    let static_tool_count = static_tools.as_ref().map_or(0, |t| t.len());
     info!(
         dynamic_tools = use_dynamic_tools,
-        static_tool_count = params.available_tools.len(),
+        static_tool_count,
         mcp_tool_count = params.mcp_tools.len(),
         fighter = %params.manifest.name,
         model = %params.manifest.model.model,
@@ -277,7 +285,11 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             selected.extend(params.mcp_tools.iter().cloned());
             selected
         } else {
-            params.available_tools.clone()
+            // Static path: clone from pre-built list (CompletionRequest takes ownership).
+            static_tools
+                .as_ref()
+                .expect("static_tools set when not using dynamic selection")
+                .clone()
         };
 
         // --- Context Budget: check and trim before LLM call ---
