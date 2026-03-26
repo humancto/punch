@@ -180,6 +180,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
 
     // 2b. Model routing: check if we should use a tier-specific driver.
     let mut routed_tier: Option<String> = None;
+    let mut routed_provider: Option<punch_types::Provider> = None;
     let routed_driver: Option<Arc<dyn LlmDriver>> = params
         .model_routing
         .as_ref()
@@ -196,6 +197,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         "model router: using tier-specific driver"
                     );
                     routed_tier = Some(tier.to_string());
+                    routed_provider = Some(model_config.provider);
                     Some(driver)
                 }
                 Err(e) => {
@@ -334,7 +336,12 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 };
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.
-                match params.manifest.model.provider {
+                // Use the routed provider if routing selected a tier, otherwise fall
+                // back to the base manifest provider.
+                let active_provider = routed_provider
+                    .clone()
+                    .unwrap_or_else(|| params.manifest.model.provider.clone());
+                match active_provider {
                     punch_types::Provider::Ollama => DEFAULT_MAX_TOKENS_OLLAMA,
                     _ => tier_default,
                 }
