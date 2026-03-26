@@ -1391,6 +1391,7 @@ impl WorkflowEngine {
             memory: Arc::clone(memory),
             driver: Arc::clone(driver),
             available_tools,
+            mcp_tools: Vec::new(),
             max_iterations: Some(20),
             context_window: None,
             tool_timeout_secs: Some(timeout_secs),

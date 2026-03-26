@@ -60,7 +60,11 @@ pub struct FighterLoopParams {
     /// The LLM driver to use for completions.
     pub driver: Arc<dyn LlmDriver>,
     /// Tools available for this fighter to use.
+    /// When provided, bypasses dynamic tool selection (used by workflows, gorillas, tests).
+    /// When empty, the fighter loop uses `ToolSelector` for context-aware tool loading.
     pub available_tools: Vec<ToolDefinition>,
+    /// Pre-fetched MCP tools for this fighter (merged into tool list each turn).
+    pub mcp_tools: Vec<ToolDefinition>,
     /// Maximum loop iterations before forced termination (default: 50).
     pub max_iterations: Option<usize>,
     /// Context window size in tokens (default: 200K).
@@ -243,8 +247,30 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         }
     }
 
+    // --- Dynamic tool selection ---
+    // If available_tools is pre-populated (workflows, gorillas, tests), use it as-is.
+    // Otherwise, use ToolSelector for context-aware per-turn tool loading.
+    let use_dynamic_tools = params.available_tools.is_empty();
+    let mut tool_selector = if use_dynamic_tools {
+        Some(crate::tools::ToolSelector::new(
+            &params.manifest.capabilities,
+        ))
+    } else {
+        None
+    };
+
+    // Pre-build static tool list (avoids cloning per loop iteration for static path).
+    let static_tools: Option<Vec<ToolDefinition>> = if !use_dynamic_tools {
+        Some(params.available_tools)
+    } else {
+        None
+    };
+
+    let static_tool_count = static_tools.as_ref().map_or(0, |t| t.len());
     info!(
-        tool_count = params.available_tools.len(),
+        dynamic_tools = use_dynamic_tools,
+        static_tool_count,
+        mcp_tool_count = params.mcp_tools.len(),
         fighter = %params.manifest.name,
         model = %params.manifest.model.model,
         "fighter loop starting"
@@ -252,8 +278,22 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
 
     // 4. Main loop.
     loop {
+        // --- Dynamic tool selection: pick tools for this turn ---
+        let turn_tools = if let Some(ref mut selector) = tool_selector {
+            let (mut selected, _changed) = selector.select_tools(&messages);
+            // Merge MCP tools (already capability-filtered in ring.rs).
+            selected.extend(params.mcp_tools.iter().cloned());
+            selected
+        } else {
+            // Static path: clone from pre-built list (CompletionRequest takes ownership).
+            static_tools
+                .as_ref()
+                .expect("static_tools set when not using dynamic selection")
+                .clone()
+        };
+
         // --- Context Budget: check and trim before LLM call ---
-        if let Some(trim_action) = budget.check_trim_needed(&messages, &params.available_tools) {
+        if let Some(trim_action) = budget.check_trim_needed(&messages, &turn_tools) {
             budget.apply_trim(&mut messages, trim_action);
 
             // Re-run session repair after trimming (may create orphans).
@@ -270,7 +310,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         let request = CompletionRequest {
             model: params.manifest.model.model.clone(),
             messages: messages.clone(),
-            tools: params.available_tools.clone(),
+            tools: turn_tools,
             max_tokens: params.manifest.model.max_tokens.unwrap_or(
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.

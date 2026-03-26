@@ -2,8 +2,19 @@
 //!
 //! This module defines the tool schemas that get sent to the LLM so it knows
 //! what tools are available. The actual execution logic lives in `tool_executor`.
+//!
+//! ## Dynamic Tool Selection
+//!
+//! The [`ToolSelector`] provides context-aware tool loading. Instead of sending
+//! all 80+ tools on every LLM call, it loads a core set (~16 tools) and
+//! activates additional tool groups when conversation context mentions relevant
+//! keywords. Once a group is activated in a bout, it stays active (monotonic
+//! growth) to maximize prompt cache hits.
 
-use punch_types::{Capability, ToolCategory, ToolDefinition};
+use std::collections::BTreeSet;
+
+use punch_types::{Capability, Message, ToolCategory, ToolDefinition};
+use tracing::info;
 
 /// Return all built-in tool definitions that match the given capabilities.
 ///
@@ -240,6 +251,548 @@ pub fn all_tools() -> Vec<ToolDefinition> {
 fn push_unique(tools: &mut Vec<ToolDefinition>, tool: ToolDefinition) {
     if !tools.iter().any(|t| t.name == tool.name) {
         tools.push(tool);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic tool selection
+// ---------------------------------------------------------------------------
+
+/// Groups of contextual tools that activate when conversation context is relevant.
+///
+/// Each group maps to a set of related tools and a list of activation keywords.
+/// Groups are ordered deterministically (via BTreeSet) to keep the tool list
+/// stable across turns for prompt cache efficiency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ToolGroup {
+    SourceControl,
+    Container,
+    DataManipulation,
+    Schedule,
+    BrowserControl,
+    AgentCoordination,
+    Archive,
+    Template,
+    Crypto,
+    UiAutomation,
+    AppIntegration,
+    PluginInvoke,
+    A2ADelegate,
+    KnowledgeGraph,
+    CodeAnalysis,
+    ProcessManagement,
+    HttpAdvanced,
+}
+
+impl ToolGroup {
+    /// All tool groups.
+    const ALL: &[ToolGroup] = &[
+        ToolGroup::SourceControl,
+        ToolGroup::Container,
+        ToolGroup::DataManipulation,
+        ToolGroup::Schedule,
+        ToolGroup::BrowserControl,
+        ToolGroup::AgentCoordination,
+        ToolGroup::Archive,
+        ToolGroup::Template,
+        ToolGroup::Crypto,
+        ToolGroup::UiAutomation,
+        ToolGroup::AppIntegration,
+        ToolGroup::PluginInvoke,
+        ToolGroup::A2ADelegate,
+        ToolGroup::KnowledgeGraph,
+        ToolGroup::CodeAnalysis,
+        ToolGroup::ProcessManagement,
+        ToolGroup::HttpAdvanced,
+    ];
+
+    /// Keywords that trigger this tool group. Matched case-insensitively
+    /// against conversation messages.
+    fn keywords(&self) -> &'static [&'static str] {
+        match self {
+            ToolGroup::SourceControl => &[
+                "git ",
+                "git commit",
+                "git branch",
+                "git diff",
+                "git merge",
+                "git rebase",
+                "git push",
+                "git pull",
+                "git clone",
+                "git stash",
+                "git checkout",
+                "git log",
+                "commit changes",
+                "commit my",
+                "repo",
+                "repository",
+            ],
+            ToolGroup::Container => &[
+                "docker",
+                "container",
+                "dockerfile",
+                "docker image",
+                "compose",
+                "pod",
+                "kubernetes",
+                "k8s",
+                "helm",
+            ],
+            ToolGroup::DataManipulation => &[
+                "json",
+                "yaml",
+                "toml",
+                "regex",
+                "parse json",
+                "parse yaml",
+                "transform json",
+                "csv",
+                "xml",
+                "jq",
+            ],
+            ToolGroup::Schedule => &[
+                "schedule",
+                "cron",
+                "timer",
+                "periodic",
+                "interval",
+                "recurring",
+                "every hour",
+                "every day",
+            ],
+            ToolGroup::BrowserControl => &[
+                "browser",
+                "webpage",
+                "click button",
+                "click element",
+                "click link",
+                "navigate to",
+                "selenium",
+                "puppeteer",
+                "scrape",
+                "open website",
+                "web page",
+            ],
+            ToolGroup::AgentCoordination => &[
+                "spawn fighter",
+                "spawn agent",
+                "spawn worker",
+                "new fighter",
+                "troop",
+                "multi-agent",
+                "delegate to",
+                "coordinate agents",
+            ],
+            ToolGroup::Archive => &[
+                "archive",
+                "zip file",
+                "tar file",
+                "gzip",
+                "extract archive",
+                "compress file",
+                "unzip",
+                "decompress",
+            ],
+            ToolGroup::Template => &[
+                "template",
+                "render template",
+                "handlebars",
+                "mustache",
+                "jinja",
+            ],
+            ToolGroup::Crypto => &[
+                "sha256",
+                "sha512",
+                "crypto",
+                "md5",
+                "hmac",
+                "checksum",
+                "digest",
+                "encrypt",
+                "decrypt",
+                "hash file",
+                "hash password",
+            ],
+            ToolGroup::UiAutomation => &[
+                "ui automation",
+                "accessibility",
+                "ui element",
+                "click button",
+                "menu bar",
+                "window list",
+                "applescript",
+                "osascript",
+            ],
+            ToolGroup::AppIntegration => &[
+                "ocr",
+                "text recognition",
+                "screen read",
+                "extract text from image",
+            ],
+            ToolGroup::PluginInvoke => &["plugin", "wasm", "extension", "webassembly"],
+            ToolGroup::A2ADelegate => &["a2a", "remote agent", "delegate task", "external agent"],
+            ToolGroup::KnowledgeGraph => &[
+                "knowledge graph",
+                "add entity",
+                "add relation",
+                "knowledge base",
+                "ontology",
+                "triple store",
+            ],
+            ToolGroup::CodeAnalysis => &[
+                "code symbols",
+                "code search",
+                "find definition",
+                "find references",
+                "ast",
+                "code analysis",
+                "go to definition",
+            ],
+            ToolGroup::ProcessManagement => &[
+                "list processes",
+                "kill process",
+                "pid",
+                "send signal",
+                "background process",
+                "process list",
+            ],
+            ToolGroup::HttpAdvanced => &[
+                "http post",
+                "api call",
+                "rest api",
+                "api endpoint",
+                "webhook",
+                "curl",
+                "http request",
+                "http put",
+                "http delete",
+            ],
+        }
+    }
+
+    /// Check whether the fighter's capabilities include the one required for this group.
+    fn is_permitted(&self, capabilities: &[Capability]) -> bool {
+        capabilities.iter().any(|c| match self {
+            ToolGroup::SourceControl => matches!(c, Capability::SourceControl),
+            ToolGroup::Container => matches!(c, Capability::Container),
+            ToolGroup::DataManipulation => matches!(c, Capability::DataManipulation),
+            ToolGroup::Schedule => matches!(c, Capability::Schedule),
+            ToolGroup::BrowserControl => matches!(c, Capability::BrowserControl),
+            ToolGroup::AgentCoordination => {
+                matches!(c, Capability::AgentSpawn | Capability::AgentMessage)
+            }
+            ToolGroup::Archive => matches!(c, Capability::Archive),
+            ToolGroup::Template => matches!(c, Capability::Template),
+            ToolGroup::Crypto => matches!(c, Capability::Crypto),
+            ToolGroup::UiAutomation => matches!(c, Capability::UiAutomation(_)),
+            ToolGroup::AppIntegration => matches!(c, Capability::AppIntegration(_)),
+            ToolGroup::PluginInvoke => matches!(c, Capability::PluginInvoke),
+            ToolGroup::A2ADelegate => matches!(c, Capability::A2ADelegate),
+            ToolGroup::KnowledgeGraph => matches!(c, Capability::KnowledgeGraph),
+            ToolGroup::CodeAnalysis => matches!(c, Capability::CodeAnalysis),
+            ToolGroup::ProcessManagement => matches!(c, Capability::ShellExec(_)),
+            ToolGroup::HttpAdvanced => matches!(c, Capability::Network(_)),
+        })
+    }
+
+    /// Return the tool definitions for this group.
+    fn tools(&self) -> Vec<ToolDefinition> {
+        match self {
+            ToolGroup::SourceControl => {
+                vec![
+                    git_status(),
+                    git_diff(),
+                    git_log(),
+                    git_commit(),
+                    git_branch(),
+                ]
+            }
+            ToolGroup::Container => {
+                vec![docker_ps(), docker_run(), docker_build(), docker_logs()]
+            }
+            ToolGroup::DataManipulation => vec![
+                json_query(),
+                json_transform(),
+                yaml_parse(),
+                regex_match(),
+                regex_replace(),
+                text_diff(),
+                text_count(),
+            ],
+            ToolGroup::Schedule => {
+                vec![schedule_task(), schedule_list(), schedule_cancel()]
+            }
+            ToolGroup::BrowserControl => vec![
+                browser_navigate(),
+                browser_screenshot(),
+                browser_click(),
+                browser_type(),
+                browser_content(),
+            ],
+            ToolGroup::AgentCoordination => {
+                vec![agent_spawn(), agent_message(), agent_list()]
+            }
+            ToolGroup::Archive => {
+                vec![archive_create(), archive_extract(), archive_list()]
+            }
+            ToolGroup::Template => vec![template_render()],
+            ToolGroup::Crypto => vec![hash_compute(), hash_verify()],
+            ToolGroup::UiAutomation => vec![
+                ui_screenshot(),
+                ui_find_elements(),
+                ui_click(),
+                ui_type_text(),
+                ui_list_windows(),
+                ui_read_attribute(),
+            ],
+            ToolGroup::AppIntegration => vec![app_ocr()],
+            ToolGroup::PluginInvoke => vec![wasm_invoke()],
+            ToolGroup::A2ADelegate => vec![a2a_delegate()],
+            ToolGroup::KnowledgeGraph => vec![
+                knowledge_add_entity(),
+                knowledge_add_relation(),
+                knowledge_query(),
+            ],
+            ToolGroup::CodeAnalysis => vec![code_search(), code_symbols()],
+            ToolGroup::ProcessManagement => vec![process_list(), process_kill()],
+            ToolGroup::HttpAdvanced => vec![http_request(), http_post()],
+        }
+    }
+}
+
+/// Dynamic tool selector that loads tools based on conversation context.
+///
+/// Core tools (~18) are always available. Contextual tool groups activate
+/// when relevant keywords appear in recent messages and stay active for the
+/// remainder of the bout (monotonic growth) to maximize prompt cache hits.
+///
+/// The tool executor can still run ANY tool regardless of what the LLM sees —
+/// capabilities are checked at execution time, not selection time. The model
+/// never loses capability: `shell_exec` is always in the core set and can do
+/// anything the contextual tools can via command-line equivalents.
+pub struct ToolSelector {
+    /// Fighter's granted capabilities.
+    capabilities: Vec<Capability>,
+    /// Tool groups activated so far in this bout (only grows, never shrinks).
+    active_groups: BTreeSet<ToolGroup>,
+    /// Hash of the last tool list returned, for change detection.
+    last_tool_hash: u64,
+}
+
+impl ToolSelector {
+    /// Create a new selector for a fighter with the given capabilities.
+    ///
+    /// Groups whose capabilities are granted but have no representation in the
+    /// core tool set are auto-activated on construction. This prevents a
+    /// capability regression where, e.g., a fighter with `SourceControl` wouldn't
+    /// get git tools on turn 1 unless the user explicitly said "git".
+    pub fn new(capabilities: &[Capability]) -> Self {
+        let mut active_groups = BTreeSet::new();
+
+        // Auto-activate groups that are permitted AND have no core-tool overlap.
+        // These are "capability-only" groups whose tools would be invisible without
+        // keyword triggers, creating a silent regression for restricted fighters.
+        for group in ToolGroup::ALL {
+            if group.is_permitted(capabilities) && Self::group_needs_auto_activate(group) {
+                active_groups.insert(*group);
+            }
+        }
+
+        if !active_groups.is_empty() {
+            info!(
+                auto_activated = ?active_groups,
+                "tool selector: auto-activated groups for granted capabilities"
+            );
+        }
+
+        Self {
+            capabilities: capabilities.to_vec(),
+            active_groups,
+            last_tool_hash: 0,
+        }
+    }
+
+    /// Returns true if a group's tools have zero overlap with core tools,
+    /// meaning the group would be invisible without keyword activation.
+    fn group_needs_auto_activate(group: &ToolGroup) -> bool {
+        matches!(
+            group,
+            ToolGroup::SourceControl
+                | ToolGroup::Container
+                | ToolGroup::DataManipulation
+                | ToolGroup::Schedule
+                | ToolGroup::BrowserControl
+                | ToolGroup::AgentCoordination
+                | ToolGroup::ProcessManagement
+        )
+    }
+
+    /// Select tools based on conversation context.
+    ///
+    /// Returns `(tools, tools_changed)` where `tools_changed` is true if the
+    /// tool list differs from the previous call (useful for cache invalidation
+    /// decisions).
+    ///
+    /// Scans the last 4 messages (current + 3 prior) for keywords. Once a
+    /// group activates, it stays active for the rest of the bout.
+    pub fn select_tools(&mut self, messages: &[Message]) -> (Vec<ToolDefinition>, bool) {
+        let scan_text = Self::build_scan_text(messages);
+
+        let mut newly_activated = Vec::new();
+        for group in ToolGroup::ALL {
+            if self.active_groups.contains(group) {
+                continue;
+            }
+            if !group.is_permitted(&self.capabilities) {
+                continue;
+            }
+            if Self::keywords_match(&scan_text, group.keywords()) {
+                self.active_groups.insert(*group);
+                newly_activated.push(*group);
+            }
+        }
+
+        if !newly_activated.is_empty() {
+            info!(
+                groups = ?newly_activated,
+                total_active = self.active_groups.len(),
+                "tool selector: activated new groups"
+            );
+        }
+
+        let mut tools = self.core_tools();
+        for group in &self.active_groups {
+            for tool in group.tools() {
+                push_unique(&mut tools, tool);
+            }
+        }
+
+        let hash = Self::compute_hash(&tools);
+        let changed = hash != self.last_tool_hash;
+        self.last_tool_hash = hash;
+
+        (tools, changed)
+    }
+
+    /// Return the number of currently active contextual tool groups.
+    pub fn active_group_count(&self) -> usize {
+        self.active_groups.len()
+    }
+
+    /// Core tools that are always loaded (when capability permits).
+    fn core_tools(&self) -> Vec<ToolDefinition> {
+        let mut tools = Vec::with_capacity(20);
+
+        for cap in &self.capabilities {
+            match cap {
+                Capability::FileRead(_) => {
+                    push_unique(&mut tools, file_read());
+                    push_unique(&mut tools, file_list());
+                    push_unique(&mut tools, file_search());
+                    push_unique(&mut tools, file_info());
+                }
+                Capability::FileWrite(_) => {
+                    push_unique(&mut tools, file_write());
+                    push_unique(&mut tools, patch_apply());
+                }
+                Capability::ShellExec(_) => {
+                    push_unique(&mut tools, shell_exec());
+                    push_unique(&mut tools, env_get());
+                    push_unique(&mut tools, env_list());
+                }
+                Capability::Network(_) => {
+                    push_unique(&mut tools, web_fetch());
+                    push_unique(&mut tools, web_search());
+                }
+                Capability::Memory => {
+                    push_unique(&mut tools, memory_store());
+                    push_unique(&mut tools, memory_recall());
+                }
+                Capability::SystemAutomation => {
+                    push_unique(&mut tools, sys_screenshot());
+                }
+                Capability::ChannelNotify => {
+                    push_unique(&mut tools, channel_notify());
+                }
+                Capability::SelfConfig => {
+                    push_unique(&mut tools, heartbeat_add());
+                    push_unique(&mut tools, heartbeat_list());
+                    push_unique(&mut tools, heartbeat_remove());
+                    push_unique(&mut tools, creed_view());
+                    push_unique(&mut tools, skill_list());
+                    push_unique(&mut tools, skill_recommend());
+                }
+                _ => {}
+            }
+        }
+
+        tools
+    }
+
+    /// Build the keyword scan text from recent messages.
+    ///
+    /// Scans message content, tool call names/arguments, and tool result content
+    /// to catch context from tool usage (e.g. a git_status call signals SourceControl).
+    fn build_scan_text(messages: &[Message]) -> String {
+        let window_size = 4.min(messages.len());
+        let start = messages.len().saturating_sub(window_size);
+        let mut text = String::with_capacity(4000);
+        for msg in &messages[start..] {
+            text.push_str(&msg.content);
+            text.push(' ');
+            for tc in &msg.tool_calls {
+                text.push_str(&tc.name);
+                text.push(' ');
+                // Include a compact form of arguments (tool names are most useful).
+                if let Some(obj) = tc.input.as_object() {
+                    for val in obj.values() {
+                        if let Some(s) = val.as_str() {
+                            // Only include short string values to avoid bloating scan text.
+                            if s.len() <= 200 {
+                                text.push_str(s);
+                                text.push(' ');
+                            }
+                        }
+                    }
+                }
+            }
+            for tr in &msg.tool_results {
+                // Include first ~200 chars of tool result content for keyword detection.
+                // Use floor_char_boundary to avoid panicking on multi-byte UTF-8.
+                let end = if tr.content.len() > 200 {
+                    tr.content.floor_char_boundary(200)
+                } else {
+                    tr.content.len()
+                };
+                text.push_str(&tr.content[..end]);
+                text.push(' ');
+            }
+        }
+        text.to_lowercase()
+    }
+
+    /// Check if any keyword appears in the scan text.
+    fn keywords_match(scan_text: &str, keywords: &[&str]) -> bool {
+        keywords.iter().any(|kw| scan_text.contains(kw))
+    }
+
+    /// Compute a stable hash of the tool list for change detection.
+    ///
+    /// Uses a simple FNV-1a-inspired hash that is stable across Rust versions
+    /// (unlike `DefaultHasher` which uses SipHash with randomized keys).
+    fn compute_hash(tools: &[ToolDefinition]) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+        for tool in tools {
+            for byte in tool.name.as_bytes() {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
+            }
+            // Separator to distinguish "ab"+"cd" from "abc"+"d".
+            hash ^= 0xff;
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        hash
     }
 }
 
@@ -2894,5 +3447,268 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate tools found");
+    }
+
+    // -----------------------------------------------------------------------
+    // ToolSelector tests
+    // -----------------------------------------------------------------------
+
+    use super::{ToolGroup, ToolSelector};
+    use punch_types::{Message, Role};
+
+    fn full_caps() -> Vec<Capability> {
+        Capability::full_access()
+    }
+
+    fn msg(role: Role, text: &str) -> Message {
+        Message::new(role, text)
+    }
+
+    #[test]
+    fn test_selector_core_tools_always_present() {
+        let mut sel = ToolSelector::new(&full_caps());
+        let messages = vec![msg(Role::User, "hello, how are you?")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        // Core tools must be present.
+        assert!(names.contains(&"file_read"), "file_read missing");
+        assert!(names.contains(&"shell_exec"), "shell_exec missing");
+        assert!(names.contains(&"web_fetch"), "web_fetch missing");
+        assert!(names.contains(&"memory_store"), "memory_store missing");
+        // Auto-activated groups (granted capability, no core overlap) should also be present.
+        assert!(
+            names.contains(&"git_status"),
+            "git tools should auto-activate for SourceControl capability"
+        );
+        assert!(
+            names.contains(&"docker_ps"),
+            "docker tools should auto-activate for Container capability"
+        );
+    }
+
+    #[test]
+    fn test_selector_no_auto_activate_without_capability() {
+        // A fighter with only FileRead + ShellExec should NOT get git or docker tools.
+        let caps = vec![
+            Capability::FileRead("**".to_string()),
+            Capability::ShellExec("*".to_string()),
+        ];
+        let mut sel = ToolSelector::new(&caps);
+        let messages = vec![msg(Role::User, "hello")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            !names.contains(&"git_status"),
+            "git should not auto-activate without SourceControl"
+        );
+        assert!(
+            !names.contains(&"docker_ps"),
+            "docker should not auto-activate without Container"
+        );
+    }
+
+    #[test]
+    fn test_selector_keyword_activates_group() {
+        let mut sel = ToolSelector::new(&full_caps());
+        let messages = vec![msg(Role::User, "please commit my changes to git")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names.contains(&"git_status"),
+            "git_status should be activated"
+        );
+        assert!(
+            names.contains(&"git_commit"),
+            "git_commit should be activated"
+        );
+        assert!(names.contains(&"git_diff"), "git_diff should be activated");
+    }
+
+    #[test]
+    fn test_selector_multiple_groups_activate() {
+        let mut sel = ToolSelector::new(&full_caps());
+        let messages = vec![msg(
+            Role::User,
+            "build the docker image and then commit it to git",
+        )];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"git_status"), "git should activate");
+        assert!(names.contains(&"docker_build"), "docker should activate");
+    }
+
+    #[test]
+    fn test_selector_capability_gating() {
+        // No capabilities granted — no contextual tools should activate.
+        let mut sel = ToolSelector::new(&[]);
+        let messages = vec![msg(Role::User, "git commit and docker build")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        assert!(tools.is_empty(), "no tools without capabilities");
+    }
+
+    #[test]
+    fn test_selector_monotonic_growth() {
+        let mut sel = ToolSelector::new(&full_caps());
+
+        // Turn 1: activate git tools.
+        let msgs1 = vec![msg(Role::User, "commit my changes")];
+        let (tools1, _) = sel.select_tools(&msgs1);
+        let count1 = tools1.len();
+
+        // Turn 2: no git keywords, but git tools should persist.
+        let msgs2 = vec![
+            msg(Role::User, "commit my changes"),
+            msg(Role::Assistant, "done"),
+            msg(Role::User, "now tell me a joke"),
+        ];
+        let (tools2, _) = sel.select_tools(&msgs2);
+
+        let names2: Vec<&str> = tools2.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names2.contains(&"git_status"),
+            "git tools should persist across turns"
+        );
+        assert!(tools2.len() >= count1, "tool count should not decrease");
+    }
+
+    #[test]
+    fn test_selector_tools_changed_detection() {
+        // Use Archive + Crypto (not auto-activated) to test change detection.
+        let caps = vec![Capability::Archive, Capability::Crypto];
+        let mut sel = ToolSelector::new(&caps);
+
+        let msgs1 = vec![msg(Role::User, "hello")];
+        let (_, changed1) = sel.select_tools(&msgs1);
+        // First call always reports changed (hash was 0).
+        assert!(changed1, "first call should report changed");
+
+        // Same message again — no new groups, no change.
+        let (_, changed2) = sel.select_tools(&msgs1);
+        assert!(!changed2, "no new groups means no change");
+
+        // New keyword activates a group — should report changed.
+        let msgs3 = vec![msg(Role::User, "compute sha256 checksum")];
+        let (_, changed3) = sel.select_tools(&msgs3);
+        assert!(changed3, "new group activation should report changed");
+    }
+
+    #[test]
+    fn test_selector_case_insensitive() {
+        let mut sel = ToolSelector::new(&full_caps());
+        let messages = vec![msg(Role::User, "GIT COMMIT DOCKER BUILD")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"git_status"), "case insensitive match");
+        assert!(names.contains(&"docker_ps"), "case insensitive match");
+    }
+
+    #[test]
+    fn test_selector_scan_window_limited() {
+        // Use Crypto capability (not auto-activated) to test window limits.
+        let caps = vec![Capability::Crypto];
+        let mut sel = ToolSelector::new(&caps);
+        // Old message mentions crypto keyword, but it's outside the 4-message window.
+        let messages = vec![
+            msg(Role::User, "compute sha256 checksum"), // 5th from end — outside window
+            msg(Role::Assistant, "done"),               // 4th
+            msg(Role::User, "ok"),                      // 3rd
+            msg(Role::Assistant, "ok"),                 // 2nd
+            msg(Role::User, "tell me a joke"),          // 1st (current)
+        ];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            !names.contains(&"hash_compute"),
+            "old messages outside window should not activate groups"
+        );
+    }
+
+    #[test]
+    fn test_selector_no_duplicates() {
+        let mut sel = ToolSelector::new(&full_caps());
+        // Use precise keywords that match the tightened patterns.
+        let messages = vec![msg(
+            Role::User,
+            "git commit docker json unzip schedule cron browser sha256 plugin a2a knowledge graph code analysis",
+        )];
+        let (tools, _) = sel.select_tools(&messages);
+
+        let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        let before = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(before, names.len(), "duplicate tools found in selection");
+    }
+
+    #[test]
+    fn test_selector_core_count_reasonable() {
+        // Use a fighter with only basic capabilities (no auto-activated groups).
+        let caps = vec![
+            Capability::FileRead("**".to_string()),
+            Capability::FileWrite("**".to_string()),
+            Capability::ShellExec("*".to_string()),
+            Capability::Network("*".to_string()),
+            Capability::Memory,
+        ];
+        let mut sel = ToolSelector::new(&caps);
+        let messages = vec![msg(Role::User, "hello")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        // Core should be roughly 12-20 tools (not 80+).
+        assert!(
+            tools.len() < 25,
+            "core tools should be under 25, got {}",
+            tools.len()
+        );
+        assert!(
+            tools.len() >= 10,
+            "core tools should be at least 10, got {}",
+            tools.len()
+        );
+    }
+
+    #[test]
+    fn test_selector_full_caps_with_auto_activation() {
+        // Full capabilities: auto-activated groups should be present from turn 1.
+        let mut sel = ToolSelector::new(&full_caps());
+        let messages = vec![msg(Role::User, "hello")];
+        let (tools, _) = sel.select_tools(&messages);
+
+        // Should have core + auto-activated groups, but still well under the full 80+.
+        assert!(
+            tools.len() < 60,
+            "full caps + auto-activation should be under 60, got {}",
+            tools.len()
+        );
+        assert!(
+            tools.len() >= 30,
+            "full caps + auto-activation should be at least 30, got {}",
+            tools.len()
+        );
+    }
+
+    #[test]
+    fn test_tool_group_all_covers_every_variant() {
+        // Ensure ALL array matches the enum variants.
+        assert_eq!(
+            ToolGroup::ALL.len(),
+            17,
+            "ToolGroup::ALL must match the number of variants"
+        );
+    }
+
+    #[test]
+    fn test_tool_group_tools_not_empty() {
+        for group in ToolGroup::ALL {
+            let tools = group.tools();
+            assert!(!tools.is_empty(), "ToolGroup::{:?} has no tools", group);
+        }
     }
 }

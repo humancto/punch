@@ -41,4 +41,4 @@ pub use mcp::McpClient;
 pub use model_router::{ModelRouter, ModelTier};
 pub use session_repair::{RepairStats, repair_session};
 pub use tool_executor::{ToolExecutionContext, execute_tool};
-pub use tools::{all_tools, tools_for_capabilities};
+pub use tools::{ToolGroup, ToolSelector, all_tools, tools_for_capabilities};

@@ -18,10 +18,7 @@ use tokio::task::JoinHandle;
 use tracing::{info, instrument, warn};
 
 use punch_memory::{BoutId, MemorySubstrate};
-use punch_runtime::{
-    FighterLoopParams, FighterLoopResult, LlmDriver, McpClient, run_fighter_loop,
-    tools_for_capabilities,
-};
+use punch_runtime::{FighterLoopParams, FighterLoopResult, LlmDriver, McpClient, run_fighter_loop};
 use punch_types::{
     AgentCoordinator, AgentInfo, AgentMessageResult, CoordinationStrategy, FighterId,
     FighterManifest, FighterStatus, GorillaId, GorillaManifest, GorillaMetrics, GorillaStatus,
@@ -763,9 +760,9 @@ impl Ring {
         let fighter_name = manifest.name.clone();
         drop(entry); // Release the DashMap guard before any async calls.
 
-        let mut available_tools = tools_for_capabilities(&manifest.capabilities);
-
-        // Merge MCP tools if the fighter has McpAccess capability.
+        // Collect MCP tools separately (the fighter loop handles dynamic
+        // built-in tool selection via ToolSelector when available_tools is empty).
+        let mut mcp_tools = Vec::new();
         let has_mcp_access = manifest
             .capabilities
             .iter()
@@ -782,7 +779,7 @@ impl Ring {
                 });
                 if can_access {
                     match mcp_entry.value().list_tools().await {
-                        Ok(tools) => available_tools.extend(tools),
+                        Ok(tools) => mcp_tools.extend(tools),
                         Err(e) => {
                             warn!(
                                 server = %server_name,
@@ -804,6 +801,8 @@ impl Ring {
         });
 
         // Run the fighter loop.
+        // available_tools is empty — the fighter loop uses ToolSelector for
+        // context-aware dynamic tool loading per turn.
         let params = FighterLoopParams {
             manifest: manifest.clone(),
             user_message: message,
@@ -811,7 +810,8 @@ impl Ring {
             fighter_id: *fighter_id,
             memory: Arc::clone(&self.memory),
             driver: Arc::clone(&self.driver),
-            available_tools,
+            available_tools: Vec::new(),
+            mcp_tools,
             max_iterations: None,
             context_window: None,
             tool_timeout_secs: None,

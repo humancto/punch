@@ -115,6 +115,7 @@ pub async fn run_gorilla_tick(
         memory: Arc::clone(memory),
         driver: Arc::clone(driver),
         available_tools,
+        mcp_tools: Vec::new(),
         max_iterations: Some(10),
         context_window: None,
         tool_timeout_secs: None,
