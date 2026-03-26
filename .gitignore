@@ -27,6 +27,9 @@ Thumbs.db
 *.swo
 *~
 
+# Planning docs (local only)
+.planning/
+
 # Debug
 *.pdb
 
