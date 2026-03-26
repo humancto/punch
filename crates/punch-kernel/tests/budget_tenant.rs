@@ -64,7 +64,7 @@ async fn test_budget_under_limit_allowed() {
     enforcer.set_fighter_limit(
         fid,
         BudgetLimit {
-            max_cost_per_day_cents: Some(1000),
+            max_cost_per_day_usd: Some(10.0),
             ..Default::default()
         },
     );
@@ -106,7 +106,7 @@ async fn test_budget_over_limit_blocked() {
     enforcer.set_fighter_limit(
         fid,
         BudgetLimit {
-            max_cost_per_day_cents: Some(100), // $1.00
+            max_cost_per_day_usd: Some(1.0),
             ..Default::default()
         },
     );
@@ -132,14 +132,14 @@ async fn test_budget_per_fighter_independent() {
     enforcer.set_fighter_limit(
         fid1,
         BudgetLimit {
-            max_cost_per_day_cents: Some(100),
+            max_cost_per_day_usd: Some(1.0),
             ..Default::default()
         },
     );
     enforcer.set_fighter_limit(
         fid2,
         BudgetLimit {
-            max_cost_per_day_cents: Some(100),
+            max_cost_per_day_usd: Some(1.0),
             ..Default::default()
         },
     );
@@ -163,12 +163,10 @@ async fn test_budget_global_limit_blocks_all() {
         .unwrap();
 
     let enforcer = BudgetEnforcer::new(Arc::clone(&metering));
-    enforcer
-        .set_global_limit(BudgetLimit {
-            max_cost_per_day_cents: Some(100),
-            ..Default::default()
-        })
-        .await;
+    enforcer.set_global_limit(BudgetLimit {
+        max_cost_per_day_usd: Some(1.0),
+        ..Default::default()
+    });
 
     // Even a different fighter should be blocked.
     let fid2 = setup_fighter(&memory).await;
@@ -198,7 +196,7 @@ async fn test_budget_set_and_remove_fighter_limit() {
     enforcer.set_fighter_limit(
         fid,
         BudgetLimit {
-            max_cost_per_day_cents: Some(100),
+            max_cost_per_day_usd: Some(1.0),
             ..Default::default()
         },
     );
@@ -215,17 +213,15 @@ async fn test_budget_set_and_clear_global_limit() {
     let (metering, _memory) = setup().await;
     let enforcer = BudgetEnforcer::new(metering);
 
-    enforcer
-        .set_global_limit(BudgetLimit {
-            max_cost_per_day_cents: Some(500),
-            ..Default::default()
-        })
-        .await;
+    enforcer.set_global_limit(BudgetLimit {
+        max_cost_per_day_usd: Some(5.0),
+        ..Default::default()
+    });
 
-    assert!(enforcer.get_global_limit().await.is_some());
+    assert!(enforcer.get_global_limit().is_some());
 
-    enforcer.clear_global_limit().await;
-    assert!(enforcer.get_global_limit().await.is_none());
+    enforcer.clear_global_limit();
+    assert!(enforcer.get_global_limit().is_none());
 }
 
 // ===========================================================================

@@ -106,9 +106,8 @@ pub struct FighterLoopParams {
     #[allow(clippy::struct_field_names)]
     pub user_content_parts: Vec<punch_types::ContentPart>,
     /// When true, the fighter operates in eco mode: forces cheap model tier,
-    /// skips post-bout reflection, and uses minimal tool loading.
+    /// caps max_tokens to 1024, skips post-bout reflection, and uses compact creed.
     /// Activated when approaching budget limits.
-    #[allow(dead_code)]
     pub eco_mode: bool,
 }
 
@@ -364,10 +363,16 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 // Adaptive max_tokens: scale output budget by model tier.
                 // Cheap tier gets less headroom since greetings/simple answers
                 // don't need 4K output tokens. Expensive tier gets full budget.
-                let tier_default = match routed_tier.as_deref() {
-                    Some("cheap") => DEFAULT_MAX_TOKENS_CHEAP,
-                    Some("mid") => DEFAULT_MAX_TOKENS_MID,
-                    _ => DEFAULT_MAX_TOKENS_EXPENSIVE, // expensive or no routing
+                // In eco mode, always cap to cheap-tier budget even when routing
+                // is not configured (prevents eco mode from being a no-op).
+                let tier_default = if params.eco_mode {
+                    DEFAULT_MAX_TOKENS_CHEAP
+                } else {
+                    match routed_tier.as_deref() {
+                        Some("cheap") => DEFAULT_MAX_TOKENS_CHEAP,
+                        Some("mid") => DEFAULT_MAX_TOKENS_MID,
+                        _ => DEFAULT_MAX_TOKENS_EXPENSIVE,
+                    }
                 };
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.

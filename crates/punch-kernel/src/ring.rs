@@ -140,6 +140,31 @@ pub struct Ring {
     _shutdown_rx: watch::Receiver<bool>,
 }
 
+/// Apply budget limits from `PunchConfig` to the `BudgetEnforcer`.
+///
+/// Converts daily and monthly USD limits into a single daily USD limit
+/// (using the more restrictive of the two) and sets it on the enforcer.
+fn apply_budget_config(config: &PunchConfig, enforcer: &BudgetEnforcer) {
+    if !config.budget.has_any_limit() {
+        return;
+    }
+    let daily_from_config = config.budget.daily_cost_limit_usd;
+    let daily_from_monthly = config.budget.monthly_cost_limit_usd.map(|m| m / 30.0);
+    let max_cost_per_day_usd = match (daily_from_config, daily_from_monthly) {
+        (Some(d), Some(m)) => Some(d.min(m)),
+        (Some(d), None) => Some(d),
+        (None, Some(m)) => Some(m),
+        (None, None) => None,
+    };
+    let limit = BudgetLimit {
+        warning_threshold_percent: config.budget.eco_mode_threshold_percent,
+        max_cost_per_day_usd,
+        ..Default::default()
+    };
+    enforcer.set_global_limit(limit);
+    info!("budget limits loaded from config");
+}
+
 impl Ring {
     /// Create a new Ring.
     ///
@@ -161,29 +186,7 @@ impl Ring {
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
 
         // Apply config-based budget limits to the enforcer.
-        if config.budget.has_any_limit() {
-            let daily_from_config = config
-                .budget
-                .daily_cost_limit_usd
-                .map(|d| (d * 100.0) as u64);
-            let daily_from_monthly = config
-                .budget
-                .monthly_cost_limit_usd
-                .map(|m| ((m / 30.0) * 100.0) as u64);
-            let max_cost_per_day_cents = match (daily_from_config, daily_from_monthly) {
-                (Some(d), Some(m)) => Some(d.min(m)),
-                (Some(d), None) => Some(d),
-                (None, Some(m)) => Some(m),
-                (None, None) => None,
-            };
-            let limit = BudgetLimit {
-                warning_threshold_percent: config.budget.eco_mode_threshold_percent,
-                max_cost_per_day_cents,
-                ..Default::default()
-            };
-            budget_enforcer.set_global_limit_sync(limit);
-            info!("budget limits loaded from config");
-        }
+        apply_budget_config(&config, &budget_enforcer);
 
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
@@ -239,29 +242,7 @@ impl Ring {
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
 
         // Apply config-based budget limits.
-        if config.budget.has_any_limit() {
-            let daily_from_config = config
-                .budget
-                .daily_cost_limit_usd
-                .map(|d| (d * 100.0) as u64);
-            let daily_from_monthly = config
-                .budget
-                .monthly_cost_limit_usd
-                .map(|m| ((m / 30.0) * 100.0) as u64);
-            let max_cost_per_day_cents = match (daily_from_config, daily_from_monthly) {
-                (Some(d), Some(m)) => Some(d.min(m)),
-                (Some(d), None) => Some(d),
-                (None, Some(m)) => Some(m),
-                (None, None) => None,
-            };
-            let limit = BudgetLimit {
-                warning_threshold_percent: config.budget.eco_mode_threshold_percent,
-                max_cost_per_day_cents,
-                ..Default::default()
-            };
-            budget_enforcer.set_global_limit_sync(limit);
-            info!("budget limits loaded from config");
-        }
+        apply_budget_config(&config, &budget_enforcer);
 
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);

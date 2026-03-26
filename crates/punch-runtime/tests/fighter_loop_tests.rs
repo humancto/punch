@@ -978,3 +978,122 @@ async fn test_tool_use_bout_triggers_reflection() {
         "tool-use bout should trigger reflection (3 LLM calls total)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Eco mode tests
+// ---------------------------------------------------------------------------
+
+/// Eco mode caps max_tokens to 1024 even without model routing configured.
+#[tokio::test]
+async fn test_eco_mode_caps_max_tokens() {
+    let driver = Arc::new(CapturingMockDriver::new());
+    let memory = test_memory();
+    let bout_id = punch_memory::BoutId::new();
+    let fighter_id = FighterId::new();
+
+    // Use a manifest WITHOUT explicit max_tokens so the adaptive logic kicks in.
+    let mut manifest = test_manifest();
+    manifest.model.max_tokens = None;
+    manifest.model.provider = Provider::Anthropic; // Not Ollama, so Ollama override doesn't apply.
+
+    let params = FighterLoopParams {
+        manifest,
+        user_message: "Hello".to_string(),
+        bout_id,
+        fighter_id,
+        memory,
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(5),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None, // No routing configured!
+        channel_notifier: None,
+        user_content_parts: vec![],
+        eco_mode: true,
+    };
+
+    let result = run_fighter_loop(params).await.expect("loop should succeed");
+    assert_eq!(result.response, "OK");
+
+    let captured = driver.captured_max_tokens.lock().unwrap();
+    assert!(!captured.is_empty(), "driver should have been called");
+    assert_eq!(
+        captured[0], 1024,
+        "eco mode should cap max_tokens to 1024 even without routing"
+    );
+}
+
+/// Eco mode skips post-bout reflection even when the bout has tool calls.
+#[tokio::test]
+async fn test_eco_mode_skips_reflection() {
+    let driver = Arc::new(ScriptedMockDriver::new(vec![
+        // Turn 1: LLM requests a tool call.
+        ScriptedResponse {
+            content: "Let me store that.".to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call_eco_1".to_string(),
+                name: "memory_store".to_string(),
+                input: serde_json::json!({"key": "eco_test", "value": "data"}),
+            }],
+            stop_reason: StopReason::ToolUse,
+        },
+        // Turn 2: LLM responds after tool result.
+        ScriptedResponse {
+            content: "Done.".to_string(),
+            tool_calls: Vec::new(),
+            stop_reason: StopReason::EndTurn,
+        },
+    ]));
+
+    let memory = test_memory();
+    let fighter_name = "eco-reflection-test";
+
+    let creed = punch_types::Creed::new(fighter_name);
+    memory.save_creed(&creed).await.expect("save creed");
+
+    let mut manifest = test_manifest();
+    manifest.name = fighter_name.to_string();
+
+    let mut params = FighterLoopParams {
+        manifest,
+        user_message: "Store something for me".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory: memory.clone(),
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+        eco_mode: true, // Eco mode ON
+    };
+    params.available_tools = vec![memory_store_tool_def()];
+
+    let result = run_fighter_loop(params).await.expect("loop should succeed");
+    assert_eq!(result.tool_calls_made, 1);
+
+    // Give the async reflection task a moment to fire (if it were going to).
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // In eco mode, reflection is skipped: only 2 LLM calls (tool-use + response),
+    // not 3 (which would include reflection).
+    assert_eq!(
+        driver.call_count.load(Ordering::SeqCst),
+        2,
+        "eco mode should skip reflection (2 LLM calls, not 3)"
+    );
+}

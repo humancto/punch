@@ -71,11 +71,7 @@ async fn set_global_budget(
     State(state): State<AppState>,
     Json(body): Json<SetBudgetRequest>,
 ) -> StatusCode {
-    state
-        .ring
-        .budget_enforcer()
-        .set_global_limit(body.limit)
-        .await;
+    state.ring.budget_enforcer().set_global_limit(body.limit);
 
     StatusCode::OK
 }
