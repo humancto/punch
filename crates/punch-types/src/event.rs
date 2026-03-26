@@ -61,6 +61,11 @@ pub enum PunchEvent {
     McpServerStarted { server_name: String },
     /// An MCP server has been shut down.
     McpServerStopped { server_name: String },
+    /// A heartbeat task was proactively executed by the scheduler.
+    HeartbeatExecuted {
+        fighter_id: FighterId,
+        task_description: String,
+    },
     /// An error occurred in the system.
     Error { source: String, message: String },
 }

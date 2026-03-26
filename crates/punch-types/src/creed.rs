@@ -71,6 +71,10 @@ pub struct Creed {
     /// Defines the fighter's multi-agent collaboration behavior.
     #[serde(default)]
     pub delegation_rules: Vec<DelegationRule>,
+    /// Structured preferences (quiet hours, notification style, etc.).
+    /// Set via self-config tools or learned from interactions.
+    #[serde(default)]
+    pub preferences: std::collections::HashMap<String, String>,
     /// Total bouts this creed has been active for.
     pub bout_count: u64,
     /// Total messages processed under this creed.
@@ -199,6 +203,7 @@ impl Creed {
             relationships: Vec::new(),
             heartbeat: Vec::new(),
             delegation_rules: Vec::new(),
+            preferences: std::collections::HashMap::new(),
             bout_count: 0,
             message_count: 0,
             created_at: now,
@@ -285,10 +290,12 @@ impl Creed {
     /// Return references to active heartbeat tasks whose cadence has elapsed.
     ///
     /// Cadence rules:
-    /// - `"every_bout"` — always due
+    /// - `"every_bout"` — always due (reactive, fires on user message)
     /// - `"on_wake"` — due only if `last_checked` is `None` (first bout)
-    /// - `"hourly"` — due if `last_checked` is `None` or was more than 1 hour ago
-    /// - `"daily"` — due if `last_checked` is `None` or was more than 24 hours ago
+    /// - `"hourly"` — due if never checked or > 1 hour since last check
+    /// - `"daily"` — due if never checked or > 24 hours since last check
+    /// - `"weekly"` — due if never checked or > 7 days since last check
+    /// - `"every Xm"` / `"every Xh"` / cron — parsed as duration, due if elapsed
     pub fn due_heartbeat_tasks(&self) -> Vec<&HeartbeatTask> {
         let now = chrono::Utc::now();
         self.heartbeat
@@ -297,21 +304,75 @@ impl Creed {
                 if !h.active {
                     return false;
                 }
-                match h.cadence.as_str() {
-                    "every_bout" => true,
-                    "on_wake" => h.last_checked.is_none(),
-                    "hourly" => match h.last_checked {
+                let required_secs: Option<i64> = match h.cadence.as_str() {
+                    "every_bout" => return true,
+                    "on_wake" => return h.last_checked.is_none(),
+                    "hourly" => Some(3600),
+                    "daily" => Some(86400),
+                    "weekly" => Some(604800),
+                    other => Self::parse_cadence_secs(other),
+                };
+
+                match required_secs {
+                    Some(secs) => match h.last_checked {
                         None => true,
-                        Some(t) => (now - t) > chrono::Duration::hours(1),
+                        Some(t) => (now - t).num_seconds() >= secs,
                     },
-                    "daily" => match h.last_checked {
-                        None => true,
-                        Some(t) => (now - t) > chrono::Duration::hours(24),
-                    },
-                    _ => false, // unknown cadence — skip
+                    None => false, // Unknown cadence
                 }
             })
             .collect()
+    }
+
+    /// Check if a cadence string is valid (parseable as a schedule).
+    ///
+    /// Used by the tool executor to validate user-provided cadences
+    /// beyond the builtin keywords.
+    pub fn is_valid_cadence(cadence: &str) -> bool {
+        Self::parse_cadence_secs(cadence).is_some()
+    }
+
+    /// Parse a cadence string into seconds. Supports:
+    /// - `"every 30s"` / `"every 5m"` / `"every 2h"` / `"every 1d"`
+    /// - Cron expressions like `"*/10 * * * *"`
+    /// - Raw seconds like `"300"`
+    fn parse_cadence_secs(cadence: &str) -> Option<i64> {
+        let s = cadence.trim().to_lowercase();
+
+        // "every Xs/Xm/Xh/Xd"
+        let core = s.strip_prefix("every ").unwrap_or(&s);
+        if let Some(num) = core.strip_suffix('s') {
+            return num.trim().parse::<i64>().ok();
+        }
+        if let Some(num) = core.strip_suffix('m') {
+            return num.trim().parse::<i64>().ok().map(|n| n * 60);
+        }
+        if let Some(num) = core.strip_suffix('h') {
+            return num.trim().parse::<i64>().ok().map(|n| n * 3600);
+        }
+        if let Some(num) = core.strip_suffix('d') {
+            return num.trim().parse::<i64>().ok().map(|n| n * 86400);
+        }
+
+        // Cron: "*/N * * * *" -> every N minutes
+        let fields: Vec<&str> = s.split_whitespace().collect();
+        if fields.len() == 5 {
+            if let Some(step) = fields[0].strip_prefix("*/")
+                && fields[1] == "*"
+                && fields[2] == "*"
+            {
+                return step.parse::<i64>().ok().map(|n| n * 60);
+            }
+            if fields[0] == "0"
+                && let Some(step) = fields[1].strip_prefix("*/")
+                && fields[2] == "*"
+            {
+                return step.parse::<i64>().ok().map(|n| n * 3600);
+            }
+        }
+
+        // Raw seconds
+        s.parse::<i64>().ok()
     }
 
     /// Mark a heartbeat task as checked: sets `last_checked` to now and
@@ -847,7 +908,7 @@ mod tests {
 
     #[test]
     fn test_due_heartbeat_tasks_unknown_cadence_skipped() {
-        let creed = Creed::new("ECHO").with_heartbeat_task("Mystery task", "weekly");
+        let creed = Creed::new("ECHO").with_heartbeat_task("Mystery task", "gibberish_cadence");
         assert_eq!(creed.due_heartbeat_tasks().len(), 0);
     }
 

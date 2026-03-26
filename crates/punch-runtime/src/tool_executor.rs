@@ -4035,15 +4035,17 @@ async fn tool_heartbeat_add(
         message: "missing 'cadence' parameter".into(),
     })?;
 
-    let valid_cadences = ["every_bout", "on_wake", "hourly", "daily"];
-    if !valid_cadences.contains(&cadence) {
+    let builtin_cadences = ["every_bout", "on_wake", "hourly", "daily", "weekly"];
+    // Accept builtin cadences OR anything parseable as a schedule (e.g. "every 30m", cron).
+    let is_valid =
+        builtin_cadences.contains(&cadence) || punch_types::Creed::is_valid_cadence(cadence);
+    if !is_valid {
         return Ok(ToolResult {
             success: false,
             output: serde_json::json!(null),
             error: Some(format!(
-                "invalid cadence '{}'. Must be one of: {}",
+                "invalid cadence '{}'. Use: every_bout, on_wake, hourly, daily, weekly, 'every Xm', 'every Xh', or cron (e.g. '*/10 * * * *')",
                 cadence,
-                valid_cadences.join(", ")
             )),
             duration_ms: 0,
         });

@@ -388,6 +388,13 @@ fn event_to_audit(event: &punch_types::PunchEvent) -> (String, String) {
             "mcp_stopped".to_string(),
             format!("MCP server '{}' stopped", server_name),
         ),
+        PunchEvent::HeartbeatExecuted {
+            fighter_id,
+            task_description,
+        } => (
+            "heartbeat_executed".to_string(),
+            format!("Fighter {} executed: {}", fighter_id, task_description),
+        ),
         PunchEvent::Error { source, message } => {
             ("error".to_string(), format!("[{}] {}", source, message))
         }

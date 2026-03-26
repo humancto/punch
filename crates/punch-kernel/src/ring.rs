@@ -34,6 +34,7 @@ use crate::agent_messaging::MessageRouter;
 use crate::background::BackgroundExecutor;
 use crate::budget::BudgetEnforcer;
 use crate::event_bus::EventBus;
+use crate::heartbeat_scheduler::HeartbeatScheduler;
 use crate::metering::MeteringEngine;
 use crate::metrics::{self, MetricsRegistry};
 use crate::scheduler::{QuotaConfig, Scheduler};
@@ -110,6 +111,8 @@ pub struct Ring {
     config: PunchConfig,
     /// Background executor for autonomous gorilla tasks.
     background: BackgroundExecutor,
+    /// Proactive heartbeat scheduler for fighter agents.
+    heartbeat_scheduler: HeartbeatScheduler,
     /// Multi-step workflow engine.
     workflow_engine: WorkflowEngine,
     /// Cost tracking and metering engine.
@@ -152,6 +155,8 @@ impl Ring {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let background =
             BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
+        let heartbeat_scheduler =
+            HeartbeatScheduler::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
@@ -174,6 +179,7 @@ impl Ring {
             scheduler: Scheduler::new(QuotaConfig::default()),
             config,
             background,
+            heartbeat_scheduler,
             workflow_engine: WorkflowEngine::new(),
             metering,
             budget_enforcer,
@@ -200,6 +206,8 @@ impl Ring {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let background =
             BackgroundExecutor::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
+        let heartbeat_scheduler =
+            HeartbeatScheduler::with_shutdown(shutdown_tx.clone(), shutdown_rx.clone());
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
@@ -222,6 +230,7 @@ impl Ring {
             scheduler: Scheduler::new(quota_config),
             config,
             background,
+            heartbeat_scheduler,
             workflow_engine: WorkflowEngine::new(),
             metering,
             budget_enforcer,
@@ -575,6 +584,26 @@ impl Ring {
             });
         }
 
+        // --- Start heartbeat monitoring ---
+        // The heartbeat loop tolerates the creed not existing yet (sleeps and retries).
+        if let Some(entry) = self.fighters.get(&id) {
+            let manifest = entry.value().manifest.clone();
+            drop(entry); // Release DashMap guard before async work
+            self.heartbeat_scheduler.start_monitoring(
+                crate::heartbeat_scheduler::HeartbeatStartConfig {
+                    fighter_id: id,
+                    fighter_name: name.clone(),
+                    manifest,
+                    memory: Arc::clone(&self.memory),
+                    driver: Arc::clone(&self.driver),
+                    event_bus: self.event_bus.clone(),
+                    channel_notifier: None, // set later via API layer
+                    model_routing: Some(self.config.model_routing.clone()),
+                    chat_id_hint: None, // populated from channel config
+                },
+            );
+        }
+
         id
     }
 
@@ -836,9 +865,16 @@ impl Ring {
         result
     }
 
+    /// Access the heartbeat scheduler (e.g. for refresh after heartbeat config changes).
+    pub fn heartbeat_scheduler(&self) -> &HeartbeatScheduler {
+        &self.heartbeat_scheduler
+    }
+
     /// Kill (remove) a fighter.
-    #[instrument(skip(self), fields(%fighter_id))]
     pub fn kill_fighter(&self, fighter_id: &FighterId) {
+        // Stop heartbeat monitoring before removing.
+        self.heartbeat_scheduler.stop_monitoring(fighter_id);
+
         if let Some((_, entry)) = self.fighters.remove(fighter_id) {
             self.scheduler.remove_fighter(fighter_id);
             self.metrics
