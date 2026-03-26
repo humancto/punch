@@ -146,6 +146,14 @@ impl BudgetEnforcer {
         *guard = Some(limit);
     }
 
+    /// Set the global budget limit synchronously (for use in non-async constructors).
+    pub fn set_global_limit_sync(&self, limit: BudgetLimit) {
+        info!("global budget limit set (sync)");
+        // Use blocking_write since we are in a sync context.
+        let mut guard = self.global_limit.blocking_write();
+        *guard = Some(limit);
+    }
+
     /// Remove the global budget limit.
     pub async fn clear_global_limit(&self) {
         let mut guard = self.global_limit.write().await;

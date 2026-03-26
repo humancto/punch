@@ -148,6 +148,7 @@ fn make_params(
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     }
 }
 
@@ -478,6 +479,7 @@ async fn test_messages_persisted_to_memory() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -540,6 +542,7 @@ async fn test_creed_bout_count_increments() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -600,6 +603,7 @@ async fn test_heartbeat_tasks_marked_checked() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -759,6 +763,7 @@ async fn test_adaptive_max_tokens_ollama_default() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -797,6 +802,7 @@ async fn test_adaptive_max_tokens_no_routing_non_ollama() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -837,6 +843,7 @@ async fn test_adaptive_max_tokens_explicit_override() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -886,6 +893,7 @@ async fn test_simple_bout_skips_reflection() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
 
     let result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -952,6 +960,7 @@ async fn test_tool_use_bout_triggers_reflection() {
         model_routing: None,
         channel_notifier: None,
         user_content_parts: vec![],
+        eco_mode: false,
     };
     params.available_tools = vec![memory_store_tool_def()];
 

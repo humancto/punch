@@ -29,7 +29,7 @@ use punch_skills::{SkillMarketplace, builtin_skills};
 
 use crate::agent_messaging::MessageRouter;
 use crate::background::BackgroundExecutor;
-use crate::budget::BudgetEnforcer;
+use crate::budget::{BudgetEnforcer, BudgetLimit};
 use crate::event_bus::EventBus;
 use crate::heartbeat_scheduler::HeartbeatScheduler;
 use crate::metering::MeteringEngine;
@@ -159,6 +159,32 @@ impl Ring {
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+
+        // Apply config-based budget limits to the enforcer.
+        if config.budget.has_any_limit() {
+            let daily_from_config = config
+                .budget
+                .daily_cost_limit_usd
+                .map(|d| (d * 100.0) as u64);
+            let daily_from_monthly = config
+                .budget
+                .monthly_cost_limit_usd
+                .map(|m| ((m / 30.0) * 100.0) as u64);
+            let max_cost_per_day_cents = match (daily_from_config, daily_from_monthly) {
+                (Some(d), Some(m)) => Some(d.min(m)),
+                (Some(d), None) => Some(d),
+                (None, Some(m)) => Some(m),
+                (None, None) => None,
+            };
+            let limit = BudgetLimit {
+                warning_threshold_percent: config.budget.eco_mode_threshold_percent,
+                max_cost_per_day_cents,
+                ..Default::default()
+            };
+            budget_enforcer.set_global_limit_sync(limit);
+            info!("budget limits loaded from config");
+        }
+
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
@@ -211,6 +237,32 @@ impl Ring {
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+
+        // Apply config-based budget limits.
+        if config.budget.has_any_limit() {
+            let daily_from_config = config
+                .budget
+                .daily_cost_limit_usd
+                .map(|d| (d * 100.0) as u64);
+            let daily_from_monthly = config
+                .budget
+                .monthly_cost_limit_usd
+                .map(|m| ((m / 30.0) * 100.0) as u64);
+            let max_cost_per_day_cents = match (daily_from_config, daily_from_monthly) {
+                (Some(d), Some(m)) => Some(d.min(m)),
+                (Some(d), None) => Some(d),
+                (None, Some(m)) => Some(m),
+                (None, None) => None,
+            };
+            let limit = BudgetLimit {
+                warning_threshold_percent: config.budget.eco_mode_threshold_percent,
+                max_cost_per_day_cents,
+                ..Default::default()
+            };
+            budget_enforcer.set_global_limit_sync(limit);
+            info!("budget limits loaded from config");
+        }
+
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
@@ -704,6 +756,8 @@ impl Ring {
         }
 
         // Check budget enforcement (opt-in — only blocks if limits are configured).
+        // When approaching a limit (Warning), activate eco mode for this request.
+        let mut eco_mode = false;
         match self.budget_enforcer.check_budget(fighter_id).await {
             Ok(crate::budget::BudgetVerdict::Blocked {
                 reason,
@@ -716,7 +770,8 @@ impl Ring {
                 });
             }
             Ok(crate::budget::BudgetVerdict::Warning { message, .. }) => {
-                info!(warning = %message, "budget warning for fighter");
+                info!(warning = %message, "budget warning — activating eco mode");
+                eco_mode = true;
             }
             Ok(crate::budget::BudgetVerdict::Allowed) => {}
             Err(e) => {
@@ -830,6 +885,7 @@ impl Ring {
             },
             channel_notifier: None,
             user_content_parts: content_parts,
+            eco_mode,
         };
 
         // Record message metric.

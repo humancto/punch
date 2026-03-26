@@ -31,6 +31,10 @@ pub struct PunchConfig {
     /// to cheap / mid / expensive models based on query complexity.
     #[serde(default)]
     pub model_routing: ModelRoutingConfig,
+    /// Budget limits and eco mode configuration. When set, fighters enter
+    /// eco mode (cheap tier, no reflection, minimal tools) as limits approach.
+    #[serde(default)]
+    pub budget: BudgetConfig,
 }
 
 /// Configuration for a language model.
@@ -187,6 +191,44 @@ pub struct ModelRoutingConfig {
     pub mid: Option<ModelConfig>,
     /// Model for complex reasoning (analysis, comparison, code review, etc.).
     pub expensive: Option<ModelConfig>,
+}
+
+/// Budget limits and eco mode configuration.
+///
+/// When budget limits are set, fighters automatically enter "eco mode" as
+/// spending approaches the configured thresholds. Eco mode degrades to:
+/// cheap model tier only, no post-bout reflection, minimal tool loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    /// Maximum daily cost in USD. When approached, eco mode activates.
+    pub daily_cost_limit_usd: Option<f64>,
+    /// Maximum monthly cost in USD (30-day rolling window).
+    pub monthly_cost_limit_usd: Option<f64>,
+    /// Percentage of any limit at which eco mode activates (default: 80).
+    /// At 100% the fighter is fully blocked.
+    #[serde(default = "default_eco_threshold")]
+    pub eco_mode_threshold_percent: u8,
+}
+
+fn default_eco_threshold() -> u8 {
+    80
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            daily_cost_limit_usd: None,
+            monthly_cost_limit_usd: None,
+            eco_mode_threshold_percent: default_eco_threshold(),
+        }
+    }
+}
+
+impl BudgetConfig {
+    /// Returns true if any budget limit is configured.
+    pub fn has_any_limit(&self) -> bool {
+        self.daily_cost_limit_usd.is_some() || self.monthly_cost_limit_usd.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -406,5 +448,41 @@ mod tests {
         set.insert(Provider::Google);
         set.insert(Provider::Anthropic); // duplicate
         assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_budget_config_defaults() {
+        let config = BudgetConfig::default();
+        assert!(!config.has_any_limit());
+        assert!(config.daily_cost_limit_usd.is_none());
+        assert!(config.monthly_cost_limit_usd.is_none());
+        assert_eq!(config.eco_mode_threshold_percent, 80);
+    }
+
+    #[test]
+    fn test_budget_config_has_limit() {
+        let config = BudgetConfig {
+            daily_cost_limit_usd: Some(1.0),
+            ..Default::default()
+        };
+        assert!(config.has_any_limit());
+    }
+
+    #[test]
+    fn test_budget_config_serde() {
+        let json = r#"{"daily_cost_limit_usd": 5.0, "monthly_cost_limit_usd": 15.0, "eco_mode_threshold_percent": 70}"#;
+        let config: BudgetConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.daily_cost_limit_usd, Some(5.0));
+        assert_eq!(config.monthly_cost_limit_usd, Some(15.0));
+        assert_eq!(config.eco_mode_threshold_percent, 70);
+        assert!(config.has_any_limit());
+    }
+
+    #[test]
+    fn test_budget_config_serde_empty() {
+        let json = "{}";
+        let config: BudgetConfig = serde_json::from_str(json).expect("deserialize");
+        assert!(!config.has_any_limit());
+        assert_eq!(config.eco_mode_threshold_percent, 80);
     }
 }

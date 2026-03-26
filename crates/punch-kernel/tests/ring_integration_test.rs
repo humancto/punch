@@ -91,6 +91,7 @@ fn test_config() -> PunchConfig {
         channels: Default::default(),
         mcp_servers: Default::default(),
         model_routing: Default::default(),
+        budget: Default::default(),
     }
 }
 
