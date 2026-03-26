@@ -27,6 +27,26 @@ pub struct UsageSummary {
     pub event_count: u64,
 }
 
+/// Per-model usage breakdown row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUsageBreakdown {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
+    pub request_count: u64,
+}
+
+/// Per-fighter usage breakdown row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FighterUsageBreakdown {
+    pub fighter_id: FighterId,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
+    pub request_count: u64,
+}
+
 impl MemorySubstrate {
     /// Record a usage event for a fighter.
     pub async fn record_usage(
@@ -92,6 +112,145 @@ impl MemorySubstrate {
             )
             .map_err(|e| PunchError::Memory(format!("failed to get usage summary: {e}")))?;
 
+        Ok(result)
+    }
+
+    /// Get per-model usage breakdown for a fighter since the given timestamp.
+    pub async fn get_model_breakdown(
+        &self,
+        fighter_id: &FighterId,
+        since: DateTime<Utc>,
+    ) -> PunchResult<Vec<ModelUsageBreakdown>> {
+        let fighter_str = fighter_id.to_string();
+        let since_str = since.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT model,
+                    COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0),
+                    COUNT(*)
+                 FROM usage_events
+                 WHERE fighter_id = ?1 AND created_at >= ?2
+                 GROUP BY model
+                 ORDER BY SUM(cost_usd) DESC",
+            )
+            .map_err(|e| PunchError::Memory(format!("failed to prepare model breakdown: {e}")))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![fighter_str, since_str], |row| {
+                Ok(ModelUsageBreakdown {
+                    model: row.get(0)?,
+                    input_tokens: row.get(1)?,
+                    output_tokens: row.get(2)?,
+                    cost_usd: row.get(3)?,
+                    request_count: row.get(4)?,
+                })
+            })
+            .map_err(|e| PunchError::Memory(format!("failed to query model breakdown: {e}")))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(
+                row.map_err(|e| PunchError::Memory(format!("failed to read breakdown row: {e}")))?,
+            );
+        }
+        Ok(result)
+    }
+
+    /// Get per-model usage breakdown across ALL fighters since the given timestamp.
+    pub async fn get_total_model_breakdown(
+        &self,
+        since: DateTime<Utc>,
+    ) -> PunchResult<Vec<ModelUsageBreakdown>> {
+        let since_str = since.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT model,
+                    COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0),
+                    COUNT(*)
+                 FROM usage_events
+                 WHERE created_at >= ?1
+                 GROUP BY model
+                 ORDER BY SUM(cost_usd) DESC",
+            )
+            .map_err(|e| PunchError::Memory(format!("failed to prepare model breakdown: {e}")))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![since_str], |row| {
+                Ok(ModelUsageBreakdown {
+                    model: row.get(0)?,
+                    input_tokens: row.get(1)?,
+                    output_tokens: row.get(2)?,
+                    cost_usd: row.get(3)?,
+                    request_count: row.get(4)?,
+                })
+            })
+            .map_err(|e| PunchError::Memory(format!("failed to query model breakdown: {e}")))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(
+                row.map_err(|e| PunchError::Memory(format!("failed to read breakdown row: {e}")))?,
+            );
+        }
+        Ok(result)
+    }
+
+    /// Get per-fighter usage breakdown across all fighters since the given timestamp.
+    pub async fn get_fighter_breakdown(
+        &self,
+        since: DateTime<Utc>,
+    ) -> PunchResult<Vec<FighterUsageBreakdown>> {
+        let since_str = since.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT fighter_id,
+                    COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0),
+                    COUNT(*)
+                 FROM usage_events
+                 WHERE created_at >= ?1
+                 GROUP BY fighter_id
+                 ORDER BY SUM(cost_usd) DESC",
+            )
+            .map_err(|e| PunchError::Memory(format!("failed to prepare fighter breakdown: {e}")))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![since_str], |row| {
+                let id_str: String = row.get(0)?;
+                let fighter_id = id_str
+                    .parse::<uuid::Uuid>()
+                    .map(FighterId)
+                    .unwrap_or_else(|_| FighterId::new());
+                Ok(FighterUsageBreakdown {
+                    fighter_id,
+                    input_tokens: row.get(1)?,
+                    output_tokens: row.get(2)?,
+                    cost_usd: row.get(3)?,
+                    request_count: row.get(4)?,
+                })
+            })
+            .map_err(|e| PunchError::Memory(format!("failed to query fighter breakdown: {e}")))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(
+                row.map_err(|e| PunchError::Memory(format!("failed to read breakdown row: {e}")))?,
+            );
+        }
         Ok(result)
     }
 
@@ -180,6 +339,104 @@ mod tests {
         assert_eq!(summary.total_input_tokens, 3000);
         assert_eq!(summary.total_output_tokens, 1300);
         assert!((summary.total_cost_usd - 0.043).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn test_model_breakdown() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate
+            .record_usage(&fid, "claude-sonnet-4-20250514", 1000, 500, 0.015)
+            .await
+            .unwrap();
+        substrate
+            .record_usage(&fid, "gpt-4o-mini", 2000, 800, 0.002)
+            .await
+            .unwrap();
+        substrate
+            .record_usage(&fid, "claude-sonnet-4-20250514", 3000, 1000, 0.030)
+            .await
+            .unwrap();
+
+        let since = Utc::now() - Duration::hours(1);
+        let breakdown = substrate.get_model_breakdown(&fid, since).await.unwrap();
+
+        assert_eq!(breakdown.len(), 2);
+        // Ordered by cost DESC, so sonnet ($0.045) first, then gpt-4o-mini ($0.002)
+        assert_eq!(breakdown[0].model, "claude-sonnet-4-20250514");
+        assert_eq!(breakdown[0].input_tokens, 4000);
+        assert_eq!(breakdown[0].output_tokens, 1500);
+        assert_eq!(breakdown[0].request_count, 2);
+        assert_eq!(breakdown[1].model, "gpt-4o-mini");
+        assert_eq!(breakdown[1].request_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_total_model_breakdown() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid1 = punch_types::FighterId::new();
+        let fid2 = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid1, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        substrate
+            .save_fighter(&fid2, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate
+            .record_usage(&fid1, "claude-sonnet-4-20250514", 1000, 500, 0.015)
+            .await
+            .unwrap();
+        substrate
+            .record_usage(&fid2, "claude-sonnet-4-20250514", 2000, 800, 0.028)
+            .await
+            .unwrap();
+
+        let since = Utc::now() - Duration::hours(1);
+        let breakdown = substrate.get_total_model_breakdown(since).await.unwrap();
+
+        assert_eq!(breakdown.len(), 1);
+        assert_eq!(breakdown[0].input_tokens, 3000);
+        assert_eq!(breakdown[0].request_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_fighter_breakdown() {
+        let substrate = MemorySubstrate::in_memory().unwrap();
+        let fid1 = punch_types::FighterId::new();
+        let fid2 = punch_types::FighterId::new();
+        substrate
+            .save_fighter(&fid1, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+        substrate
+            .save_fighter(&fid2, &test_manifest(), FighterStatus::Idle)
+            .await
+            .unwrap();
+
+        substrate
+            .record_usage(&fid1, "claude-sonnet-4-20250514", 1000, 500, 0.015)
+            .await
+            .unwrap();
+        substrate
+            .record_usage(&fid2, "gpt-4o-mini", 5000, 2000, 0.004)
+            .await
+            .unwrap();
+
+        let since = Utc::now() - Duration::hours(1);
+        let breakdown = substrate.get_fighter_breakdown(since).await.unwrap();
+
+        assert_eq!(breakdown.len(), 2);
+        // Ordered by cost DESC: sonnet ($0.015) first
+        assert_eq!(breakdown[0].fighter_id, fid1);
+        assert_eq!(breakdown[1].fighter_id, fid2);
     }
 
     #[tokio::test]

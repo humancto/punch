@@ -32,4 +32,4 @@ pub use knowledge::{KnowledgeEntity, KnowledgeRelation};
 pub use memories::MemoryEntry;
 pub use migrations::{Migration, MigrationEngine, MigrationStatus};
 pub use substrate::MemorySubstrate;
-pub use usage::{UsageEvent, UsageSummary};
+pub use usage::{FighterUsageBreakdown, ModelUsageBreakdown, UsageEvent, UsageSummary};
