@@ -311,15 +311,22 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             model: params.manifest.model.model.clone(),
             messages: messages.clone(),
             tools: turn_tools,
-            max_tokens: params.manifest.model.max_tokens.unwrap_or(
+            max_tokens: params.manifest.model.max_tokens.unwrap_or_else(|| {
+                // Adaptive max_tokens: scale output budget by model tier.
+                // Cheap tier gets less headroom since greetings/simple answers
+                // don't need 4K output tokens. Expensive tier gets full budget.
+                let tier_default = match routed_tier.as_deref() {
+                    Some("cheap") => 1024,
+                    Some("mid") => 2048,
+                    _ => 4096, // expensive or no routing
+                };
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.
-                // The thinking budget can easily consume 2000-4000 tokens alone.
                 match params.manifest.model.provider {
                     punch_types::Provider::Ollama => 16384,
-                    _ => 4096,
-                },
-            ),
+                    _ => tier_default,
+                }
+            }),
             temperature: params.manifest.model.temperature,
             system_prompt: Some(system_prompt.clone()),
         };
@@ -443,9 +450,11 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     }
                 }
 
-                // Spawn async reflection to extract learned behaviors from the bout.
-                // This runs in the background and does not block the response.
-                {
+                // Conditional reflection: only reflect on substantive bouts.
+                // Skip reflection for simple exchanges (< 3 turns and no tool use)
+                // to avoid wasting an LLM call on "hello" / "how are you?" bouts.
+                let is_substantive_bout = guard.iterations() >= 3 || tool_calls_made > 0;
+                if is_substantive_bout {
                     let driver = Arc::clone(&params.driver);
                     let memory = Arc::clone(&params.memory);
                     let model = params.manifest.model.model.clone();
@@ -455,6 +464,12 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         reflect_on_bout(driver, memory, model, fighter_name, reflection_messages)
                             .await;
                     });
+                } else {
+                    debug!(
+                        iterations = guard.iterations(),
+                        tool_calls = tool_calls_made,
+                        "skipping post-bout reflection (simple exchange)"
+                    );
                 }
 
                 return Ok(FighterLoopResult {
