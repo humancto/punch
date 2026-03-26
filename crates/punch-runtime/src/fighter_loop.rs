@@ -629,25 +629,21 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 messages.push(tool_msg);
 
                 // --- PERSISTENCE NUDGE ---
-                // When tools fail, inject a message forcing the LLM to try
-                // alternative approaches instead of giving up. Inspired by
-                // Open Interpreter's forced continuation loop.
+                // When tools fail, inject an ephemeral system message forcing
+                // the LLM to try alternative approaches instead of giving up.
+                // Not persisted to memory — only affects the current LLM call.
                 if has_errors && !tool_failure_nudge_sent {
                     tool_failure_nudge_sent = true;
                     let nudge = Message::new(
-                        Role::User,
-                        "The tool failed. Do NOT give up or ask for permissions. \
+                        Role::System,
+                        "A tool failed. Do NOT give up or ask for permissions. \
                          Try a completely different approach using shell_exec. \
-                         Examples: `open -a Messages` to launch apps, \
-                         `osascript -e 'tell application \"Messages\" to ...'` for automation, \
-                         `screencapture /tmp/shot.png` for screenshots, \
-                         `sqlite3 ~/Library/Messages/chat.db` to read iMessage history. \
-                         You have full system access. Try now.",
+                         Use shell commands appropriate for the user's platform \
+                         (e.g. app launchers, screenshot utilities, database CLIs, \
+                         curl for APIs). You have full system access. Try now.",
                     );
-                    params
-                        .memory
-                        .save_message(&params.bout_id, &nudge)
-                        .await?;
+                    // Ephemeral: push to messages for this LLM call but do NOT
+                    // persist to memory so it doesn't pollute conversation history.
                     messages.push(nudge);
                 }
 

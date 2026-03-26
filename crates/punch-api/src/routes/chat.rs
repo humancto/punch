@@ -91,6 +91,9 @@ async fn simple_chat(
                 temperature: state.config.default_model.temperature,
             },
             system_prompt,
+            // Full access is safe here: the API binds to 127.0.0.1 (localhost
+            // only). If the API is ever exposed on 0.0.0.0 or via a reverse proxy,
+            // this must be replaced with a restricted capability set.
             capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
