@@ -685,3 +685,287 @@ async fn test_llm_completion_error_propagates() {
         err_str
     );
 }
+
+// ---------------------------------------------------------------------------
+// Adaptive max_tokens tests
+// ---------------------------------------------------------------------------
+
+/// A mock driver that captures the max_tokens from the CompletionRequest.
+struct CapturingMockDriver {
+    captured_max_tokens: Mutex<Vec<u32>>,
+}
+
+impl CapturingMockDriver {
+    fn new() -> Self {
+        Self {
+            captured_max_tokens: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmDriver for CapturingMockDriver {
+    async fn complete(&self, request: CompletionRequest) -> PunchResult<CompletionResponse> {
+        self.captured_max_tokens
+            .lock()
+            .unwrap()
+            .push(request.max_tokens);
+
+        Ok(CompletionResponse {
+            message: Message {
+                role: Role::Assistant,
+                content: "OK".to_string(),
+                content_parts: Vec::new(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                timestamp: chrono::Utc::now(),
+            },
+            usage: TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+}
+
+/// Adaptive max_tokens: when no routing is configured and provider is Ollama,
+/// max_tokens defaults to 16384 (the Ollama override).
+#[tokio::test]
+async fn test_adaptive_max_tokens_ollama_default() {
+    let driver = Arc::new(CapturingMockDriver::new());
+    let memory = test_memory();
+
+    let mut manifest = test_manifest();
+    manifest.model.provider = Provider::Ollama;
+    manifest.model.max_tokens = None; // No explicit max_tokens
+
+    let params = FighterLoopParams {
+        manifest,
+        user_message: "Hello".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory,
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+    };
+
+    let _result = run_fighter_loop(params).await.expect("loop should succeed");
+
+    let captured = driver.captured_max_tokens.lock().unwrap();
+    assert_eq!(captured[0], 16384, "Ollama should default to 16384");
+}
+
+/// Adaptive max_tokens: when no routing is configured and provider is not Ollama,
+/// max_tokens defaults to 4096 (the expensive tier default).
+#[tokio::test]
+async fn test_adaptive_max_tokens_no_routing_non_ollama() {
+    let driver = Arc::new(CapturingMockDriver::new());
+    let memory = test_memory();
+
+    let mut manifest = test_manifest();
+    manifest.model.provider = Provider::Anthropic;
+    manifest.model.max_tokens = None; // No explicit max_tokens
+
+    let params = FighterLoopParams {
+        manifest,
+        user_message: "Hello".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory,
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+    };
+
+    let _result = run_fighter_loop(params).await.expect("loop should succeed");
+
+    let captured = driver.captured_max_tokens.lock().unwrap();
+    assert_eq!(
+        captured[0], 4096,
+        "non-Ollama without routing should default to 4096"
+    );
+}
+
+/// Adaptive max_tokens: explicit max_tokens in config overrides tier defaults.
+#[tokio::test]
+async fn test_adaptive_max_tokens_explicit_override() {
+    let driver = Arc::new(CapturingMockDriver::new());
+    let memory = test_memory();
+
+    let mut manifest = test_manifest();
+    manifest.model.provider = Provider::Anthropic;
+    manifest.model.max_tokens = Some(8192); // Explicit override
+
+    let params = FighterLoopParams {
+        manifest,
+        user_message: "Hello".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory,
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+    };
+
+    let _result = run_fighter_loop(params).await.expect("loop should succeed");
+
+    let captured = driver.captured_max_tokens.lock().unwrap();
+    assert_eq!(
+        captured[0], 8192,
+        "explicit max_tokens should override tier defaults"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Conditional reflection tests
+// ---------------------------------------------------------------------------
+
+/// Conditional reflection: a simple single-turn "hello" bout should skip
+/// reflection (iterations=0, tool_calls=0, few messages).
+#[tokio::test]
+async fn test_simple_bout_skips_reflection() {
+    let driver = Arc::new(ScriptedMockDriver::text_only("Hi there!"));
+    let memory = test_memory();
+    let fighter_name = "reflection-skip-fighter";
+
+    // Create a creed so reflection would have something to update
+    let creed = punch_types::Creed::new(fighter_name);
+    memory.save_creed(&creed).await.expect("save creed");
+
+    let mut manifest = test_manifest();
+    manifest.name = fighter_name.to_string();
+
+    let params = FighterLoopParams {
+        manifest,
+        user_message: "hello".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory: memory.clone(),
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+    };
+
+    let result = run_fighter_loop(params).await.expect("loop should succeed");
+
+    assert_eq!(result.response, "Hi there!");
+    assert_eq!(result.tool_calls_made, 0);
+
+    // The driver should only have been called once (the main completion).
+    // If reflection were triggered, the driver would be called a second time.
+    assert_eq!(
+        driver.call_count.load(Ordering::SeqCst),
+        1,
+        "simple bout should make only 1 LLM call (no reflection)"
+    );
+}
+
+/// Conditional reflection: a bout with tool use should trigger reflection.
+#[tokio::test]
+async fn test_tool_use_bout_triggers_reflection() {
+    let tool_call = ToolCall {
+        id: "tc_reflect".to_string(),
+        name: "memory_store".to_string(),
+        input: serde_json::json!({"key": "k", "value": "v"}),
+    };
+
+    let driver = Arc::new(ScriptedMockDriver::new(vec![
+        ScriptedResponse {
+            content: "Storing.".to_string(),
+            tool_calls: vec![tool_call],
+            stop_reason: StopReason::ToolUse,
+        },
+        ScriptedResponse {
+            content: "Done storing.".to_string(),
+            tool_calls: Vec::new(),
+            stop_reason: StopReason::EndTurn,
+        },
+    ]));
+
+    let memory = test_memory();
+    let fighter_name = "reflection-trigger-fighter";
+
+    let creed = punch_types::Creed::new(fighter_name);
+    memory.save_creed(&creed).await.expect("save creed");
+
+    let mut manifest = test_manifest();
+    manifest.name = fighter_name.to_string();
+
+    let mut params = FighterLoopParams {
+        manifest,
+        user_message: "Store something for me".to_string(),
+        bout_id: punch_memory::BoutId::new(),
+        fighter_id: FighterId::new(),
+        memory: memory.clone(),
+        driver: driver.clone(),
+        available_tools: Vec::new(),
+        mcp_tools: Vec::new(),
+        max_iterations: Some(10),
+        context_window: Some(200_000),
+        tool_timeout_secs: Some(30),
+        coordinator: None,
+        approval_engine: None,
+        sandbox: None,
+        mcp_clients: None,
+        model_routing: None,
+        channel_notifier: None,
+        user_content_parts: vec![],
+    };
+    params.available_tools = vec![memory_store_tool_def()];
+
+    let result = run_fighter_loop(params).await.expect("loop should succeed");
+
+    assert_eq!(result.tool_calls_made, 1);
+
+    // Give the async reflection task a moment to fire
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // Driver should have been called 3 times: 2 for the bout + 1 for reflection
+    assert_eq!(
+        driver.call_count.load(Ordering::SeqCst),
+        3,
+        "tool-use bout should trigger reflection (3 LLM calls total)"
+    );
+}

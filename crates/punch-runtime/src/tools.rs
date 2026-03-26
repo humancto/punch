@@ -803,7 +803,7 @@ impl ToolSelector {
 fn file_read() -> ToolDefinition {
     ToolDefinition {
         name: "file_read".into(),
-        description: "Read the contents of a file on the user's machine. Use this to analyze, inspect, or review any file the user mentions — text, code, config, logs, CSV, JSON, etc. Accepts absolute paths (e.g. /Users/name/file.txt) or relative paths.".into(),
+        description: "Read a file by path (absolute or relative). Supports text, code, config, logs, CSV, JSON, etc.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -821,9 +821,7 @@ fn file_read() -> ToolDefinition {
 fn file_write() -> ToolDefinition {
     ToolDefinition {
         name: "file_write".into(),
-        description:
-            "Write or create a file on the user's machine. Creates parent directories if needed. Use for saving results, generating files, or modifying content."
-                .into(),
+        description: "Write or create a file. Creates parent directories if needed.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -845,7 +843,7 @@ fn file_write() -> ToolDefinition {
 fn file_list() -> ToolDefinition {
     ToolDefinition {
         name: "file_list".into(),
-        description: "List files and directories in a folder on the user's machine. Use to explore directory contents, find files, or verify paths exist.".into(),
+        description: "List files and directories in a folder.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -862,7 +860,7 @@ fn file_list() -> ToolDefinition {
 fn shell_exec() -> ToolDefinition {
     ToolDefinition {
         name: "shell_exec".into(),
-        description: "Execute a shell command on the user's machine and return stdout, stderr, and exit code. This is your most versatile tool — use it for anything: launching apps, running scripts, system automation, package management, database queries, API calls via curl, and any task that can be done from a terminal.".into(),
+        description: "Execute a shell command and return stdout, stderr, and exit code. Universal fallback for any task doable from a terminal.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -898,9 +896,7 @@ fn web_fetch() -> ToolDefinition {
 fn web_search() -> ToolDefinition {
     ToolDefinition {
         name: "web_search".into(),
-        description:
-            "Search the web using DuckDuckGo and return the top results with titles and URLs."
-                .into(),
+        description: "Search the web and return top results with titles and URLs.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -918,7 +914,7 @@ fn web_search() -> ToolDefinition {
 fn memory_store() -> ToolDefinition {
     ToolDefinition {
         name: "memory_store".into(),
-        description: "Store a key-value pair in your persistent memory. Use this to remember important facts, user preferences, or context across conversations.".into(),
+        description: "Store a key-value pair in persistent memory. Use to remember facts, preferences, or context across conversations.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -944,7 +940,7 @@ fn memory_store() -> ToolDefinition {
 fn memory_recall() -> ToolDefinition {
     ToolDefinition {
         name: "memory_recall".into(),
-        description: "Search your persistent memory for previously stored information.".into(),
+        description: "Search persistent memory for previously stored information.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1044,7 +1040,7 @@ fn knowledge_query() -> ToolDefinition {
 fn agent_spawn() -> ToolDefinition {
     ToolDefinition {
         name: "agent_spawn".into(),
-        description: "Spawn a new fighter (AI agent). Returns the new fighter's ID. Use this to create subordinate agents that can handle specialized tasks.".into(),
+        description: "Spawn a new fighter (AI agent) and return its ID.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1077,7 +1073,7 @@ fn agent_spawn() -> ToolDefinition {
 fn agent_message() -> ToolDefinition {
     ToolDefinition {
         name: "agent_message".into(),
-        description: "Send a message to another fighter by ID or name and get its response. Use this for inter-agent coordination and delegation.".into(),
+        description: "Send a message to another fighter by ID or name and get its response.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1120,9 +1116,7 @@ fn agent_list() -> ToolDefinition {
 fn patch_apply() -> ToolDefinition {
     ToolDefinition {
         name: "patch_apply".into(),
-        description: "Apply a unified diff patch to a file. Reads the file, validates the patch, \
-                       applies it, and writes the result back. Supports standard unified diff format."
-            .into(),
+        description: "Apply a unified diff patch to a file.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1225,9 +1219,8 @@ fn browser_type() -> ToolDefinition {
 fn browser_content() -> ToolDefinition {
     ToolDefinition {
         name: "browser_content".into(),
-        description:
-            "Get the text content of the page or a specific element. Useful for extracting readable text from a web page."
-                .into(),
+        description: "Get the text content of the page or a specific element by CSS selector."
+            .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1544,7 +1537,7 @@ fn json_query() -> ToolDefinition {
 fn json_transform() -> ToolDefinition {
     ToolDefinition {
         name: "json_transform".into(),
-        description: "Transform JSON data: extract specific keys, rename keys, or filter an array of objects.".into(),
+        description: "Transform JSON: extract keys, rename keys, or filter arrays.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1622,7 +1615,8 @@ fn regex_match() -> ToolDefinition {
 fn regex_replace() -> ToolDefinition {
     ToolDefinition {
         name: "regex_replace".into(),
-        description: "Find and replace text using a regex pattern. Supports capture group references ($1, $2, etc.) in the replacement.".into(),
+        description: "Find and replace text using a regex pattern with capture group support."
+            .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1759,7 +1753,7 @@ fn schedule_cancel() -> ToolDefinition {
 fn code_search() -> ToolDefinition {
     ToolDefinition {
         name: "code_search".into(),
-        description: "Search for text or a regex pattern in files recursively under a directory. Returns matching lines with file paths and line numbers.".into(),
+        description: "Search for a regex pattern in files recursively. Returns matching lines with paths and line numbers.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1789,7 +1783,8 @@ fn code_search() -> ToolDefinition {
 fn code_symbols() -> ToolDefinition {
     ToolDefinition {
         name: "code_symbols".into(),
-        description: "Extract function, struct, class, and method definitions from a source file using regex-based heuristics.".into(),
+        description: "Extract function, struct, class, and method definitions from a source file."
+            .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2053,8 +2048,7 @@ fn text_count() -> ToolDefinition {
 fn file_search() -> ToolDefinition {
     ToolDefinition {
         name: "file_search".into(),
-        description: "Search for files by name pattern (glob) recursively under a directory."
-            .into(),
+        description: "Search for files by glob pattern recursively.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2098,9 +2092,7 @@ fn file_info() -> ToolDefinition {
 fn a2a_delegate() -> ToolDefinition {
     ToolDefinition {
         name: "a2a_delegate".into(),
-        description: "Delegate a task to a remote A2A agent. Discovers the agent, sends the task, \
-                      polls for completion, and returns the result."
-            .into(),
+        description: "Delegate a task to a remote A2A agent and return the result.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2130,10 +2122,7 @@ fn a2a_delegate() -> ToolDefinition {
 fn wasm_invoke() -> ToolDefinition {
     ToolDefinition {
         name: "wasm_invoke".into(),
-        description: "Invoke a function on a loaded WASM plugin (imported technique). \
-                      Executes the named function within the plugin's sandboxed WASM runtime \
-                      and returns the result."
-            .into(),
+        description: "Invoke a function on a loaded WASM plugin and return the result.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2159,9 +2148,7 @@ fn wasm_invoke() -> ToolDefinition {
 fn channel_notify() -> ToolDefinition {
     ToolDefinition {
         name: "channel_notify".into(),
-        description: "Send a proactive message to an external channel (Telegram, Slack, Discord, \
-                      etc.). Use this to push notifications, briefings, alerts, and heartbeat \
-                      results to connected messaging platforms."
+        description: "Send a message to an external channel (Telegram, Slack, Discord, etc.)."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -2192,12 +2179,7 @@ fn channel_notify() -> ToolDefinition {
 fn heartbeat_add() -> ToolDefinition {
     ToolDefinition {
         name: "heartbeat_add".into(),
-        description: "Add a proactive heartbeat task to your creed. Heartbeat tasks fire on a \
-                      cadence and remind you to perform recurring actions like checking email, \
-                      monitoring endpoints, or daily briefings. Timed cadences (hourly, daily, \
-                      weekly, 'every 30m', cron) are executed by the background scheduler — \
-                      no user message needed."
-            .into(),
+        description: "Add a recurring heartbeat task to your creed. Cadences: every_bout, on_wake, hourly, daily, weekly, cron.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2219,8 +2201,7 @@ fn heartbeat_add() -> ToolDefinition {
 fn heartbeat_list() -> ToolDefinition {
     ToolDefinition {
         name: "heartbeat_list".into(),
-        description: "List all heartbeat tasks in your creed. Shows task description, cadence, \
-                      active status, execution count, and last checked time."
+        description: "List all heartbeat tasks in your creed with cadence and execution counts."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -2234,9 +2215,7 @@ fn heartbeat_list() -> ToolDefinition {
 fn heartbeat_remove() -> ToolDefinition {
     ToolDefinition {
         name: "heartbeat_remove".into(),
-        description: "Remove a heartbeat task from your creed by its index (0-based). Use \
-                      heartbeat_list first to see the indices."
-            .into(),
+        description: "Remove a heartbeat task from your creed by its 0-based index.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2254,10 +2233,7 @@ fn heartbeat_remove() -> ToolDefinition {
 fn creed_view() -> ToolDefinition {
     ToolDefinition {
         name: "creed_view".into(),
-        description: "View your current creed — identity, personality traits, directives, \
-                      learned behaviors, relationships, heartbeat tasks, and stats. Use this \
-                      to understand who you are and what you're configured to do."
-            .into(),
+        description: "View your current creed: identity, traits, directives, behaviors, relationships, and stats.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {},
@@ -2270,10 +2246,7 @@ fn creed_view() -> ToolDefinition {
 fn skill_list() -> ToolDefinition {
     ToolDefinition {
         name: "skill_list".into(),
-        description: "List available skill packs that can be installed. Skill packs bundle MCP \
-                      server configurations with prompts and tools. Available packs: productivity \
-                      (calendar/email), developer (GitHub), research (web tools), files (filesystem)."
-            .into(),
+        description: "List available skill packs: productivity, developer, research, files.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {},
@@ -2286,11 +2259,7 @@ fn skill_list() -> ToolDefinition {
 fn skill_recommend() -> ToolDefinition {
     ToolDefinition {
         name: "skill_recommend".into(),
-        description: "Recommend a skill pack to the user based on what they need. Looks up the \
-                      pack details (what it provides, required setup, install command) and returns \
-                      a recommendation the user can act on. Use this when the user asks for \
-                      capabilities you don't currently have (e.g., calendar, email, GitHub)."
-            .into(),
+        description: "Recommend a skill pack when the user needs capabilities you don't have (calendar, email, GitHub). Shows install command.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2312,7 +2281,9 @@ fn skill_recommend() -> ToolDefinition {
 fn sys_screenshot() -> ToolDefinition {
     ToolDefinition {
         name: "sys_screenshot".into(),
-        description: "Capture a screenshot of the full screen or a specific window. Returns a base64-encoded PNG image that the vision model can read. Use this to see what's currently on screen.".into(),
+        description:
+            "Capture a screenshot of the full screen or a specific window. Returns base64 PNG."
+                .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2329,7 +2300,7 @@ fn sys_screenshot() -> ToolDefinition {
 fn ui_screenshot() -> ToolDefinition {
     ToolDefinition {
         name: "ui_screenshot".into(),
-        description: "Capture a screenshot of a specific UI region by element ID or bounds. More targeted than sys_screenshot for inspecting specific parts of the screen.".into(),
+        description: "Capture a screenshot of a specific UI region by element ID or bounds.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2357,7 +2328,7 @@ fn ui_screenshot() -> ToolDefinition {
 fn app_ocr() -> ToolDefinition {
     ToolDefinition {
         name: "app_ocr".into(),
-        description: "Extract text from an app window using OCR (optical character recognition). Returns plain text — cheaper than a screenshot + vision model for text-heavy content. Use this first for reading text, fall back to sys_screenshot for visual/spatial understanding.".into(),
+        description: "Extract text from an app window using OCR. Returns plain text. Prefer over sys_screenshot for text extraction.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2375,7 +2346,7 @@ fn app_ocr() -> ToolDefinition {
 fn ui_find_elements() -> ToolDefinition {
     ToolDefinition {
         name: "ui_find_elements".into(),
-        description: "Query the accessibility tree of an app to find UI elements (buttons, text fields, rows, etc.). Returns structured element IDs that can be used with ui_click, ui_type_text, and ui_read_attribute. Re-query if the app state changes, as element IDs are session-ephemeral.".into(),
+        description: "Query the accessibility tree of an app to find UI elements. Returns element IDs for ui_click/ui_type_text. Re-query after state changes — IDs are ephemeral.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2405,7 +2376,7 @@ fn ui_find_elements() -> ToolDefinition {
 fn ui_click() -> ToolDefinition {
     ToolDefinition {
         name: "ui_click".into(),
-        description: "Click a UI element by its element ID (from ui_find_elements). Safe, validated accessibility click — not a raw coordinate click.".into(),
+        description: "Click a UI element by its element ID from ui_find_elements.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2423,7 +2394,7 @@ fn ui_click() -> ToolDefinition {
 fn ui_type_text() -> ToolDefinition {
     ToolDefinition {
         name: "ui_type_text".into(),
-        description: "Type text into a UI element by its element ID (from ui_find_elements). Sets the value of a text field or input element.".into(),
+        description: "Type text into a UI element by its element ID from ui_find_elements.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2445,7 +2416,7 @@ fn ui_type_text() -> ToolDefinition {
 fn ui_list_windows() -> ToolDefinition {
     ToolDefinition {
         name: "ui_list_windows".into(),
-        description: "List all visible windows with their titles and owning apps. Use this to discover what's on screen before taking a screenshot or interacting with specific apps.".into(),
+        description: "List all visible windows with their titles and owning apps.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {}
@@ -2457,7 +2428,9 @@ fn ui_list_windows() -> ToolDefinition {
 fn ui_read_attribute() -> ToolDefinition {
     ToolDefinition {
         name: "ui_read_attribute".into(),
-        description: "Read an accessibility attribute (value, enabled, focused, etc.) from a UI element. Useful for checking element state without a screenshot.".into(),
+        description:
+            "Read an accessibility attribute (value, enabled, focused, etc.) from a UI element."
+                .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {

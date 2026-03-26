@@ -45,6 +45,18 @@ const MAX_CONTINUATION_LOOPS: usize = 5;
 /// Default per-tool timeout in seconds.
 const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 120;
 
+/// Default max output tokens for the cheap model tier.
+const DEFAULT_MAX_TOKENS_CHEAP: u32 = 1024;
+/// Default max output tokens for the mid model tier.
+const DEFAULT_MAX_TOKENS_MID: u32 = 2048;
+/// Default max output tokens for the expensive tier (or when no routing is configured).
+const DEFAULT_MAX_TOKENS_EXPENSIVE: u32 = 4096;
+/// Default max output tokens for Ollama models (reasoning models need extra headroom).
+const DEFAULT_MAX_TOKENS_OLLAMA: u32 = 16384;
+/// Minimum message count (including history) for a bout to be considered substantive
+/// enough to warrant a post-bout reflection LLM call.
+const REFLECTION_MIN_MESSAGES: usize = 6;
+
 /// Parameters for the fighter loop.
 pub struct FighterLoopParams {
     /// The fighter's manifest (identity, model config, system prompt, capabilities).
@@ -168,6 +180,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
 
     // 2b. Model routing: check if we should use a tier-specific driver.
     let mut routed_tier: Option<String> = None;
+    let mut routed_provider: Option<punch_types::Provider> = None;
     let routed_driver: Option<Arc<dyn LlmDriver>> = params
         .model_routing
         .as_ref()
@@ -184,6 +197,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         "model router: using tier-specific driver"
                     );
                     routed_tier = Some(tier.to_string());
+                    routed_provider = Some(model_config.provider);
                     Some(driver)
                 }
                 Err(e) => {
@@ -311,15 +325,27 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             model: params.manifest.model.model.clone(),
             messages: messages.clone(),
             tools: turn_tools,
-            max_tokens: params.manifest.model.max_tokens.unwrap_or(
+            max_tokens: params.manifest.model.max_tokens.unwrap_or_else(|| {
+                // Adaptive max_tokens: scale output budget by model tier.
+                // Cheap tier gets less headroom since greetings/simple answers
+                // don't need 4K output tokens. Expensive tier gets full budget.
+                let tier_default = match routed_tier.as_deref() {
+                    Some("cheap") => DEFAULT_MAX_TOKENS_CHEAP,
+                    Some("mid") => DEFAULT_MAX_TOKENS_MID,
+                    _ => DEFAULT_MAX_TOKENS_EXPENSIVE, // expensive or no routing
+                };
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.
-                // The thinking budget can easily consume 2000-4000 tokens alone.
-                match params.manifest.model.provider {
-                    punch_types::Provider::Ollama => 16384,
-                    _ => 4096,
-                },
-            ),
+                // Use the routed provider if routing selected a tier, otherwise fall
+                // back to the base manifest provider.
+                let active_provider = routed_provider
+                    .clone()
+                    .unwrap_or_else(|| params.manifest.model.provider.clone());
+                match active_provider {
+                    punch_types::Provider::Ollama => DEFAULT_MAX_TOKENS_OLLAMA,
+                    _ => tier_default,
+                }
+            }),
             temperature: params.manifest.model.temperature,
             system_prompt: Some(system_prompt.clone()),
         };
@@ -443,9 +469,16 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     }
                 }
 
-                // Spawn async reflection to extract learned behaviors from the bout.
-                // This runs in the background and does not block the response.
-                {
+                // Conditional reflection: only reflect on substantive bouts.
+                // Skip reflection for simple exchanges (few messages and no tool use)
+                // to avoid wasting an LLM call on "hello" / "how are you?" bouts.
+                // We use messages.len() (which counts all messages in the bout including
+                // history) rather than guard.iterations() because iterations only tracks
+                // tool-use rounds and retries — a substantive single-turn text exchange
+                // would have 0 iterations but still deserve reflection.
+                let is_substantive_bout =
+                    messages.len() >= REFLECTION_MIN_MESSAGES || tool_calls_made > 0;
+                if is_substantive_bout {
                     let driver = Arc::clone(&params.driver);
                     let memory = Arc::clone(&params.memory);
                     let model = params.manifest.model.model.clone();
@@ -455,6 +488,12 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         reflect_on_bout(driver, memory, model, fighter_name, reflection_messages)
                             .await;
                     });
+                } else {
+                    debug!(
+                        message_count = messages.len(),
+                        tool_calls = tool_calls_made,
+                        "skipping post-bout reflection (simple exchange)"
+                    );
                 }
 
                 return Ok(FighterLoopResult {
