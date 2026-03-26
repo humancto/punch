@@ -128,6 +128,17 @@ pub enum Commands {
         native: bool,
     },
 
+    /// Show token usage and cost statistics
+    Stats {
+        /// Time period: hour, day, month (default: day)
+        #[arg(short, long, default_value = "day")]
+        period: String,
+
+        /// Show stats for a specific fighter (by name or ID)
+        #[arg(short, long)]
+        fighter: Option<String>,
+    },
+
     /// Print version information
     Version,
 }

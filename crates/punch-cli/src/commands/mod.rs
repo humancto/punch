@@ -10,6 +10,7 @@ pub mod heartbeat;
 pub mod init;
 pub mod moves;
 pub mod start;
+pub mod stats;
 pub mod status;
 pub mod trigger;
 pub mod tui;

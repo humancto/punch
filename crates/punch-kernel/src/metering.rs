@@ -209,6 +209,53 @@ impl MeteringEngine {
         let summary = self.memory.get_total_usage_summary(since).await?;
         Ok(summary.total_cost_usd)
     }
+
+    /// Get the usage summary for a fighter over a time period.
+    pub async fn get_fighter_summary(
+        &self,
+        fighter_id: &FighterId,
+        period: SpendPeriod,
+    ) -> PunchResult<punch_memory::UsageSummary> {
+        let since = Utc::now() - period.to_duration();
+        self.memory.get_usage_summary(fighter_id, since).await
+    }
+
+    /// Get the total usage summary across all fighters over a time period.
+    pub async fn get_total_summary(
+        &self,
+        period: SpendPeriod,
+    ) -> PunchResult<punch_memory::UsageSummary> {
+        let since = Utc::now() - period.to_duration();
+        self.memory.get_total_usage_summary(since).await
+    }
+
+    /// Get per-model usage breakdown for a fighter over a time period.
+    pub async fn get_model_breakdown(
+        &self,
+        fighter_id: &FighterId,
+        period: SpendPeriod,
+    ) -> PunchResult<Vec<punch_memory::ModelUsageBreakdown>> {
+        let since = Utc::now() - period.to_duration();
+        self.memory.get_model_breakdown(fighter_id, since).await
+    }
+
+    /// Get per-model usage breakdown across all fighters over a time period.
+    pub async fn get_total_model_breakdown(
+        &self,
+        period: SpendPeriod,
+    ) -> PunchResult<Vec<punch_memory::ModelUsageBreakdown>> {
+        let since = Utc::now() - period.to_duration();
+        self.memory.get_total_model_breakdown(since).await
+    }
+
+    /// Get per-fighter usage breakdown over a time period.
+    pub async fn get_fighter_breakdown(
+        &self,
+        period: SpendPeriod,
+    ) -> PunchResult<Vec<punch_memory::FighterUsageBreakdown>> {
+        let since = Utc::now() - period.to_duration();
+        self.memory.get_fighter_breakdown(since).await
+    }
 }
 
 // ---------------------------------------------------------------------------
