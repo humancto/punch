@@ -459,6 +459,7 @@ mod tests {
             channels: HashMap::new(),
             mcp_servers: HashMap::new(),
             model_routing: Default::default(),
+            budget: Default::default(),
         }
     }
 

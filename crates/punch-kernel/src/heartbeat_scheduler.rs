@@ -284,6 +284,7 @@ async fn heartbeat_loop(mut cfg: HeartbeatLoopConfig) {
                 model_routing: model_routing.clone(),
                 channel_notifier: channel_notifier.clone(),
                 user_content_parts: vec![],
+                eco_mode: false,
             };
 
             match run_fighter_loop(params).await {

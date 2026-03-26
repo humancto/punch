@@ -28,8 +28,8 @@ pub struct BudgetLimit {
     pub max_tokens_per_hour: Option<u64>,
     /// Maximum total tokens (input + output) per day.
     pub max_tokens_per_day: Option<u64>,
-    /// Maximum cost per day in cents (USD).
-    pub max_cost_per_day_cents: Option<u64>,
+    /// Maximum cost per day in USD (f64 to avoid truncation of small limits).
+    pub max_cost_per_day_usd: Option<f64>,
     /// Maximum number of requests per hour.
     pub max_requests_per_hour: Option<u64>,
     /// Warning threshold as a percentage of any limit (default: 80).
@@ -46,7 +46,7 @@ impl Default for BudgetLimit {
         Self {
             max_tokens_per_hour: None,
             max_tokens_per_day: None,
-            max_cost_per_day_cents: None,
+            max_cost_per_day_usd: None,
             max_requests_per_hour: None,
             warning_threshold_percent: default_warning_threshold(),
         }
@@ -58,7 +58,7 @@ impl BudgetLimit {
     pub fn has_any_limit(&self) -> bool {
         self.max_tokens_per_hour.is_some()
             || self.max_tokens_per_day.is_some()
-            || self.max_cost_per_day_cents.is_some()
+            || self.max_cost_per_day_usd.is_some()
             || self.max_requests_per_hour.is_some()
     }
 }
@@ -93,8 +93,8 @@ pub struct BudgetStatus {
     pub tokens_used_hour: u64,
     /// Current daily token usage.
     pub tokens_used_day: u64,
-    /// Current daily cost in cents.
-    pub cost_used_day_cents: u64,
+    /// Current daily cost in USD.
+    pub cost_used_day_usd: f64,
     /// Current hourly request count.
     pub requests_used_hour: u64,
     /// Current verdict.
@@ -110,7 +110,10 @@ pub struct BudgetStatus {
 pub struct BudgetEnforcer {
     metering: Arc<MeteringEngine>,
     limits: DashMap<FighterId, BudgetLimit>,
-    global_limit: Arc<tokio::sync::RwLock<Option<BudgetLimit>>>,
+    /// `std::sync::RwLock` — not `tokio::sync::RwLock` — because this only
+    /// guards an `Option<BudgetLimit>` (no async work under the lock) and
+    /// must be callable from both sync constructors and async tasks.
+    global_limit: std::sync::RwLock<Option<BudgetLimit>>,
 }
 
 impl BudgetEnforcer {
@@ -119,7 +122,7 @@ impl BudgetEnforcer {
         Self {
             metering,
             limits: DashMap::new(),
-            global_limit: Arc::new(tokio::sync::RwLock::new(None)),
+            global_limit: std::sync::RwLock::new(None),
         }
     }
 
@@ -140,21 +143,32 @@ impl BudgetEnforcer {
     }
 
     /// Set the global budget limit (applies to all fighters).
-    pub async fn set_global_limit(&self, limit: BudgetLimit) {
+    ///
+    /// Uses `std::sync::RwLock` so this is safe from both sync and async contexts.
+    pub fn set_global_limit(&self, limit: BudgetLimit) {
         info!("global budget limit set");
-        let mut guard = self.global_limit.write().await;
+        let mut guard = self
+            .global_limit
+            .write()
+            .expect("global_limit lock poisoned");
         *guard = Some(limit);
     }
 
     /// Remove the global budget limit.
-    pub async fn clear_global_limit(&self) {
-        let mut guard = self.global_limit.write().await;
+    pub fn clear_global_limit(&self) {
+        let mut guard = self
+            .global_limit
+            .write()
+            .expect("global_limit lock poisoned");
         *guard = None;
     }
 
     /// Get the current global budget limit.
-    pub async fn get_global_limit(&self) -> Option<BudgetLimit> {
-        let guard = self.global_limit.read().await;
+    pub fn get_global_limit(&self) -> Option<BudgetLimit> {
+        let guard = self
+            .global_limit
+            .read()
+            .expect("global_limit lock poisoned");
         guard.clone()
     }
 
@@ -177,8 +191,8 @@ impl BudgetEnforcer {
 
         // Check global limit.
         let global_verdict = {
-            let guard = self.global_limit.read().await;
-            if let Some(ref limit) = *guard {
+            let global = self.get_global_limit();
+            if let Some(ref limit) = global {
                 self.evaluate_global_limit(limit).await?
             } else {
                 BudgetVerdict::Allowed
@@ -204,7 +218,7 @@ impl BudgetEnforcer {
             limits: limit,
             tokens_used_hour: 0, // Token counts would need additional metering queries
             tokens_used_day: 0,
-            cost_used_day_cents: (daily_spend * 100.0) as u64,
+            cost_used_day_usd: daily_spend,
             requests_used_hour: 0,
             verdict,
         })
@@ -212,7 +226,7 @@ impl BudgetEnforcer {
 
     /// Get the global budget status.
     pub async fn get_global_status(&self) -> PunchResult<BudgetStatus> {
-        let limit = self.get_global_limit().await;
+        let limit = self.get_global_limit();
 
         let daily_spend = self.metering.get_total_spend(SpendPeriod::Day).await?;
 
@@ -226,7 +240,7 @@ impl BudgetEnforcer {
             limits: limit,
             tokens_used_hour: 0,
             tokens_used_day: 0,
-            cost_used_day_cents: (daily_spend * 100.0) as u64,
+            cost_used_day_usd: daily_spend,
             requests_used_hour: 0,
             verdict: global_verdict,
         })
@@ -245,33 +259,36 @@ impl BudgetEnforcer {
 
         let threshold = limit.warning_threshold_percent as f64 / 100.0;
 
-        // Check daily cost limit.
-        if let Some(max_cents) = limit.max_cost_per_day_cents {
+        // Check daily cost limit (all comparisons in f64 USD to avoid truncation).
+        if let Some(max_usd) = limit.max_cost_per_day_usd {
             let daily_cost = self
                 .metering
                 .get_spend(fighter_id, SpendPeriod::Day)
                 .await?;
-            let daily_cents = (daily_cost * 100.0) as u64;
 
-            if daily_cents >= max_cents {
-                debug!(%fighter_id, daily_cents, max_cents, "fighter over daily cost budget");
+            if daily_cost >= max_usd {
+                debug!(%fighter_id, daily_cost, max_usd, "fighter over daily cost budget");
                 return Ok(BudgetVerdict::Blocked {
                     reason: format!(
-                        "daily cost budget exceeded: {}c / {}c",
-                        daily_cents, max_cents
+                        "daily cost budget exceeded: ${:.4} / ${:.4}",
+                        daily_cost, max_usd
                     ),
                     retry_after_secs: seconds_until_day_reset(),
                 });
             }
 
-            let usage_pct = daily_cents as f64 / max_cents as f64;
+            let usage_pct = if max_usd > 0.0 {
+                daily_cost / max_usd
+            } else {
+                1.0 // zero limit = always over
+            };
             if usage_pct >= threshold {
                 return Ok(BudgetVerdict::Warning {
                     usage_percent: usage_pct * 100.0,
                     message: format!(
-                        "approaching daily cost limit: {}c / {}c ({:.0}%)",
-                        daily_cents,
-                        max_cents,
+                        "approaching daily cost limit: ${:.4} / ${:.4} ({:.0}%)",
+                        daily_cost,
+                        max_usd,
                         usage_pct * 100.0
                     ),
                 });
@@ -308,29 +325,32 @@ impl BudgetEnforcer {
 
         let threshold = limit.warning_threshold_percent as f64 / 100.0;
 
-        // Check daily cost limit.
-        if let Some(max_cents) = limit.max_cost_per_day_cents {
+        // Check daily cost limit (all comparisons in f64 USD).
+        if let Some(max_usd) = limit.max_cost_per_day_usd {
             let daily_cost = self.metering.get_total_spend(SpendPeriod::Day).await?;
-            let daily_cents = (daily_cost * 100.0) as u64;
 
-            if daily_cents >= max_cents {
+            if daily_cost >= max_usd {
                 return Ok(BudgetVerdict::Blocked {
                     reason: format!(
-                        "global daily cost budget exceeded: {}c / {}c",
-                        daily_cents, max_cents
+                        "global daily cost budget exceeded: ${:.4} / ${:.4}",
+                        daily_cost, max_usd
                     ),
                     retry_after_secs: seconds_until_day_reset(),
                 });
             }
 
-            let usage_pct = daily_cents as f64 / max_cents as f64;
+            let usage_pct = if max_usd > 0.0 {
+                daily_cost / max_usd
+            } else {
+                1.0
+            };
             if usage_pct >= threshold {
                 return Ok(BudgetVerdict::Warning {
                     usage_percent: usage_pct * 100.0,
                     message: format!(
-                        "approaching global daily cost limit: {}c / {}c ({:.0}%)",
-                        daily_cents,
-                        max_cents,
+                        "approaching global daily cost limit: ${:.4} / ${:.4} ({:.0}%)",
+                        daily_cost,
+                        max_usd,
                         usage_pct * 100.0
                     ),
                 });
@@ -435,7 +455,7 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(1000), // $10
+                max_cost_per_day_usd: Some(10.0),
                 ..Default::default()
             },
         );
@@ -464,7 +484,7 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100), // $1.00
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
@@ -494,7 +514,7 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100), // $1.00 = 100 cents
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
@@ -525,7 +545,7 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
@@ -551,14 +571,14 @@ mod tests {
         enforcer.set_fighter_limit(
             fid1,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
         enforcer.set_fighter_limit(
             fid2,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
@@ -582,12 +602,10 @@ mod tests {
             .expect("record usage");
 
         let enforcer = BudgetEnforcer::new(Arc::clone(&metering));
-        enforcer
-            .set_global_limit(BudgetLimit {
-                max_cost_per_day_cents: Some(100),
-                ..Default::default()
-            })
-            .await;
+        enforcer.set_global_limit(BudgetLimit {
+            max_cost_per_day_usd: Some(1.0),
+            ..Default::default()
+        });
 
         // Even a different fighter should be blocked by global limit.
         let fid2 = setup_fighter(&memory).await;
@@ -621,12 +639,12 @@ mod tests {
         let (metering, memory) = setup().await;
         let fid = setup_fighter(&memory).await;
 
-        // Even with zero usage, a limit of 0 cents should block immediately.
+        // Even with zero usage, a limit of $0.00 should block immediately.
         let enforcer = BudgetEnforcer::new(Arc::clone(&metering));
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(0),
+                max_cost_per_day_usd: Some(0.0),
                 ..Default::default()
             },
         );
@@ -658,21 +676,21 @@ mod tests {
         enforcer.set_fighter_limit(
             fid1,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
         enforcer.set_fighter_limit(
             fid2,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 ..Default::default()
             },
         );
         enforcer.set_fighter_limit(
             fid3,
             BudgetLimit {
-                max_cost_per_day_cents: Some(50),
+                max_cost_per_day_usd: Some(0.50),
                 ..Default::default()
             },
         );
@@ -699,11 +717,11 @@ mod tests {
 
         let enforcer = BudgetEnforcer::new(Arc::clone(&metering));
 
-        // Set threshold to 95% — with 90 cents out of 100, we should NOT get a warning.
+        // Set threshold to 95% — with $0.90 out of $1.00, we should NOT get a warning.
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 warning_threshold_percent: 95,
                 ..Default::default()
             },
@@ -721,7 +739,7 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(100),
+                max_cost_per_day_usd: Some(1.0),
                 warning_threshold_percent: 50,
                 ..Default::default()
             },
@@ -751,17 +769,17 @@ mod tests {
         enforcer.set_fighter_limit(
             fid,
             BudgetLimit {
-                max_cost_per_day_cents: Some(1), // 1 cent limit
+                max_cost_per_day_usd: Some(0.01), // 1 cent limit
                 ..Default::default()
             },
         );
 
         let verdict = enforcer.check_budget(&fid).await.expect("check budget");
-        // 0.75 cents out of 1 cent = 75%, under 80% threshold => Allowed
+        // $0.0075 out of $0.01 = 75%, under 80% threshold => Allowed
         assert_eq!(
             verdict,
             BudgetVerdict::Allowed,
-            "0.75 cents should be under 1 cent limit at 80% threshold: {:?}",
+            "$0.0075 should be under $0.01 limit at 80% threshold: {:?}",
             verdict
         );
     }

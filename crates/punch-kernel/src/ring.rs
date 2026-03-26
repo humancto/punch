@@ -29,7 +29,7 @@ use punch_skills::{SkillMarketplace, builtin_skills};
 
 use crate::agent_messaging::MessageRouter;
 use crate::background::BackgroundExecutor;
-use crate::budget::BudgetEnforcer;
+use crate::budget::{BudgetEnforcer, BudgetLimit};
 use crate::event_bus::EventBus;
 use crate::heartbeat_scheduler::HeartbeatScheduler;
 use crate::metering::MeteringEngine;
@@ -140,6 +140,31 @@ pub struct Ring {
     _shutdown_rx: watch::Receiver<bool>,
 }
 
+/// Apply budget limits from `PunchConfig` to the `BudgetEnforcer`.
+///
+/// Converts daily and monthly USD limits into a single daily USD limit
+/// (using the more restrictive of the two) and sets it on the enforcer.
+fn apply_budget_config(config: &PunchConfig, enforcer: &BudgetEnforcer) {
+    if !config.budget.has_any_limit() {
+        return;
+    }
+    let daily_from_config = config.budget.daily_cost_limit_usd;
+    let daily_from_monthly = config.budget.monthly_cost_limit_usd.map(|m| m / 30.0);
+    let max_cost_per_day_usd = match (daily_from_config, daily_from_monthly) {
+        (Some(d), Some(m)) => Some(d.min(m)),
+        (Some(d), None) => Some(d),
+        (None, Some(m)) => Some(m),
+        (None, None) => None,
+    };
+    let limit = BudgetLimit {
+        warning_threshold_percent: config.budget.eco_mode_threshold_percent,
+        max_cost_per_day_usd,
+        ..Default::default()
+    };
+    enforcer.set_global_limit(limit);
+    info!("budget limits loaded from config");
+}
+
 impl Ring {
     /// Create a new Ring.
     ///
@@ -159,6 +184,10 @@ impl Ring {
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+
+        // Apply config-based budget limits to the enforcer.
+        apply_budget_config(&config, &budget_enforcer);
+
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
@@ -211,6 +240,10 @@ impl Ring {
         let metering = MeteringEngine::new(Arc::clone(&memory));
         let metering_arc = Arc::new(MeteringEngine::new(Arc::clone(&memory)));
         let budget_enforcer = Arc::new(BudgetEnforcer::new(Arc::clone(&metering_arc)));
+
+        // Apply config-based budget limits.
+        apply_budget_config(&config, &budget_enforcer);
+
         let metrics_registry = Arc::new(MetricsRegistry::new());
         metrics::register_default_metrics(&metrics_registry);
 
@@ -704,6 +737,8 @@ impl Ring {
         }
 
         // Check budget enforcement (opt-in — only blocks if limits are configured).
+        // When approaching a limit (Warning), activate eco mode for this request.
+        let mut eco_mode = false;
         match self.budget_enforcer.check_budget(fighter_id).await {
             Ok(crate::budget::BudgetVerdict::Blocked {
                 reason,
@@ -716,7 +751,8 @@ impl Ring {
                 });
             }
             Ok(crate::budget::BudgetVerdict::Warning { message, .. }) => {
-                info!(warning = %message, "budget warning for fighter");
+                info!(warning = %message, "budget warning — activating eco mode");
+                eco_mode = true;
             }
             Ok(crate::budget::BudgetVerdict::Allowed) => {}
             Err(e) => {
@@ -830,6 +866,7 @@ impl Ring {
             },
             channel_notifier: None,
             user_content_parts: content_parts,
+            eco_mode,
         };
 
         // Record message metric.

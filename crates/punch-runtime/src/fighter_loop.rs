@@ -105,6 +105,10 @@ pub struct FighterLoopParams {
     /// When present, the user message is sent with these parts for vision-capable models.
     #[allow(clippy::struct_field_names)]
     pub user_content_parts: Vec<punch_types::ContentPart>,
+    /// When true, the fighter operates in eco mode: forces cheap model tier,
+    /// caps max_tokens to 1024, skips post-bout reflection, and uses compact creed.
+    /// Activated when approaching budget limits.
+    pub eco_mode: bool,
 }
 
 /// Result of a completed fighter loop run.
@@ -179,46 +183,76 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     messages.push(user_msg);
 
     // 2b. Model routing: check if we should use a tier-specific driver.
+    // In eco mode, force the cheap tier to minimize costs.
     let mut routed_tier: Option<String> = None;
     let mut routed_provider: Option<punch_types::Provider> = None;
-    let routed_driver: Option<Arc<dyn LlmDriver>> = params
-        .model_routing
-        .as_ref()
-        .and_then(|routing_config| {
-            let router = ModelRouter::new(routing_config.clone());
-            router.route_message_with_context(&params.user_message, &messages)
-        })
-        .and_then(
-            |(tier, model_config)| match ModelRouter::create_tier_driver(&model_config) {
+    let routed_driver: Option<Arc<dyn LlmDriver>> =
+        if params.eco_mode {
+            // Eco mode: try to use the cheap model if routing is configured.
+            params
+            .model_routing
+            .as_ref()
+            .and_then(|routing_config| {
+                let router = ModelRouter::new(routing_config.clone());
+                router.select_model(crate::model_router::ModelTier::Cheap).cloned()
+            })
+            .and_then(|model_config| match ModelRouter::create_tier_driver(&model_config) {
                 Ok(driver) => {
                     info!(
-                        tier = %tier,
                         model = %model_config.model,
-                        "model router: using tier-specific driver"
+                        "eco mode: forcing cheap tier to save costs"
                     );
-                    routed_tier = Some(tier.to_string());
+                    routed_tier = Some("cheap".to_string());
                     routed_provider = Some(model_config.provider);
                     Some(driver)
                 }
                 Err(e) => {
-                    warn!(
-                        tier = %tier,
-                        error = %e,
-                        "model router: failed to create tier driver, falling back to default"
-                    );
+                    warn!(error = %e, "eco mode: failed to create cheap driver, using default");
+                    routed_tier = Some("cheap".to_string());
                     None
                 }
-            },
-        );
+            })
+        } else {
+            params
+            .model_routing
+            .as_ref()
+            .and_then(|routing_config| {
+                let router = ModelRouter::new(routing_config.clone());
+                router.route_message_with_context(&params.user_message, &messages)
+            })
+            .and_then(
+                |(tier, model_config)| match ModelRouter::create_tier_driver(&model_config) {
+                    Ok(driver) => {
+                        info!(
+                            tier = %tier,
+                            model = %model_config.model,
+                            "model router: using tier-specific driver"
+                        );
+                        routed_tier = Some(tier.to_string());
+                        routed_provider = Some(model_config.provider);
+                        Some(driver)
+                    }
+                    Err(e) => {
+                        warn!(
+                            tier = %tier,
+                            error = %e,
+                            "model router: failed to create tier driver, falling back to default"
+                        );
+                        None
+                    }
+                },
+            )
+        };
     let active_driver: &dyn LlmDriver = match &routed_driver {
         Some(d) => d.as_ref(),
         None => params.driver.as_ref(),
     };
 
-    // Use compact creed rendering for cheap/mid tiers to save tokens.
-    let use_compact_creed = routed_tier
-        .as_deref()
-        .is_some_and(|t| t == "cheap" || t == "mid");
+    // Use compact creed rendering for cheap/mid tiers (and always in eco mode) to save tokens.
+    let use_compact_creed = params.eco_mode
+        || routed_tier
+            .as_deref()
+            .is_some_and(|t| t == "cheap" || t == "mid");
 
     // 3. Recall relevant memories and build an enriched system prompt.
     let system_prompt = build_system_prompt(
@@ -329,10 +363,16 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 // Adaptive max_tokens: scale output budget by model tier.
                 // Cheap tier gets less headroom since greetings/simple answers
                 // don't need 4K output tokens. Expensive tier gets full budget.
-                let tier_default = match routed_tier.as_deref() {
-                    Some("cheap") => DEFAULT_MAX_TOKENS_CHEAP,
-                    Some("mid") => DEFAULT_MAX_TOKENS_MID,
-                    _ => DEFAULT_MAX_TOKENS_EXPENSIVE, // expensive or no routing
+                // In eco mode, always cap to cheap-tier budget even when routing
+                // is not configured (prevents eco mode from being a no-op).
+                let tier_default = if params.eco_mode {
+                    DEFAULT_MAX_TOKENS_CHEAP
+                } else {
+                    match routed_tier.as_deref() {
+                        Some("cheap") => DEFAULT_MAX_TOKENS_CHEAP,
+                        Some("mid") => DEFAULT_MAX_TOKENS_MID,
+                        _ => DEFAULT_MAX_TOKENS_EXPENSIVE,
+                    }
                 };
                 // Reasoning models (Qwen, DeepSeek) use thinking tokens internally,
                 // so they need a much higher default to leave room for visible output.
@@ -472,12 +512,9 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 // Conditional reflection: only reflect on substantive bouts.
                 // Skip reflection for simple exchanges (few messages and no tool use)
                 // to avoid wasting an LLM call on "hello" / "how are you?" bouts.
-                // We use messages.len() (which counts all messages in the bout including
-                // history) rather than guard.iterations() because iterations only tracks
-                // tool-use rounds and retries — a substantive single-turn text exchange
-                // would have 0 iterations but still deserve reflection.
-                let is_substantive_bout =
-                    messages.len() >= REFLECTION_MIN_MESSAGES || tool_calls_made > 0;
+                // Also skip entirely in eco mode to minimize token spend.
+                let is_substantive_bout = !params.eco_mode
+                    && (messages.len() >= REFLECTION_MIN_MESSAGES || tool_calls_made > 0);
                 if is_substantive_bout {
                     let driver = Arc::clone(&params.driver);
                     let memory = Arc::clone(&params.memory);
