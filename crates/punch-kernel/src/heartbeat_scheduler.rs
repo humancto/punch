@@ -197,7 +197,124 @@ async fn heartbeat_loop(mut cfg: HeartbeatLoopConfig) {
             }
         };
 
-        // 2. Compute sleep duration from finest timed cadence.
+        // 2. Check for already-due tasks before sleeping (handles overdue
+        //    heartbeats after restart or monitor start).
+        let mut creed = creed;
+
+        // 3. Check due tasks (timed only — skip every_bout and on_wake).
+        let due_indices: Vec<usize> = creed
+            .heartbeat
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| {
+                if !h.active {
+                    return false;
+                }
+                is_timed_cadence_due(h)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        // 4. Execute due tasks if any.
+        if !due_indices.is_empty() {
+            let due_tasks: Vec<String> = due_indices
+                .iter()
+                .map(|&i| creed.heartbeat[i].task.clone())
+                .collect();
+
+            info!(
+                fighter = %fighter_name,
+                tasks = due_tasks.len(),
+                "executing heartbeat bout"
+            );
+
+            // Build the heartbeat prompt.
+            let mut prompt = format!(
+                "[HEARTBEAT] You are {}. The following proactive tasks are due:\n{}",
+                fighter_name,
+                due_tasks
+                    .iter()
+                    .map(|t| format!("- {t}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+
+            prompt.push_str(
+                "\n\nExecute each task using your available tools. \
+                 If you have results to share with the user, use channel_notify to message them.",
+            );
+
+            // Inject chat_id hint if available.
+            if let Some(cid) = chat_id_hint {
+                prompt.push_str(&format!(
+                    "\nTo notify the user, use channel_notify with channel=\"telegram\" and chat_id=\"{cid}\"."
+                ));
+            }
+
+            // Run a heartbeat bout.
+            let bout_id = match memory.create_bout(&fighter_id).await {
+                Ok(id) => id,
+                Err(e) => {
+                    warn!(fighter = %fighter_name, error = %e, "failed to create heartbeat bout");
+                    // Still sleep before retrying.
+                    let sleep_dur = compute_next_wake(&creed);
+                    tokio::select! {
+                        _ = tokio::time::sleep(sleep_dur) => continue,
+                        _ = shutdown_rx.changed() => break,
+                    }
+                }
+            };
+
+            let params = FighterLoopParams {
+                manifest: manifest.clone(),
+                user_message: prompt,
+                bout_id,
+                fighter_id,
+                memory: Arc::clone(memory),
+                driver: Arc::clone(driver),
+                available_tools: tools_for_capabilities(&manifest.capabilities),
+                max_iterations: Some(10),
+                context_window: None,
+                tool_timeout_secs: Some(60),
+                coordinator: None,
+                approval_engine: None,
+                sandbox: None,
+                mcp_clients: None,
+                model_routing: model_routing.clone(),
+                channel_notifier: channel_notifier.clone(),
+            };
+
+            match run_fighter_loop(params).await {
+                Ok(_) => {
+                    // Mark heartbeat tasks checked.
+                    for &idx in &due_indices {
+                        creed.mark_heartbeat_checked(idx);
+                    }
+                    if let Err(e) = memory.save_creed(&creed).await {
+                        warn!(fighter = %fighter_name, error = %e, "failed to save creed after heartbeat bout");
+                    }
+
+                    // Publish events.
+                    for task in &due_tasks {
+                        event_bus.publish(PunchEvent::HeartbeatExecuted {
+                            fighter_id,
+                            task_description: task.clone(),
+                        });
+                    }
+
+                    info!(
+                        fighter = %fighter_name,
+                        tasks = due_tasks.len(),
+                        "heartbeat bout completed"
+                    );
+                }
+                Err(e) => {
+                    error!(fighter = %fighter_name, error = %e, "heartbeat bout failed");
+                }
+            }
+        }
+
+        // 5. Compute sleep duration and wait for next cycle.
         let sleep_dur = compute_next_wake(&creed);
 
         // If no timed heartbeats, sleep for 5 minutes and re-check
@@ -215,125 +332,9 @@ async fn heartbeat_loop(mut cfg: HeartbeatLoopConfig) {
             "heartbeat sleeping until next wake"
         );
 
-        // 3. Sleep until wake time or shutdown.
         tokio::select! {
             _ = tokio::time::sleep(sleep_dur) => {},
             _ = shutdown_rx.changed() => break,
-        }
-
-        // 4. Reload creed (may have changed during sleep).
-        let mut creed = match memory.load_creed_by_name(fighter_name).await {
-            Ok(Some(c)) => c,
-            _ => continue,
-        };
-
-        // 5. Check due tasks (timed only — skip every_bout and on_wake).
-        let due_indices: Vec<usize> = creed
-            .heartbeat
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| {
-                if !h.active {
-                    return false;
-                }
-                is_timed_cadence_due(h)
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        if due_indices.is_empty() {
-            continue;
-        }
-
-        let due_tasks: Vec<String> = due_indices
-            .iter()
-            .map(|&i| creed.heartbeat[i].task.clone())
-            .collect();
-
-        info!(
-            fighter = %fighter_name,
-            tasks = due_tasks.len(),
-            "executing heartbeat bout"
-        );
-
-        // 6. Build the heartbeat prompt.
-        let mut prompt = format!(
-            "[HEARTBEAT] You are {}. The following proactive tasks are due:\n{}",
-            fighter_name,
-            due_tasks
-                .iter()
-                .map(|t| format!("- {t}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-
-        prompt.push_str(
-            "\n\nExecute each task using your available tools. \
-             If you have results to share with the user, use channel_notify to message them.",
-        );
-
-        // Inject chat_id hint if available.
-        if let Some(cid) = chat_id_hint {
-            prompt.push_str(&format!(
-                "\nTo notify the user, use channel_notify with channel=\"telegram\" and chat_id=\"{cid}\"."
-            ));
-        }
-
-        // 7. Run a heartbeat bout.
-        let bout_id = match memory.create_bout(&fighter_id).await {
-            Ok(id) => id,
-            Err(e) => {
-                warn!(fighter = %fighter_name, error = %e, "failed to create heartbeat bout");
-                continue;
-            }
-        };
-
-        let params = FighterLoopParams {
-            manifest: manifest.clone(),
-            user_message: prompt,
-            bout_id,
-            fighter_id,
-            memory: Arc::clone(memory),
-            driver: Arc::clone(driver),
-            available_tools: tools_for_capabilities(&manifest.capabilities),
-            max_iterations: Some(10),
-            context_window: None,
-            tool_timeout_secs: Some(60),
-            coordinator: None,
-            approval_engine: None,
-            sandbox: None,
-            mcp_clients: None,
-            model_routing: model_routing.clone(),
-            channel_notifier: channel_notifier.clone(),
-        };
-
-        match run_fighter_loop(params).await {
-            Ok(_) => {
-                // Mark heartbeat tasks checked.
-                for &idx in &due_indices {
-                    creed.mark_heartbeat_checked(idx);
-                }
-                if let Err(e) = memory.save_creed(&creed).await {
-                    warn!(fighter = %fighter_name, error = %e, "failed to save creed after heartbeat bout");
-                }
-
-                // Publish events.
-                for task in &due_tasks {
-                    event_bus.publish(PunchEvent::HeartbeatExecuted {
-                        fighter_id,
-                        task_description: task.clone(),
-                    });
-                }
-
-                info!(
-                    fighter = %fighter_name,
-                    tasks = due_tasks.len(),
-                    "heartbeat bout completed"
-                );
-            }
-            Err(e) => {
-                error!(fighter = %fighter_name, error = %e, "heartbeat bout failed");
-            }
         }
     }
 

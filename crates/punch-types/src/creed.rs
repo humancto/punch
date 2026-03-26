@@ -329,7 +329,7 @@ impl Creed {
     /// Used by the tool executor to validate user-provided cadences
     /// beyond the builtin keywords.
     pub fn is_valid_cadence(cadence: &str) -> bool {
-        Self::parse_cadence_secs(cadence).is_some()
+        matches!(Self::parse_cadence_secs(cadence), Some(secs) if secs > 0)
     }
 
     /// Parse a cadence string into seconds. Supports:

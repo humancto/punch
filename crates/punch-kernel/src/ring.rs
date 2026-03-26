@@ -113,6 +113,8 @@ pub struct Ring {
     background: BackgroundExecutor,
     /// Proactive heartbeat scheduler for fighter agents.
     heartbeat_scheduler: HeartbeatScheduler,
+    /// Optional channel notifier for proactive heartbeat notifications.
+    channel_notifier: Arc<std::sync::RwLock<Option<Arc<dyn punch_types::ChannelNotifier>>>>,
     /// Multi-step workflow engine.
     workflow_engine: WorkflowEngine,
     /// Cost tracking and metering engine.
@@ -180,6 +182,7 @@ impl Ring {
             config,
             background,
             heartbeat_scheduler,
+            channel_notifier: Arc::new(std::sync::RwLock::new(None)),
             workflow_engine: WorkflowEngine::new(),
             metering,
             budget_enforcer,
@@ -231,6 +234,7 @@ impl Ring {
             config,
             background,
             heartbeat_scheduler,
+            channel_notifier: Arc::new(std::sync::RwLock::new(None)),
             workflow_engine: WorkflowEngine::new(),
             metering,
             budget_enforcer,
@@ -597,7 +601,7 @@ impl Ring {
                     memory: Arc::clone(&self.memory),
                     driver: Arc::clone(&self.driver),
                     event_bus: self.event_bus.clone(),
-                    channel_notifier: None, // set later via API layer
+                    channel_notifier: self.channel_notifier.read().ok().and_then(|g| g.clone()),
                     model_routing: Some(self.config.model_routing.clone()),
                     chat_id_hint: None, // populated from channel config
                 },
@@ -868,6 +872,17 @@ impl Ring {
     /// Access the heartbeat scheduler (e.g. for refresh after heartbeat config changes).
     pub fn heartbeat_scheduler(&self) -> &HeartbeatScheduler {
         &self.heartbeat_scheduler
+    }
+
+    /// Set the channel notifier for proactive heartbeat notifications.
+    ///
+    /// Should be called once during API server setup after the channel bridge
+    /// is constructed. Existing heartbeat monitors will pick up the notifier
+    /// on their next refresh cycle.
+    pub fn set_channel_notifier(&self, notifier: Arc<dyn punch_types::ChannelNotifier>) {
+        if let Ok(mut guard) = self.channel_notifier.write() {
+            *guard = Some(notifier);
+        }
     }
 
     /// Kill (remove) a fighter.
