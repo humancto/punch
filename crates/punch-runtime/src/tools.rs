@@ -914,7 +914,7 @@ fn web_search() -> ToolDefinition {
 fn memory_store() -> ToolDefinition {
     ToolDefinition {
         name: "memory_store".into(),
-        description: "Store a key-value pair in persistent memory across conversations.".into(),
+        description: "Store a key-value pair in persistent memory. Use to remember facts, preferences, or context across conversations.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2259,7 +2259,7 @@ fn skill_list() -> ToolDefinition {
 fn skill_recommend() -> ToolDefinition {
     ToolDefinition {
         name: "skill_recommend".into(),
-        description: "Recommend a skill pack and show the user the install command.".into(),
+        description: "Recommend a skill pack when the user needs capabilities you don't have (calendar, email, GitHub). Shows install command.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2328,7 +2328,7 @@ fn ui_screenshot() -> ToolDefinition {
 fn app_ocr() -> ToolDefinition {
     ToolDefinition {
         name: "app_ocr".into(),
-        description: "Extract text from an app window using OCR. Returns plain text.".into(),
+        description: "Extract text from an app window using OCR. Returns plain text. Prefer over sys_screenshot for text extraction.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -2346,7 +2346,7 @@ fn app_ocr() -> ToolDefinition {
 fn ui_find_elements() -> ToolDefinition {
     ToolDefinition {
         name: "ui_find_elements".into(),
-        description: "Query the accessibility tree of an app to find UI elements. Returns element IDs for ui_click/ui_type_text.".into(),
+        description: "Query the accessibility tree of an app to find UI elements. Returns element IDs for ui_click/ui_type_text. Re-query after state changes — IDs are ephemeral.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
