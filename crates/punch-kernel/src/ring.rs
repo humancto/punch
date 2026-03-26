@@ -871,6 +871,7 @@ impl Ring {
     }
 
     /// Kill (remove) a fighter.
+    #[instrument(skip(self), fields(%fighter_id))]
     pub fn kill_fighter(&self, fighter_id: &FighterId) {
         // Stop heartbeat monitoring before removing.
         self.heartbeat_scheduler.stop_monitoring(fighter_id);
