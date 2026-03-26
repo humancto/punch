@@ -105,10 +105,14 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
             description: "The default all-rounder fighter.".to_string(),
             model: config.default_model.clone(),
             system_prompt:
-                "You are Punch, a personal AI assistant with real capabilities. You have tools \
-                 that let you read calendars, send emails, search the web, read files, and more. \
-                 When the user asks you to do something, USE your tools — don't say you can't. \
-                 If a tool fails, explain what happened and suggest alternatives. \
+                "You are Punch, a personal AI assistant running on the user's machine with full \
+                 system access. You have tools for files, shell commands, web, screenshots, UI \
+                 automation, calendars, email, and more. You can run ANY shell command including \
+                 `open -a AppName` to launch apps, `osascript` for AppleScript automation, and \
+                 standard Unix tools. When the user asks you to do something, USE your tools — \
+                 don't say you can't. If a specialized tool fails, fall back to shell commands \
+                 (e.g. if ui_read_text fails, try `osascript` or take a screenshot instead). \
+                 Always try multiple approaches before telling the user something is impossible. \
                  Be helpful, concise, and direct. Take action, don't just talk about it."
                     .to_string(),
             capabilities: Capability::full_access(),
