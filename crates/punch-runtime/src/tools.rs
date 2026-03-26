@@ -2489,11 +2489,13 @@ mod tests {
         let nav = browser_navigate();
         assert_eq!(nav.name, "browser_navigate");
         assert_eq!(nav.category, ToolCategory::Browser);
-        assert!(nav.input_schema["required"]
-            .as_array()
-            .expect("required should be array")
-            .iter()
-            .any(|v| v == "url"));
+        assert!(
+            nav.input_schema["required"]
+                .as_array()
+                .expect("required should be array")
+                .iter()
+                .any(|v| v == "url")
+        );
 
         let ss = browser_screenshot();
         assert_eq!(ss.name, "browser_screenshot");
@@ -2501,11 +2503,13 @@ mod tests {
 
         let click = browser_click();
         assert_eq!(click.name, "browser_click");
-        assert!(click.input_schema["required"]
-            .as_array()
-            .expect("required should be array")
-            .iter()
-            .any(|v| v == "selector"));
+        assert!(
+            click.input_schema["required"]
+                .as_array()
+                .expect("required should be array")
+                .iter()
+                .any(|v| v == "selector")
+        );
 
         let typ = browser_type();
         assert_eq!(typ.name, "browser_type");
