@@ -13,6 +13,7 @@ pub mod background;
 pub mod budget;
 pub mod config_watcher;
 pub mod event_bus;
+pub mod heartbeat_scheduler;
 pub mod metering;
 pub mod metrics;
 pub mod patterns;
@@ -35,6 +36,7 @@ pub use background::{BackgroundExecutor, fighter_manifest_from_gorilla, run_gori
 pub use budget::{BudgetEnforcer, BudgetLimit, BudgetStatus, BudgetVerdict};
 pub use config_watcher::{KernelConfigDiff, KernelConfigWatcher};
 pub use event_bus::EventBus;
+pub use heartbeat_scheduler::{HeartbeatScheduler, HeartbeatStartConfig};
 pub use metering::{MeteringEngine, ModelPrice, SpendPeriod};
 pub use metrics::{MetricsRegistry, register_default_metrics};
 pub use patterns::{

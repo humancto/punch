@@ -340,6 +340,7 @@ fn event_kind_string(event: &PunchEvent) -> String {
         PunchEvent::TroopDisbanded { .. } => "troop_disbanded".to_string(),
         PunchEvent::McpServerStarted { .. } => "mcp_server_started".to_string(),
         PunchEvent::McpServerStopped { .. } => "mcp_server_stopped".to_string(),
+        PunchEvent::HeartbeatExecuted { .. } => "heartbeat_executed".to_string(),
         PunchEvent::Error { .. } => "error".to_string(),
     }
 }

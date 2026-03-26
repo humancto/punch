@@ -1640,20 +1640,21 @@ fn heartbeat_add() -> ToolDefinition {
     ToolDefinition {
         name: "heartbeat_add".into(),
         description: "Add a proactive heartbeat task to your creed. Heartbeat tasks fire on a \
-                      cadence (every_bout, on_wake, hourly, daily) and remind you to perform \
-                      recurring actions like morning briefings, health checks, or summaries."
+                      cadence and remind you to perform recurring actions like checking email, \
+                      monitoring endpoints, or daily briefings. Timed cadences (hourly, daily, \
+                      weekly, 'every 30m', cron) are executed by the background scheduler — \
+                      no user message needed."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "What to do when the heartbeat fires (e.g., \"Morning briefing: summarize calendar and emails\")."
+                    "description": "What to do when the heartbeat fires (e.g., \"Check email for important messages and notify user\")."
                 },
                 "cadence": {
                     "type": "string",
-                    "enum": ["every_bout", "on_wake", "hourly", "daily"],
-                    "description": "How often: every_bout (every conversation), on_wake (first bout after restart), hourly, daily."
+                    "description": "How often: every_bout, on_wake, hourly, daily, weekly, 'every 30m', 'every 2h', or cron like '*/10 * * * *'."
                 }
             },
             "required": ["task", "cadence"]
