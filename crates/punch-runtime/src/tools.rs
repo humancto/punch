@@ -758,13 +758,14 @@ impl ToolSelector {
                 }
             }
             for tr in &msg.tool_results {
-                // Include first 200 chars of tool result content for keyword detection.
-                let snippet = if tr.content.len() > 200 {
-                    &tr.content[..200]
+                // Include first ~200 chars of tool result content for keyword detection.
+                // Use floor_char_boundary to avoid panicking on multi-byte UTF-8.
+                let end = if tr.content.len() > 200 {
+                    tr.content.floor_char_boundary(200)
                 } else {
-                    &tr.content
+                    tr.content.len()
                 };
-                text.push_str(snippet);
+                text.push_str(&tr.content[..end]);
                 text.push(' ');
             }
         }
@@ -2488,13 +2489,11 @@ mod tests {
         let nav = browser_navigate();
         assert_eq!(nav.name, "browser_navigate");
         assert_eq!(nav.category, ToolCategory::Browser);
-        assert!(
-            nav.input_schema["required"]
-                .as_array()
-                .expect("required should be array")
-                .iter()
-                .any(|v| v == "url")
-        );
+        assert!(nav.input_schema["required"]
+            .as_array()
+            .expect("required should be array")
+            .iter()
+            .any(|v| v == "url"));
 
         let ss = browser_screenshot();
         assert_eq!(ss.name, "browser_screenshot");
@@ -2502,13 +2501,11 @@ mod tests {
 
         let click = browser_click();
         assert_eq!(click.name, "browser_click");
-        assert!(
-            click.input_schema["required"]
-                .as_array()
-                .expect("required should be array")
-                .iter()
-                .any(|v| v == "selector")
-        );
+        assert!(click.input_schema["required"]
+            .as_array()
+            .expect("required should be array")
+            .iter()
+            .any(|v| v == "selector"));
 
         let typ = browser_type();
         assert_eq!(typ.name, "browser_type");
