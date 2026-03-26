@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use punch_types::{AgentCoordinator, FighterManifest, ModelConfig, WeightClass};
+use punch_types::{AgentCoordinator, Capability, FighterManifest, ModelConfig, WeightClass};
 
 use crate::AppState;
 
@@ -91,7 +91,10 @@ async fn simple_chat(
                 temperature: state.config.default_model.temperature,
             },
             system_prompt,
-            capabilities: vec![],
+            // Full access is safe here: the API binds to 127.0.0.1 (localhost
+            // only). If the API is ever exposed on 0.0.0.0 or via a reverse proxy,
+            // this must be replaced with a restricted capability set.
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         };

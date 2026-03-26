@@ -508,6 +508,9 @@ async fn tool_file_read(
         }
     }
 
+    // Cap file reads to avoid blowing up context. ~100K chars ≈ ~25K tokens.
+    const MAX_FILE_CHARS: usize = 100_000;
+
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => {
             // Scan file content for leaked secrets if bleed detector is active.
@@ -526,10 +529,28 @@ async fn tool_file_read(
                 }
             }
 
-            debug!(path = %path_display, bytes = content.len(), "file read");
+            let total_bytes = content.len();
+            let (output_content, was_truncated) = if content.len() > MAX_FILE_CHARS {
+                let truncated: String = content.chars().take(MAX_FILE_CHARS).collect();
+                (truncated, true)
+            } else {
+                (content, false)
+            };
+
+            debug!(path = %path_display, bytes = total_bytes, truncated = was_truncated, "file read");
+
+            let output = if was_truncated {
+                serde_json::json!(format!(
+                    "{}\n\n--- TRUNCATED: showing first {} of {} bytes. Use shell_exec with head/tail/grep to inspect specific sections. ---",
+                    output_content, MAX_FILE_CHARS, total_bytes
+                ))
+            } else {
+                serde_json::json!(output_content)
+            };
+
             Ok(ToolResult {
                 success: true,
-                output: serde_json::json!(content),
+                output,
                 error: None,
                 duration_ms: 0,
             })

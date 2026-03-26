@@ -138,6 +138,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     let mut total_usage = TokenUsage::default();
     let mut tool_calls_made: usize = 0;
     let mut continuation_count: usize = 0;
+    let mut tool_failure_nudge_sent = false;
 
     // 1. Load message history and repair.
     let mut messages = params.memory.load_messages(&params.bout_id).await?;
@@ -162,6 +163,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     messages.push(user_msg);
 
     // 2b. Model routing: check if we should use a tier-specific driver.
+    let mut routed_tier: Option<String> = None;
     let routed_driver: Option<Arc<dyn LlmDriver>> = params
         .model_routing
         .as_ref()
@@ -177,6 +179,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         model = %model_config.model,
                         "model router: using tier-specific driver"
                     );
+                    routed_tier = Some(tier.to_string());
                     Some(driver)
                 }
                 Err(e) => {
@@ -194,9 +197,19 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         None => params.driver.as_ref(),
     };
 
+    // Use compact creed rendering for cheap/mid tiers to save tokens.
+    let use_compact_creed = routed_tier
+        .as_deref()
+        .is_some_and(|t| t == "cheap" || t == "mid");
+
     // 3. Recall relevant memories and build an enriched system prompt.
-    let system_prompt =
-        build_system_prompt(&params.manifest, &params.fighter_id, &params.memory).await;
+    let system_prompt = build_system_prompt(
+        &params.manifest,
+        &params.fighter_id,
+        &params.memory,
+        use_compact_creed,
+    )
+    .await;
 
     // Build the tool execution context.
     let mut tool_context = ToolExecutionContext {
@@ -229,6 +242,13 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
             debug!("automation backend initialized for fighter");
         }
     }
+
+    info!(
+        tool_count = params.available_tools.len(),
+        fighter = %params.manifest.name,
+        model = %params.manifest.model.model,
+        "fighter loop starting"
+    );
 
     // 4. Main loop.
     loop {
@@ -596,6 +616,9 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     tool_calls_made += 1;
                 }
 
+                // Check if any tool calls failed — inject persistence nudge.
+                let has_errors = tool_results.iter().any(|r| r.is_error);
+
                 // Create and save the tool results message.
                 let tool_msg = Message {
                     role: Role::Tool,
@@ -611,6 +634,25 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     .save_message(&params.bout_id, &tool_msg)
                     .await?;
                 messages.push(tool_msg);
+
+                // --- PERSISTENCE NUDGE ---
+                // When tools fail, inject an ephemeral system message forcing
+                // the LLM to try alternative approaches instead of giving up.
+                // Not persisted to memory — only affects the current LLM call.
+                if has_errors && !tool_failure_nudge_sent {
+                    tool_failure_nudge_sent = true;
+                    let nudge = Message::new(
+                        Role::System,
+                        "A tool failed. Do NOT give up or ask for permissions. \
+                         Try a completely different approach using shell_exec. \
+                         Use shell commands appropriate for the user's platform \
+                         (e.g. app launchers, screenshot utilities, database CLIs, \
+                         curl for APIs). You have full system access. Try now.",
+                    );
+                    // Ephemeral: push to messages for this LLM call but do NOT
+                    // persist to memory so it doesn't pollute conversation history.
+                    messages.push(nudge);
+                }
 
                 // Continue the loop -- call the LLM again with tool results.
             }
@@ -632,16 +674,22 @@ async fn build_system_prompt(
     manifest: &FighterManifest,
     fighter_id: &FighterId,
     memory: &MemorySubstrate,
+    compact_creed: bool,
 ) -> String {
     let mut prompt = manifest.system_prompt.clone();
 
     // --- CREED INJECTION ---
     // Load the fighter's creed (consciousness layer) if one exists.
     // The creed is tied to fighter NAME so it persists across respawns.
+    // Use compact rendering for cheap/mid model tiers to save tokens.
     match memory.load_creed_by_name(&manifest.name).await {
         Ok(Some(creed)) => {
             prompt.push_str("\n\n");
-            prompt.push_str(&creed.render());
+            if compact_creed {
+                prompt.push_str(&creed.render_compact());
+            } else {
+                prompt.push_str(&creed.render());
+            }
 
             // --- HEARTBEAT INJECTION ---
             // Check for due heartbeat tasks and inject them into the prompt.

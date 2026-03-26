@@ -568,15 +568,43 @@ impl Ring {
             // Clone the manifest for the creed before it's moved into the entry.
             let manifest_for_creed = self.fighters.get(&id).map(|e| e.value().manifest.clone());
             tokio::spawn(async move {
-                // Ensure a creed exists (create default if not).
-                if let Ok(None) = memory.load_creed_by_name(&creed_name).await
-                    && let Some(manifest) = &manifest_for_creed
-                {
-                    let creed = punch_types::Creed::new(&creed_name).with_self_awareness(manifest);
-                    if let Err(e) = memory.save_creed(&creed).await {
-                        warn!(error = %e, fighter = %creed_name, "failed to create default creed");
-                    } else {
-                        info!(fighter = %creed_name, "default creed created on spawn");
+                // Ensure a creed exists (create default if not), and keep
+                // the self-model in sync with the current manifest/config.
+                match memory.load_creed_by_name(&creed_name).await {
+                    Ok(None) if manifest_for_creed.is_some() => {
+                        let manifest = manifest_for_creed.as_ref().unwrap();
+                        let creed =
+                            punch_types::Creed::new(&creed_name).with_self_awareness(manifest);
+                        if let Err(e) = memory.save_creed(&creed).await {
+                            warn!(error = %e, fighter = %creed_name, "failed to create default creed");
+                        } else {
+                            info!(fighter = %creed_name, "default creed created on spawn");
+                        }
+                    }
+                    Ok(Some(mut creed)) if manifest_for_creed.is_some() => {
+                        // Update self-model if the config has changed (e.g. switched
+                        // from Ollama to Gemini). Preserves all other creed state.
+                        let manifest = manifest_for_creed.as_ref().unwrap();
+                        let new_model = manifest.model.model.clone();
+                        let new_provider = manifest.model.provider.to_string();
+                        if creed.self_model.model_name != new_model
+                            || creed.self_model.provider != new_provider
+                        {
+                            info!(
+                                fighter = %creed_name,
+                                old_model = %creed.self_model.model_name,
+                                new_model = %new_model,
+                                "updating creed self-model to match current config"
+                            );
+                            creed = creed.with_self_awareness(manifest);
+                            if let Err(e) = memory.save_creed(&creed).await {
+                                warn!(error = %e, fighter = %creed_name, "failed to update creed self-model");
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!(error = %e, fighter = %creed_name, "failed to check creed on spawn");
                     }
                 }
                 // Bind the creed to this fighter instance.

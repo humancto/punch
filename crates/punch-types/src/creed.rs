@@ -621,6 +621,106 @@ impl Creed {
 
         out
     }
+
+    /// Compact creed rendering for token-efficient contexts.
+    ///
+    /// Omits empty sections entirely, uses inline trait format instead of bar
+    /// graphs, skips delegation rules and architecture notes, and uses shorter
+    /// headers. Typically 300-800 tokens vs 700-2,500 for full render.
+    pub fn render_compact(&self) -> String {
+        let mut out = String::new();
+        out.push_str("## CREED\n");
+
+        if !self.identity.is_empty() {
+            out.push_str(&self.identity);
+            out.push('\n');
+        }
+
+        // Personality: inline comma-separated instead of bar graphs
+        if !self.personality.is_empty() {
+            let mut traits: Vec<_> = self.personality.iter().collect();
+            traits.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let trait_str: Vec<String> = traits
+                .iter()
+                .map(|(name, val)| format!("{}:{:.0}%", name, *val * 100.0))
+                .collect();
+            out.push_str(&format!("Traits: {}\n", trait_str.join(", ")));
+        }
+
+        if !self.directives.is_empty() {
+            out.push_str("Directives: ");
+            out.push_str(&self.directives.join("; "));
+            out.push('\n');
+        }
+
+        // Self-model: single line
+        if !self.self_model.model_name.is_empty() {
+            out.push_str(&format!(
+                "Model: {} ({}, {})\n",
+                self.self_model.model_name, self.self_model.provider, self.self_model.weight_class
+            ));
+        }
+
+        // Learned behaviors: top 5 only, one-liner each
+        if !self.learned_behaviors.is_empty() {
+            let mut sorted = self.learned_behaviors.clone();
+            sorted.sort_by(|a, b| {
+                b.confidence
+                    .partial_cmp(&a.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            out.push_str("Learned: ");
+            let items: Vec<String> = sorted
+                .iter()
+                .take(5)
+                .map(|b| b.observation.clone())
+                .collect();
+            out.push_str(&items.join("; "));
+            out.push('\n');
+        }
+
+        // Interaction style: single line if non-empty
+        if !self.interaction_style.tone.is_empty() || !self.interaction_style.verbosity.is_empty() {
+            let mut parts = Vec::new();
+            if !self.interaction_style.verbosity.is_empty() {
+                parts.push(self.interaction_style.verbosity.clone());
+            }
+            if !self.interaction_style.tone.is_empty() {
+                parts.push(self.interaction_style.tone.clone());
+            }
+            out.push_str(&format!("Style: {}\n", parts.join(", ")));
+        }
+
+        // Relationships: compact, top 3 only
+        if !self.relationships.is_empty() {
+            let items: Vec<String> = self
+                .relationships
+                .iter()
+                .take(3)
+                .map(|r| format!("{}({})", r.entity, r.nature))
+                .collect();
+            out.push_str(&format!("Relations: {}\n", items.join(", ")));
+        }
+
+        // Heartbeat: active tasks only, brief
+        let active_heartbeat: Vec<_> = self.heartbeat.iter().filter(|h| h.active).collect();
+        if !active_heartbeat.is_empty() {
+            let items: Vec<String> = active_heartbeat
+                .iter()
+                .map(|h| format!("{}({})", h.task, h.cadence))
+                .collect();
+            out.push_str(&format!("Heartbeat: {}\n", items.join(", ")));
+        }
+
+        // Skip delegation rules in compact mode
+
+        out.push_str(&format!(
+            "Exp: {} bouts, {} msgs, v{}\n",
+            self.bout_count, self.message_count, self.version
+        ));
+
+        out
+    }
 }
 
 #[cfg(test)]
@@ -989,5 +1089,55 @@ mod tests {
         assert_eq!(creed.learned_behaviors.len(), 20);
         // Should keep the highest confidence ones
         assert!(creed.learned_behaviors[0].confidence >= creed.learned_behaviors[19].confidence);
+    }
+
+    #[test]
+    fn test_render_compact_minimal() {
+        let creed = Creed::new("ECHO");
+        let compact = creed.render_compact();
+        assert!(compact.contains("## CREED"));
+        assert!(compact.contains("Exp: 0 bouts, 0 msgs, v1"));
+        // Compact should NOT have verbose headers
+        assert!(!compact.contains("### Identity"));
+        assert!(!compact.contains("### Experience"));
+        assert!(!compact.contains("### Personality Traits"));
+    }
+
+    #[test]
+    fn test_render_compact_with_content() {
+        let creed = Creed::new("ECHO")
+            .with_identity("You are ECHO, an introspective analyst.")
+            .with_trait("curiosity", 0.9)
+            .with_trait("caution", 0.3)
+            .with_directive("Always explain your reasoning");
+        let compact = creed.render_compact();
+        assert!(compact.contains("You are ECHO"));
+        assert!(compact.contains("Traits:"));
+        assert!(compact.contains("curiosity:90%"));
+        assert!(compact.contains("Directives:"));
+        assert!(compact.contains("Always explain your reasoning"));
+        // No bar graphs
+        assert!(!compact.contains('\u{2588}'));
+    }
+
+    #[test]
+    fn test_render_compact_shorter_than_full() {
+        let manifest = sample_manifest();
+        let mut creed = Creed::new("ECHO")
+            .with_self_awareness(&manifest)
+            .with_identity("You are ECHO, an introspective analyst who values precision.")
+            .with_trait("curiosity", 0.9)
+            .with_trait("caution", 0.3)
+            .with_directive("Always explain your reasoning")
+            .with_directive("Never fabricate data");
+        creed.learn("Users prefer brief responses", 0.8);
+        let full = creed.render();
+        let compact = creed.render_compact();
+        assert!(
+            compact.len() < full.len(),
+            "compact ({}) should be shorter than full ({})",
+            compact.len(),
+            full.len()
+        );
     }
 }

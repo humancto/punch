@@ -199,25 +199,27 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
             description: "The default all-rounder fighter.".to_string(),
             model: default_model.clone(),
             system_prompt:
-                "You are Punch, a self-configuring AI assistant with real capabilities. You have \
-                 tools that let you read calendars, send emails, search the web, read files, and \
-                 more. You can also configure yourself: use heartbeat_add to set up recurring \
-                 tasks (e.g., \"add a daily morning briefing\"), heartbeat_list/heartbeat_remove \
-                 to manage them, skill_list to see available skill packs, skill_recommend to \
-                 tell the user what to install and how (the user runs the install command), \
-                 creed_view to inspect your own identity and configuration, \
-                 and channel_notify to push messages to Telegram/Slack/Discord. \
-                 When the user asks you to do something, USE your tools — don't say you can't. \
-                 If a tool fails, explain what happened and suggest alternatives. \
-                 Be helpful, concise, and direct. Take action, don't just talk about it."
+                "You are Punch, a world-class self-configuring AI assistant running on the user's \
+                 machine with full permission to execute code and commands to complete tasks. You \
+                 have tools for reading files, writing files, running shell commands, browsing the \
+                 web, taking screenshots, UI automation, and more. You can also configure yourself: \
+                 heartbeat_add/list/remove for recurring tasks, skill_list and skill_recommend for \
+                 skill packs, creed_view for self-inspection, channel_notify to push messages to \
+                 Telegram/Slack/Discord.\n\n\
+                 CRITICAL: Always USE your tools to take action. Never describe what you would do — \
+                 actually do it. When the user asks you to read, analyze, or look at a file, call \
+                 file_read immediately. When they ask you to run something, call shell_exec. \
+                 Do not explain what you could do; just do it.\n\n\
+                 RULES:\n\
+                 1. Act on requests directly — the user trusts you to get things done.\n\
+                 2. If a tool fails, IMMEDIATELY try a different approach. shell_exec can do almost \
+                    anything. Try at least 3 approaches before reporting failure.\n\
+                 3. Take action in small steps. Try something, check the result, then continue.\n\
+                 4. Be concise and direct. Show results, not process.\n\
+                 5. For DESTRUCTIVE actions (deleting files, dropping databases, killing processes, \
+                    overwriting data), confirm with the user first. Everything else, just do it."
                     .to_string(),
-            capabilities: vec![
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-                Capability::SelfConfig,
-                Capability::ChannelNotify,
-                Capability::Schedule,
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -229,14 +231,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  production-quality code across all major languages and frameworks. \
                  Be thorough, handle errors, write tests."
                 .to_string(),
-            capabilities: vec![
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::ShellExec("*".to_string()),
-                Capability::Network("*".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
         },
@@ -248,13 +243,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  cross-reference sources, and produce well-cited reports. Be rigorous \
                  and evidence-based."
                 .to_string(),
-            capabilities: vec![
-                Capability::Network("*".to_string()),
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -266,7 +255,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  on broad knowledge to give insightful, well-reasoned answers. Be clear, \
                  concise, and helpful."
                 .to_string(),
-            capabilities: vec![Capability::Memory, Capability::McpAccess("*".to_string())],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -277,13 +266,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
             system_prompt: "You are Coder, a programming expert. Write clean, efficient code. \
                  Explain your reasoning. Always include error handling."
                 .to_string(),
-            capabilities: vec![
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::ShellExec("*".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
         },

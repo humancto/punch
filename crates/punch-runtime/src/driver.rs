@@ -445,12 +445,29 @@ impl AnthropicDriver {
             body["temperature"] = serde_json::json!(temp);
         }
 
+        // Anthropic prompt caching: use structured system content blocks with
+        // cache_control so the system prompt is cached across turns (~90% cost
+        // reduction on cached input tokens).
         if let Some(ref system) = request.system_prompt {
-            body["system"] = serde_json::json!(system);
+            body["system"] = serde_json::json!([
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]);
         }
 
         if !tools.is_empty() {
-            body["tools"] = serde_json::json!(tools);
+            // Mark the last tool with cache_control so the entire tool block
+            // is included in the cached prefix.
+            let mut tools_json = serde_json::json!(tools);
+            if let Some(arr) = tools_json.as_array_mut()
+                && let Some(last) = arr.last_mut()
+            {
+                last["cache_control"] = serde_json::json!({"type": "ephemeral"});
+            }
+            body["tools"] = tools_json;
         }
 
         body
@@ -1309,12 +1326,13 @@ impl GeminiDriver {
     /// Build the Gemini API request body.
     pub fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
         let mut contents = Vec::new();
+        // Collect system text for the dedicated systemInstruction field.
         let mut system_text: Option<String> = request.system_prompt.clone();
 
         for msg in &request.messages {
             match msg.role {
                 Role::System => {
-                    // Gemini does not have a system role; prepend to first user message.
+                    // Accumulate system-role messages into the systemInstruction.
                     let existing = system_text.take().unwrap_or_default();
                     let combined = if existing.is_empty() {
                         msg.content.clone()
@@ -1325,16 +1343,8 @@ impl GeminiDriver {
                 }
                 Role::User => {
                     let mut parts: Vec<serde_json::Value> = Vec::new();
-                    let mut text = String::new();
-                    if let Some(sys) = system_text.take()
-                        && !sys.is_empty()
-                    {
-                        text.push_str(&sys);
-                        text.push_str("\n\n");
-                    }
-                    text.push_str(&msg.content);
-                    if !text.is_empty() {
-                        parts.push(serde_json::json!({"text": text}));
+                    if !msg.content.is_empty() {
+                        parts.push(serde_json::json!({"text": msg.content}));
                     }
                     // Add multimodal parts for Gemini.
                     for part in &msg.content_parts {
@@ -1399,22 +1409,20 @@ impl GeminiDriver {
             }
         }
 
-        // If we still have an unused system prompt (no user messages yet), add it.
-        if let Some(sys) = system_text
-            && !sys.is_empty()
-        {
-            contents.insert(
-                0,
-                serde_json::json!({
-                    "role": "user",
-                    "parts": [{"text": sys}],
-                }),
-            );
-        }
-
         let mut body = serde_json::json!({
             "contents": contents,
         });
+
+        // Use Gemini's dedicated systemInstruction field instead of prepending
+        // to user messages. This enables Gemini's automatic prompt caching and
+        // keeps the system prompt separate from conversation content.
+        if let Some(sys) = system_text
+            && !sys.is_empty()
+        {
+            body["system_instruction"] = serde_json::json!({
+                "parts": [{"text": sys}],
+            });
+        }
 
         let mut gen_config = serde_json::json!({
             "maxOutputTokens": request.max_tokens,
@@ -2927,12 +2935,15 @@ mod tests {
 
         let contents = body["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 1);
-        // System prompt should be prepended to user message.
+        // User message should contain only the user text (system is separate).
         let first_text = contents[0]["parts"][0]["text"].as_str().unwrap();
-        assert!(first_text.contains("You are helpful."));
-        assert!(first_text.contains("Hello"));
-        // Role should be "user" (not "system").
+        assert_eq!(first_text, "Hello");
         assert_eq!(contents[0]["role"].as_str().unwrap(), "user");
+        // System prompt should be in the dedicated systemInstruction field.
+        let sys_text = body["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert_eq!(sys_text, "You are helpful.");
 
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 4096);
         assert!((body["generationConfig"]["temperature"].as_f64().unwrap() - 0.7).abs() < 0.001);
@@ -2978,11 +2989,15 @@ mod tests {
         };
         let body = driver.build_request_body(&req);
         let contents = body["contents"].as_array().unwrap();
-        // System message should be merged into user message.
+        // System message should go to systemInstruction, not user message.
         assert_eq!(contents.len(), 1);
         let text = contents[0]["parts"][0]["text"].as_str().unwrap();
-        assert!(text.contains("Be concise."));
-        assert!(text.contains("Hi"));
+        assert_eq!(text, "Hi");
+        // System text lives in the dedicated field.
+        let sys_text = body["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert_eq!(sys_text, "Be concise.");
     }
 
     #[test]
@@ -3403,7 +3418,12 @@ mod tests {
 
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["max_tokens"], 4096);
-        assert_eq!(body["system"], "You are helpful.");
+        // System prompt is now a structured content block with cache_control.
+        let system = body["system"].as_array().unwrap();
+        assert_eq!(system.len(), 1);
+        assert_eq!(system[0]["type"], "text");
+        assert_eq!(system[0]["text"], "You are helpful.");
+        assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
         assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 0.001);
 
         let messages = body["messages"].as_array().unwrap();
