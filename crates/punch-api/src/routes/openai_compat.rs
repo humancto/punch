@@ -538,7 +538,7 @@ async fn handle_streaming(
 
     let result = state
         .ring
-        .send_message_with_coordinator(&fighter_id, user_message, Some(coordinator))
+        .send_message_with_coordinator(&fighter_id, user_message, Some(coordinator), vec![])
         .await;
 
     match result {
@@ -652,7 +652,7 @@ async fn handle_non_streaming(
 
     match state
         .ring
-        .send_message_with_coordinator(&fighter_id, user_message, Some(coordinator))
+        .send_message_with_coordinator(&fighter_id, user_message, Some(coordinator), vec![])
         .await
     {
         Ok(result) => {

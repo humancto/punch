@@ -124,6 +124,7 @@ pub async fn run_gorilla_tick(
         mcp_clients: None,
         model_routing: None,
         channel_notifier: None,
+        user_content_parts: vec![],
     };
 
     run_fighter_loop(params).await

@@ -85,6 +85,10 @@ pub struct FighterLoopParams {
     /// When present, the `channel_notify` tool can send messages to
     /// connected channels (Telegram, Slack, Discord, etc.).
     pub channel_notifier: Option<Arc<dyn ChannelNotifier>>,
+    /// Optional multimodal content parts (images) to attach to the user message.
+    /// When present, the user message is sent with these parts for vision-capable models.
+    #[allow(clippy::struct_field_names)]
+    pub user_content_parts: Vec<punch_types::ContentPart>,
 }
 
 /// Result of a completed fighter loop run.
@@ -146,7 +150,11 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     }
 
     // 2. Append the user's new message and persist it.
-    let user_msg = Message::new(Role::User, &params.user_message);
+    let user_msg = if params.user_content_parts.is_empty() {
+        Message::new(Role::User, &params.user_message)
+    } else {
+        Message::with_parts(Role::User, &params.user_message, params.user_content_parts)
+    };
     params
         .memory
         .save_message(&params.bout_id, &user_msg)

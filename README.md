@@ -176,6 +176,30 @@ The `channel_notify` tool lets fighters push notifications to any connected chan
 
 Route messages to the right model tier automatically. Simple questions hit a cheap model, complex analysis goes to an expensive one — no config per message.
 
+**All-Gemini (single key, vision-capable across all tiers):**
+
+```toml
+[model_routing]
+enabled = true
+
+[model_routing.cheap]
+provider = "google"
+model = "gemini-2.0-flash-lite"
+api_key_env = "GOOGLE_API_KEY"
+
+[model_routing.mid]
+provider = "google"
+model = "gemini-2.5-flash"
+api_key_env = "GOOGLE_API_KEY"
+
+[model_routing.expensive]
+provider = "google"
+model = "gemini-2.5-pro"
+api_key_env = "GOOGLE_API_KEY"
+```
+
+**Mix-and-match (use each provider's strengths):**
+
 ```toml
 [model_routing]
 enabled = true
@@ -183,17 +207,20 @@ enabled = true
 [model_routing.cheap]
 provider = "openai"
 model = "gpt-4.1-nano"
+api_key_env = "OPENAI_API_KEY"
 
 [model_routing.mid]
 provider = "openai"
 model = "gpt-4.1-mini"
+api_key_env = "OPENAI_API_KEY"
 
 [model_routing.expensive]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
 ```
 
-Keyword-based classifier (no LLM call overhead): "check my calendar" hits cheap, "analyze this report" hits expensive.
+Keyword-based classifier (no LLM call overhead): "check my calendar" hits cheap, "analyze this report" hits expensive. Each tier can use a different provider — mix Gemini, OpenAI, and Anthropic freely.
 
 ---
 

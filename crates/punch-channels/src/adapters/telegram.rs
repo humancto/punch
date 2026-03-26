@@ -120,7 +120,7 @@ impl TelegramAdapter {
     /// For photo messages, downloads the largest photo via the Bot API,
     /// base64-encodes it, and stores it in metadata as `image_base64` and
     /// `image_media_type`. Caption (if any) becomes the text; if there is
-    /// no caption, text is set to "[photo]".
+    /// no caption, text is left empty and the image content speaks for itself.
     pub async fn parse_webhook_payload_with_photos(
         &self,
         payload: &serde_json::Value,
@@ -184,11 +184,12 @@ impl TelegramAdapter {
             false
         };
 
-        // Text: use actual text, caption (for photos), or "[photo]" placeholder.
+        // Text: use actual text or caption. For photo-only messages, leave empty
+        // and let the LLM's multimodal training handle it naturally.
         let text = message["text"]
             .as_str()
             .or_else(|| message["caption"].as_str())
-            .unwrap_or(if has_photo { "[photo]" } else { "" });
+            .unwrap_or("");
 
         if text.is_empty() && !has_photo {
             return None;

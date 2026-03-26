@@ -18,7 +18,13 @@ use crate::router::ChannelRouter;
 #[async_trait]
 pub trait ChannelBridgeHandle: Send + Sync {
     /// Send a message to a fighter and get the text response.
-    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String>;
+    /// `image_parts` contains optional base64-encoded images for multimodal input.
+    async fn send_message(
+        &self,
+        fighter_id: FighterId,
+        message: &str,
+        image_parts: Vec<punch_types::ContentPart>,
+    ) -> Result<String, String>;
 
     /// Find a fighter by name, returning its ID.
     async fn find_fighter_by_name(&self, name: &str) -> Result<Option<FighterId>, String>;
@@ -46,6 +52,7 @@ pub async fn process_incoming_message(
     user_id: &str,
     _display_name: &str,
     message_text: &str,
+    image_parts: Vec<punch_types::ContentPart>,
 ) -> Result<String, String> {
     // 1. Try to resolve an existing fighter for this user
     let fighter_id = match router.resolve(platform, user_id) {
@@ -97,7 +104,9 @@ pub async fn process_incoming_message(
     };
 
     // 3. Send message to the fighter
-    handle.send_message(fighter_id, message_text).await
+    handle
+        .send_message(fighter_id, message_text, image_parts)
+        .await
 }
 
 #[cfg(test)]
@@ -116,6 +125,7 @@ mod tests {
             &self,
             fighter_id: FighterId,
             message: &str,
+            _image_parts: Vec<punch_types::ContentPart>,
         ) -> Result<String, String> {
             self.responses
                 .lock()
@@ -156,6 +166,7 @@ mod tests {
             "user1",
             "Alice",
             "Hello!",
+            vec![],
         )
         .await;
 
@@ -181,6 +192,7 @@ mod tests {
             "user1",
             "Alice",
             "Hello!",
+            vec![],
         )
         .await;
 
@@ -207,6 +219,7 @@ mod tests {
             "user1",
             "Alice",
             "Hello!",
+            vec![],
         )
         .await;
 
@@ -232,6 +245,7 @@ mod tests {
             "user1",
             "Alice",
             "First message",
+            vec![],
         )
         .await;
 
@@ -243,6 +257,7 @@ mod tests {
             "user1",
             "Alice",
             "Second message",
+            vec![],
         )
         .await;
 
@@ -270,6 +285,7 @@ mod tests {
             "user1",
             "Alice",
             "Hello from user1",
+            vec![],
         )
         .await;
 
@@ -281,6 +297,7 @@ mod tests {
             "user2",
             "Bob",
             "Hello from user2",
+            vec![],
         )
         .await;
 

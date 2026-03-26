@@ -146,6 +146,7 @@ fn make_params(
         mcp_clients: None,
         model_routing: None,
         channel_notifier: None,
+        user_content_parts: vec![],
     }
 }
 
@@ -474,6 +475,7 @@ async fn test_messages_persisted_to_memory() {
         mcp_clients: None,
         model_routing: None,
         channel_notifier: None,
+        user_content_parts: vec![],
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -534,6 +536,7 @@ async fn test_creed_bout_count_increments() {
         mcp_clients: None,
         model_routing: None,
         channel_notifier: None,
+        user_content_parts: vec![],
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");
@@ -592,6 +595,7 @@ async fn test_heartbeat_tasks_marked_checked() {
         mcp_clients: None,
         model_routing: None,
         channel_notifier: None,
+        user_content_parts: vec![],
     };
 
     let _result = run_fighter_loop(params).await.expect("loop should succeed");

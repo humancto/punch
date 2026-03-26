@@ -103,6 +103,56 @@ api_key_env = "GROQ_API_KEY"
 
 > **Model tip:** For reliable tool use (calendar, email, file access), use `gpt-4.1-mini` or better. Smaller models like `gpt-4.1-nano` or `gemini-2.0-flash-lite` may ignore tools entirely.
 
+### Optional: Smart Model Routing
+
+Instead of sending everything to one model, route by complexity. Simple questions go cheap, complex reasoning goes premium. Add this below your `[default_model]`:
+
+**Single provider (e.g. all Gemini):**
+
+```toml
+[model_routing]
+enabled = true
+
+[model_routing.cheap]
+provider = "google"
+model = "gemini-2.0-flash-lite"
+api_key_env = "GOOGLE_API_KEY"
+
+[model_routing.mid]
+provider = "google"
+model = "gemini-2.5-flash"
+api_key_env = "GOOGLE_API_KEY"
+
+[model_routing.expensive]
+provider = "google"
+model = "gemini-2.5-pro"
+api_key_env = "GOOGLE_API_KEY"
+```
+
+**Mix providers (use each provider's strengths):**
+
+```toml
+[model_routing]
+enabled = true
+
+[model_routing.cheap]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+
+[model_routing.mid]
+provider = "openai"
+model = "gpt-4.1-mini"
+api_key_env = "OPENAI_API_KEY"
+
+[model_routing.expensive]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+```
+
+Each tier can use a different provider — just add the relevant API keys to `~/.punch/.env`. When routing is disabled (or a tier isn't configured), the `[default_model]` is used as fallback.
+
 ## Step 3: Start the Daemon
 
 ```bash
