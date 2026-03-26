@@ -273,6 +273,7 @@ async fn heartbeat_loop(mut cfg: HeartbeatLoopConfig) {
                 memory: Arc::clone(memory),
                 driver: Arc::clone(driver),
                 available_tools: tools_for_capabilities(&manifest.capabilities),
+                mcp_tools: Vec::new(),
                 max_iterations: Some(10),
                 context_window: None,
                 tool_timeout_secs: Some(60),
