@@ -211,13 +211,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  If a tool fails, explain what happened and suggest alternatives. \
                  Be helpful, concise, and direct. Take action, don't just talk about it."
                     .to_string(),
-            capabilities: vec![
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-                Capability::SelfConfig,
-                Capability::ChannelNotify,
-                Capability::Schedule,
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -229,14 +223,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  production-quality code across all major languages and frameworks. \
                  Be thorough, handle errors, write tests."
                 .to_string(),
-            capabilities: vec![
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::ShellExec("*".to_string()),
-                Capability::Network("*".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
         },
@@ -248,13 +235,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  cross-reference sources, and produce well-cited reports. Be rigorous \
                  and evidence-based."
                 .to_string(),
-            capabilities: vec![
-                Capability::Network("*".to_string()),
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -266,7 +247,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
                  on broad knowledge to give insightful, well-reasoned answers. Be clear, \
                  concise, and helpful."
                 .to_string(),
-            capabilities: vec![Capability::Memory, Capability::McpAccess("*".to_string())],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         },
@@ -277,13 +258,7 @@ fn load_template(template: &str, default_model: &ModelConfig) -> Result<FighterM
             system_prompt: "You are Coder, a programming expert. Write clean, efficient code. \
                  Explain your reasoning. Always include error handling."
                 .to_string(),
-            capabilities: vec![
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::ShellExec("*".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Heavyweight,
             tenant_id: None,
         },

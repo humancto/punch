@@ -98,6 +98,44 @@ impl std::fmt::Display for Capability {
     }
 }
 
+impl Capability {
+    /// Returns a full-access capability set with wildcard scopes.
+    ///
+    /// This is the default for user-facing fighters — they should be able to
+    /// use any tool the LLM decides is appropriate. Restrict capabilities only
+    /// when deploying sandboxed or multi-tenant agents.
+    pub fn full_access() -> Vec<Capability> {
+        vec![
+            Capability::FileRead("**".to_string()),
+            Capability::FileWrite("**".to_string()),
+            Capability::ShellExec("*".to_string()),
+            Capability::Network("*".to_string()),
+            Capability::Memory,
+            Capability::KnowledgeGraph,
+            Capability::BrowserControl,
+            Capability::AgentSpawn,
+            Capability::AgentMessage,
+            Capability::Schedule,
+            Capability::EventPublish,
+            Capability::SourceControl,
+            Capability::Container,
+            Capability::DataManipulation,
+            Capability::CodeAnalysis,
+            Capability::Archive,
+            Capability::Template,
+            Capability::Crypto,
+            Capability::PluginInvoke,
+            Capability::A2ADelegate,
+            Capability::McpAccess("*".to_string()),
+            Capability::ChannelNotify,
+            Capability::SelfConfig,
+            Capability::SystemAutomation,
+            Capability::UiAutomation("*".to_string()),
+            Capability::AppIntegration("*".to_string()),
+        ]
+    }
+}
+
 /// A record of a capability grant to an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityGrant {

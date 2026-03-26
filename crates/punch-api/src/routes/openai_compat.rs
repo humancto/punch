@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
 
-use punch_types::{AgentCoordinator, FighterManifest, ModelCatalog, ModelConfig, WeightClass};
+use punch_types::{AgentCoordinator, Capability, FighterManifest, ModelCatalog, ModelConfig, WeightClass};
 
 use crate::AppState;
 
@@ -490,7 +490,7 @@ async fn chat_completions(
             } else {
                 system_prompt
             },
-            capabilities: vec![],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         };

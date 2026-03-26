@@ -111,14 +111,7 @@ pub async fn run(config_path: Option<String>, port_override: Option<u16>) -> i32
                  If a tool fails, explain what happened and suggest alternatives. \
                  Be helpful, concise, and direct. Take action, don't just talk about it."
                     .to_string(),
-            capabilities: vec![
-                Capability::Network("*".to_string()),
-                Capability::FileRead("**".to_string()),
-                Capability::FileWrite("**".to_string()),
-                Capability::ShellExec("*".to_string()),
-                Capability::Memory,
-                Capability::McpAccess("*".to_string()),
-            ],
+            capabilities: Capability::full_access(),
             weight_class: WeightClass::Middleweight,
             tenant_id: None,
         };
