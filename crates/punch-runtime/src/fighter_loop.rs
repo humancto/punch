@@ -243,6 +243,13 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         }
     }
 
+    info!(
+        tool_count = params.available_tools.len(),
+        fighter = %params.manifest.name,
+        model = %params.manifest.model.model,
+        "fighter loop starting"
+    );
+
     // 4. Main loop.
     loop {
         // --- Context Budget: check and trim before LLM call ---

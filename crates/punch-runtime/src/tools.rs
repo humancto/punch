@@ -250,7 +250,7 @@ fn push_unique(tools: &mut Vec<ToolDefinition>, tool: ToolDefinition) {
 fn file_read() -> ToolDefinition {
     ToolDefinition {
         name: "file_read".into(),
-        description: "Read the contents of a file at the given path.".into(),
+        description: "Read the contents of a file on the user's machine. Use this to analyze, inspect, or review any file the user mentions — text, code, config, logs, CSV, JSON, etc. Accepts absolute paths (e.g. /Users/name/file.txt) or relative paths.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -269,7 +269,7 @@ fn file_write() -> ToolDefinition {
     ToolDefinition {
         name: "file_write".into(),
         description:
-            "Write content to a file at the given path. Creates parent directories if needed."
+            "Write or create a file on the user's machine. Creates parent directories if needed. Use for saving results, generating files, or modifying content."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -292,7 +292,7 @@ fn file_write() -> ToolDefinition {
 fn file_list() -> ToolDefinition {
     ToolDefinition {
         name: "file_list".into(),
-        description: "List files and directories at the given path.".into(),
+        description: "List files and directories in a folder on the user's machine. Use to explore directory contents, find files, or verify paths exist.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -309,7 +309,7 @@ fn file_list() -> ToolDefinition {
 fn shell_exec() -> ToolDefinition {
     ToolDefinition {
         name: "shell_exec".into(),
-        description: "Execute a shell command and return stdout, stderr, and exit code.".into(),
+        description: "Execute a shell command on the user's machine and return stdout, stderr, and exit code. This is your most versatile tool — use it for anything: launching apps, running scripts, system automation, package management, database queries, API calls via curl, and any task that can be done from a terminal.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
