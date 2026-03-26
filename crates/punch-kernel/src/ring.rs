@@ -643,7 +643,7 @@ impl Ring {
         fighter_id: &FighterId,
         message: String,
     ) -> PunchResult<FighterLoopResult> {
-        self.send_message_with_coordinator(fighter_id, message, None)
+        self.send_message_with_coordinator(fighter_id, message, None, vec![])
             .await
     }
 
@@ -655,12 +655,13 @@ impl Ring {
     ///
     /// If `coordinator` is provided, the fighter can use inter-agent tools
     /// (`agent_spawn`, `agent_message`, `agent_list`).
-    #[instrument(skip(self, message, coordinator), fields(%fighter_id))]
+    #[instrument(skip(self, message, coordinator, content_parts), fields(%fighter_id))]
     pub async fn send_message_with_coordinator(
         &self,
         fighter_id: &FighterId,
         message: String,
         coordinator: Option<Arc<dyn AgentCoordinator>>,
+        content_parts: Vec<punch_types::ContentPart>,
     ) -> PunchResult<FighterLoopResult> {
         // Look up the fighter.
         let mut entry = self
@@ -800,6 +801,7 @@ impl Ring {
                 None
             },
             channel_notifier: None,
+            user_content_parts: content_parts,
         };
 
         // Record message metric.

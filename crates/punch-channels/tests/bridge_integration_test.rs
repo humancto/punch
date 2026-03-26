@@ -37,7 +37,12 @@ impl MockBridgeHandle {
 
 #[async_trait]
 impl ChannelBridgeHandle for MockBridgeHandle {
-    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String> {
+    async fn send_message(
+        &self,
+        fighter_id: FighterId,
+        message: &str,
+        _image_parts: Vec<punch_types::ContentPart>,
+    ) -> Result<String, String> {
         self.received
             .lock()
             .unwrap()
@@ -78,6 +83,7 @@ async fn test_bridge_dispatch_text_message() {
         "user1",
         "Alice",
         "Hello agent!",
+        vec![],
     )
     .await;
 
@@ -106,6 +112,7 @@ async fn test_conversation_continuity() {
         "user1",
         "Alice",
         "First message",
+        vec![],
     )
     .await;
     assert!(r1.is_ok());
@@ -118,6 +125,7 @@ async fn test_conversation_continuity() {
         "user1",
         "Alice",
         "Second message",
+        vec![],
     )
     .await;
     assert!(r2.is_ok());
@@ -145,6 +153,7 @@ async fn test_different_users_routed_independently() {
         "user1",
         "Alice",
         "Hello from user1",
+        vec![],
     )
     .await;
 
@@ -156,6 +165,7 @@ async fn test_different_users_routed_independently() {
         "user2",
         "Bob",
         "Hello from user2",
+        vec![],
     )
     .await;
 
@@ -181,6 +191,7 @@ async fn test_no_fighters_available() {
         "user1",
         "Alice",
         "Hello!",
+        vec![],
     )
     .await;
 
@@ -213,6 +224,7 @@ async fn test_multiple_platforms() {
         "tg_user",
         "Alice",
         "from telegram",
+        vec![],
     )
     .await;
 
@@ -224,6 +236,7 @@ async fn test_multiple_platforms() {
         "dc_user",
         "Bob",
         "from discord",
+        vec![],
     )
     .await;
 
@@ -252,6 +265,7 @@ async fn test_fallback_to_first_fighter() {
         "user1",
         "Alice",
         "Hello!",
+        vec![],
     )
     .await;
 

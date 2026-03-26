@@ -103,7 +103,7 @@ async fn simple_chat(
 
     match state
         .ring
-        .send_message_with_coordinator(&fighter_id, body.message, Some(coordinator))
+        .send_message_with_coordinator(&fighter_id, body.message, Some(coordinator), vec![])
         .await
     {
         Ok(result) => (

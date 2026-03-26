@@ -79,6 +79,28 @@ fn filtered_response() -> (StatusCode, Json<WebhookResponse>) {
     )
 }
 
+/// Extract image ContentParts from IncomingMessage metadata.
+///
+/// Looks for `image_base64` and `image_media_type` keys set by the
+/// Telegram adapter's async photo parser.
+fn extract_image_parts(
+    metadata: &std::collections::HashMap<String, serde_json::Value>,
+) -> Vec<punch_types::ContentPart> {
+    let mut parts = Vec::new();
+    if let Some(serde_json::Value::String(b64)) = metadata.get("image_base64") {
+        let media_type = metadata
+            .get("image_media_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("image/jpeg")
+            .to_string();
+        parts.push(punch_types::ContentPart::Image {
+            media_type,
+            data: b64.clone(),
+        });
+    }
+    parts
+}
+
 fn denied_response(reason: &str) -> (StatusCode, Json<WebhookResponse>) {
     (
         StatusCode::FORBIDDEN,
@@ -100,11 +122,16 @@ struct RingBridgeHandle {
 
 #[async_trait::async_trait]
 impl ChannelBridgeHandle for RingBridgeHandle {
-    async fn send_message(&self, fighter_id: FighterId, message: &str) -> Result<String, String> {
+    async fn send_message(
+        &self,
+        fighter_id: FighterId,
+        message: &str,
+        image_parts: Vec<punch_types::ContentPart>,
+    ) -> Result<String, String> {
         // Use coordinator-aware path so channel fighters get MCP tools.
         match self
             .ring
-            .send_message_with_coordinator(&fighter_id, message.to_string(), None)
+            .send_message_with_coordinator(&fighter_id, message.to_string(), None, image_parts)
             .await
         {
             Ok(result) => Ok(result.response),
@@ -232,9 +259,18 @@ async fn telegram_webhook(
         }
     }
 
-    // 2. Parse the payload.
-    let adapter = TelegramAdapter::new(String::new());
-    let msg = match adapter.parse_webhook_payload(&payload) {
+    // 2. Parse the payload (use async parser to handle photos).
+    let bot_token = state
+        .config
+        .channels
+        .values()
+        .find(|c| c.channel_type == "telegram")
+        .and_then(|cfg| cfg.token_env.as_ref())
+        .and_then(|env_var| std::env::var(env_var).ok())
+        .unwrap_or_default();
+
+    let adapter = TelegramAdapter::new(bot_token);
+    let msg = match adapter.parse_webhook_payload_with_photos(&payload).await {
         Some(msg) => msg,
         None => return filtered_response(),
     };
@@ -242,6 +278,7 @@ async fn telegram_webhook(
     info!(
         user_id = %msg.user_id,
         chat_id = %msg.channel_id,
+        has_image = msg.metadata.contains_key("image_base64"),
         "Telegram webhook message received"
     );
 
@@ -250,7 +287,10 @@ async fn telegram_webhook(
         return denied_response(&reason);
     }
 
-    // 4. Route to fighter via persistent router.
+    // 4. Extract image content parts from metadata (if photo was downloaded).
+    let image_parts = extract_image_parts(&msg.metadata);
+
+    // 5. Route to fighter via persistent router.
     let handle = RingBridgeHandle {
         ring: state.ring.clone(),
     };
@@ -262,6 +302,7 @@ async fn telegram_webhook(
         &msg.user_id,
         &msg.display_name,
         &msg.text,
+        image_parts,
     )
     .await
     {
@@ -346,6 +387,7 @@ async fn discord_webhook(
         &msg.user_id,
         &msg.display_name,
         &msg.text,
+        vec![],
     )
     .await
     {
@@ -451,6 +493,7 @@ async fn slack_events(
         &msg.user_id,
         &msg.display_name,
         &msg.text,
+        vec![],
     )
     .await
     {

@@ -1400,6 +1400,7 @@ impl WorkflowEngine {
             mcp_clients: None,
             model_routing: None,
             channel_notifier: None,
+            user_content_parts: vec![],
         };
 
         let loop_result = tokio::time::timeout(
