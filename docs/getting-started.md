@@ -159,7 +159,21 @@ Each tier can use a different provider — just add the relevant API keys to `~/
 punch start
 ```
 
-Punch auto-spawns a default fighter ("Punch") with full MCP tool access. You're ready to chat immediately.
+Punch auto-spawns a default fighter ("Punch") with full tool access. You're ready to chat immediately.
+
+### macOS Permissions (Required for Desktop Automation)
+
+Punch can take screenshots, control apps, read messages, and automate your desktop. On macOS, these features require explicit permission grants. Open **System Settings > Privacy & Security** and enable your terminal app (Terminal, iTerm2, Warp, etc.) for:
+
+| Permission           | What it enables                                                    |
+| -------------------- | ------------------------------------------------------------------ |
+| **Accessibility**    | UI automation, reading app elements, AppleScript via System Events |
+| **Screen Recording** | Taking screenshots of your screen and app windows                  |
+| **Full Disk Access** | Reading app databases (iMessage history, Safari data, etc.)        |
+
+Restart your terminal after granting permissions. The **Automation** permission is auto-prompted the first time Punch uses AppleScript to control a specific app.
+
+Without these permissions, desktop automation tools will fail and Punch will fall back to shell-based alternatives where possible.
 
 ### Chat via CLI
 
