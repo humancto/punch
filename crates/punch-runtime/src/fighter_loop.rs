@@ -162,6 +162,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
     messages.push(user_msg);
 
     // 2b. Model routing: check if we should use a tier-specific driver.
+    let mut routed_tier: Option<String> = None;
     let routed_driver: Option<Arc<dyn LlmDriver>> = params
         .model_routing
         .as_ref()
@@ -177,6 +178,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         model = %model_config.model,
                         "model router: using tier-specific driver"
                     );
+                    routed_tier = Some(tier.to_string());
                     Some(driver)
                 }
                 Err(e) => {
@@ -194,9 +196,19 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         None => params.driver.as_ref(),
     };
 
+    // Use compact creed rendering for cheap/mid tiers to save tokens.
+    let use_compact_creed = routed_tier
+        .as_deref()
+        .is_some_and(|t| t == "cheap" || t == "mid");
+
     // 3. Recall relevant memories and build an enriched system prompt.
-    let system_prompt =
-        build_system_prompt(&params.manifest, &params.fighter_id, &params.memory).await;
+    let system_prompt = build_system_prompt(
+        &params.manifest,
+        &params.fighter_id,
+        &params.memory,
+        use_compact_creed,
+    )
+    .await;
 
     // Build the tool execution context.
     let mut tool_context = ToolExecutionContext {
@@ -632,16 +644,22 @@ async fn build_system_prompt(
     manifest: &FighterManifest,
     fighter_id: &FighterId,
     memory: &MemorySubstrate,
+    compact_creed: bool,
 ) -> String {
     let mut prompt = manifest.system_prompt.clone();
 
     // --- CREED INJECTION ---
     // Load the fighter's creed (consciousness layer) if one exists.
     // The creed is tied to fighter NAME so it persists across respawns.
+    // Use compact rendering for cheap/mid model tiers to save tokens.
     match memory.load_creed_by_name(&manifest.name).await {
         Ok(Some(creed)) => {
             prompt.push_str("\n\n");
-            prompt.push_str(&creed.render());
+            if compact_creed {
+                prompt.push_str(&creed.render_compact());
+            } else {
+                prompt.push_str(&creed.render());
+            }
 
             // --- HEARTBEAT INJECTION ---
             // Check for due heartbeat tasks and inject them into the prompt.
