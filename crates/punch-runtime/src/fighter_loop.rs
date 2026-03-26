@@ -306,6 +306,57 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                 .clone()
         };
 
+        // --- Sliding window summarization ---
+        // When conversation grows long, summarize older messages to save tokens.
+        // This runs before the hard trim, acting as a proactive compactor.
+        if crate::context_budget::needs_summarization(&messages) {
+            let (input_text, old_count) =
+                crate::context_budget::build_summarization_input(&messages);
+            debug!(
+                old_messages = old_count,
+                input_chars = input_text.len(),
+                "summarizing older messages"
+            );
+
+            let summary_prompt = format!(
+                "Summarize the following conversation excerpt in 2-4 concise bullet points. \
+                 Focus on: key decisions made, important facts established, tasks completed or \
+                 in progress, and any commitments or preferences expressed. Be specific — include \
+                 names, file paths, and concrete details. Respond with ONLY the bullet points, \
+                 no preamble.\n\n{}",
+                input_text
+            );
+
+            let summary_request = CompletionRequest {
+                model: params.manifest.model.model.clone(),
+                messages: vec![Message::new(Role::User, &summary_prompt)],
+                tools: vec![],
+                max_tokens: 300,
+                temperature: Some(0.2),
+                system_prompt: Some(
+                    "You are a conversation summarizer. Be concise and specific.".to_string(),
+                ),
+            };
+
+            match active_driver.complete(summary_request).await {
+                Ok(resp) => {
+                    let summary = resp.message.content.trim().to_string();
+                    if !summary.is_empty() {
+                        crate::context_budget::apply_summary(&mut messages, &summary);
+                        total_usage.accumulate(&resp.usage);
+                        info!(
+                            summary_tokens = resp.usage.total(),
+                            "sliding window summarization complete"
+                        );
+                    }
+                }
+                Err(e) => {
+                    // Non-fatal: if summarization fails, we still have the hard trim as fallback.
+                    warn!(error = %e, "sliding window summarization failed (non-critical)");
+                }
+            }
+        }
+
         // --- Context Budget: check and trim before LLM call ---
         if let Some(trim_action) = budget.check_trim_needed(&messages, &turn_tools) {
             budget.apply_trim(&mut messages, trim_action);
