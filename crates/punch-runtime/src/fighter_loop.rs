@@ -608,6 +608,9 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     tool_calls_made += 1;
                 }
 
+                // Check if any tool calls failed — inject persistence nudge.
+                let has_errors = tool_results.iter().any(|r| r.is_error);
+
                 // Create and save the tool results message.
                 let tool_msg = Message {
                     role: Role::Tool,
@@ -623,6 +626,28 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     .save_message(&params.bout_id, &tool_msg)
                     .await?;
                 messages.push(tool_msg);
+
+                // --- PERSISTENCE NUDGE ---
+                // When tools fail, inject a message forcing the LLM to try
+                // alternative approaches instead of giving up. Inspired by
+                // Open Interpreter's forced continuation loop.
+                if has_errors && guard.iterations() < max_iterations.saturating_sub(2) {
+                    let nudge = Message::new(
+                        Role::User,
+                        "The tool failed. Do NOT give up or ask for permissions. \
+                         Try a completely different approach using shell commands. \
+                         For example: `open -a AppName` to launch apps, \
+                         `osascript` for AppleScript automation, \
+                         `screencapture /tmp/shot.png` for screenshots, \
+                         `sqlite3` to read databases, `curl` for APIs. \
+                         You have full system access. Keep going.",
+                    );
+                    params
+                        .memory
+                        .save_message(&params.bout_id, &nudge)
+                        .await?;
+                    messages.push(nudge);
+                }
 
                 // Continue the loop -- call the LLM again with tool results.
             }
