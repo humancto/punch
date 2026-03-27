@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use punch_channels::ChannelPlatform;
-use punch_channels::bridge::{ChannelBridgeHandle, process_incoming_message};
+use punch_channels::bridge::{BridgeResponse, ChannelBridgeHandle, process_incoming_message};
 use punch_channels::router::ChannelRouter;
 use punch_types::FighterId;
 use std::sync::Mutex;
@@ -42,12 +42,15 @@ impl ChannelBridgeHandle for MockBridgeHandle {
         fighter_id: FighterId,
         message: &str,
         _image_parts: Vec<punch_types::ContentPart>,
-    ) -> Result<String, String> {
+    ) -> Result<BridgeResponse, String> {
         self.received
             .lock()
             .unwrap()
             .push((fighter_id, message.to_string()));
-        Ok(format!("Echo: {message}"))
+        Ok(BridgeResponse {
+            text: format!("Echo: {message}"),
+            images: vec![],
+        })
     }
 
     async fn find_fighter_by_name(&self, name: &str) -> Result<Option<FighterId>, String> {
@@ -88,7 +91,7 @@ async fn test_bridge_dispatch_text_message() {
     .await;
 
     assert!(response.is_ok());
-    assert_eq!(response.unwrap(), "Echo: Hello agent!");
+    assert_eq!(response.unwrap().text, "Echo: Hello agent!");
 
     // Verify the handle received the message for the correct fighter
     let received = handle.get_received();
@@ -270,5 +273,5 @@ async fn test_fallback_to_first_fighter() {
     .await;
 
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "Echo: Hello!");
+    assert_eq!(result.unwrap().text, "Echo: Hello!");
 }

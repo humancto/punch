@@ -28,6 +28,19 @@ pub struct AgentMessageResult {
     pub response: String,
     /// Tokens consumed by the target agent's processing.
     pub tokens_used: u64,
+    /// Images produced during the bout (e.g. screenshots, generated images).
+    /// Each entry is a base64-encoded image with its media type.
+    #[serde(default)]
+    pub images: Vec<ResponseImage>,
+}
+
+/// An image produced during a bout, ready to be sent to a channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseImage {
+    /// Base64-encoded image data.
+    pub data: String,
+    /// MIME type (e.g. "image/png", "image/jpeg").
+    pub media_type: String,
 }
 
 /// Trait for coordinating inter-agent operations.
@@ -106,6 +119,7 @@ mod tests {
         let result = AgentMessageResult {
             response: "I processed your request".to_string(),
             tokens_used: 256,
+            images: vec![],
         };
         let json = serde_json::to_string(&result).expect("serialize");
         let deser: AgentMessageResult = serde_json::from_str(&json).expect("deserialize");
@@ -118,6 +132,7 @@ mod tests {
         let result = AgentMessageResult {
             response: String::new(),
             tokens_used: 0,
+            images: vec![],
         };
         let json = serde_json::to_string(&result).expect("serialize");
         let deser: AgentMessageResult = serde_json::from_str(&json).expect("deserialize");

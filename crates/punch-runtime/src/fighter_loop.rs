@@ -122,6 +122,9 @@ pub struct FighterLoopResult {
     pub iterations: usize,
     /// Number of individual tool calls executed.
     pub tool_calls_made: usize,
+    /// Images produced by tool calls during the bout (screenshots, etc.).
+    /// Each entry is (base64_data, media_type).
+    pub images: Vec<(String, String)>,
 }
 
 /// Run the fighter loop: the core agent execution engine.
@@ -324,6 +327,10 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
         "fighter loop starting"
     );
 
+    // Collect images produced by tool calls (screenshots, etc.) so they can
+    // be forwarded to the channel (e.g. Telegram sendPhoto).
+    let mut produced_images: Vec<(String, String)> = Vec::new();
+
     // 4. Main loop.
     loop {
         // --- Dynamic tool selection: pick tools for this turn ---
@@ -441,6 +448,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                             usage: total_usage,
                             iterations: guard.iterations(),
                             tool_calls_made,
+                            images: produced_images,
                         });
                     }
                 }
@@ -538,6 +546,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                     usage: total_usage,
                     iterations: guard.iterations(),
                     tool_calls_made,
+                    images: produced_images,
                 });
             }
 
@@ -561,6 +570,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                         usage: total_usage,
                         iterations: guard.iterations(),
                         tool_calls_made,
+                        images: produced_images,
                     });
                 }
 
@@ -610,6 +620,7 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                             usage: total_usage,
                             iterations: guard.iterations(),
                             tool_calls_made,
+                            images: produced_images,
                         });
                     }
                     LoopGuardVerdict::Continue => {}
@@ -693,6 +704,15 @@ pub async fn run_fighter_loop(params: FighterLoopParams) -> PunchResult<FighterL
                             } else {
                                 None
                             };
+
+                            // Collect images for channel forwarding.
+                            if let Some(punch_types::ContentPart::Image {
+                                ref media_type,
+                                ref data,
+                            }) = image
+                            {
+                                produced_images.push((data.clone(), media_type.clone()));
+                            }
 
                             ToolCallResult {
                                 id: tc.id.clone(),

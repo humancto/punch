@@ -1510,6 +1510,11 @@ impl AgentCoordinator for Ring {
         Ok(AgentMessageResult {
             response: result.response,
             tokens_used: result.usage.total(),
+            images: result
+                .images
+                .into_iter()
+                .map(|(data, media_type)| punch_types::ResponseImage { data, media_type })
+                .collect(),
         })
     }
 

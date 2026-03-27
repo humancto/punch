@@ -11,20 +11,30 @@ use punch_types::FighterId;
 use crate::ChannelPlatform;
 use crate::router::ChannelRouter;
 
+/// Response from a fighter, including text and any produced images.
+#[derive(Debug, Clone)]
+pub struct BridgeResponse {
+    /// The text response from the fighter.
+    pub text: String,
+    /// Images produced during the bout (screenshots, etc.).
+    /// Each entry is (base64_data, media_type).
+    pub images: Vec<(String, String)>,
+}
+
 /// Kernel operations needed by channel adapters.
 ///
 /// Defined here to avoid circular deps (punch-channels cannot depend on
 /// punch-kernel). Implemented in punch-api on the actual Ring.
 #[async_trait]
 pub trait ChannelBridgeHandle: Send + Sync {
-    /// Send a message to a fighter and get the text response.
+    /// Send a message to a fighter and get the response (text + images).
     /// `image_parts` contains optional base64-encoded images for multimodal input.
     async fn send_message(
         &self,
         fighter_id: FighterId,
         message: &str,
         image_parts: Vec<punch_types::ContentPart>,
-    ) -> Result<String, String>;
+    ) -> Result<BridgeResponse, String>;
 
     /// Find a fighter by name, returning its ID.
     async fn find_fighter_by_name(&self, name: &str) -> Result<Option<FighterId>, String>;
@@ -44,7 +54,7 @@ pub trait ChannelBridgeHandle: Send + Sync {
 /// 3. Send the message to the fighter via the Ring
 /// 4. Return the response text
 ///
-/// Returns the response text to send back to the user.
+/// Returns the response (text + images) to send back to the user.
 pub async fn process_incoming_message(
     handle: &dyn ChannelBridgeHandle,
     router: &ChannelRouter,
@@ -53,7 +63,7 @@ pub async fn process_incoming_message(
     _display_name: &str,
     message_text: &str,
     image_parts: Vec<punch_types::ContentPart>,
-) -> Result<String, String> {
+) -> Result<BridgeResponse, String> {
     // 1. Try to resolve an existing fighter for this user
     let fighter_id = match router.resolve(platform, user_id) {
         Some(id) => id,
@@ -126,12 +136,15 @@ mod tests {
             fighter_id: FighterId,
             message: &str,
             _image_parts: Vec<punch_types::ContentPart>,
-        ) -> Result<String, String> {
+        ) -> Result<BridgeResponse, String> {
             self.responses
                 .lock()
                 .unwrap()
                 .push((fighter_id, message.to_string()));
-            Ok(format!("Echo: {message}"))
+            Ok(BridgeResponse {
+                text: format!("Echo: {message}"),
+                images: vec![],
+            })
         }
 
         async fn find_fighter_by_name(&self, name: &str) -> Result<Option<FighterId>, String> {
@@ -171,7 +184,7 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Echo: Hello!");
+        assert_eq!(result.unwrap().text, "Echo: Hello!");
     }
 
     #[tokio::test]
@@ -197,7 +210,7 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Echo: Hello!");
+        assert_eq!(result.unwrap().text, "Echo: Hello!");
 
         // Verify the route was set for future messages
         assert!(router.has_route(&ChannelPlatform::Telegram, "user1"));

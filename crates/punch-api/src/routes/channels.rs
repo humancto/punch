@@ -127,14 +127,17 @@ impl ChannelBridgeHandle for RingBridgeHandle {
         fighter_id: FighterId,
         message: &str,
         image_parts: Vec<punch_types::ContentPart>,
-    ) -> Result<String, String> {
+    ) -> Result<punch_channels::bridge::BridgeResponse, String> {
         // Use coordinator-aware path so channel fighters get MCP tools.
         match self
             .ring
             .send_message_with_coordinator(&fighter_id, message.to_string(), None, image_parts)
             .await
         {
-            Ok(result) => Ok(result.response),
+            Ok(result) => Ok(punch_channels::bridge::BridgeResponse {
+                text: result.response,
+                images: result.images,
+            }),
             Err(e) => Err(format!("Fighter error: {e}")),
         }
     }
@@ -306,7 +309,7 @@ async fn telegram_webhook(
     )
     .await
     {
-        Ok(response) => {
+        Ok(bridge_response) => {
             // Send response back via Telegram Bot API.
             if let Some(cfg) = state
                 .config
@@ -317,11 +320,26 @@ async fn telegram_webhook(
                 && let Ok(token) = std::env::var(env_var)
             {
                 let tg = TelegramAdapter::new(token);
-                if let Err(e) = tg.send_response(&msg.channel_id, &response).await {
+
+                // Send any images produced during the bout.
+                for (data, media_type) in &bridge_response.images {
+                    if let Err(e) = tg
+                        .send_photo(&msg.channel_id, data, media_type)
+                        .await
+                    {
+                        warn!("Failed to send Telegram photo: {e}");
+                    }
+                }
+
+                // Send the text response.
+                if !bridge_response.text.is_empty()
+                    && let Err(e) =
+                        tg.send_response(&msg.channel_id, &bridge_response.text).await
+                {
                     warn!("Failed to send Telegram response: {e}");
                 }
             }
-            ok_response(response)
+            ok_response(bridge_response.text)
         }
         Err(e) => err_response(e),
     }
@@ -391,7 +409,7 @@ async fn discord_webhook(
     )
     .await
     {
-        Ok(response) => ok_response(response),
+        Ok(bridge_response) => ok_response(bridge_response.text),
         Err(e) => err_response(e),
     }
 }
@@ -497,7 +515,7 @@ async fn slack_events(
     )
     .await
     {
-        Ok(response) => {
+        Ok(bridge_response) => {
             // Send response back via Slack Web API.
             if let Some(cfg) = state
                 .config
@@ -508,11 +526,11 @@ async fn slack_events(
                 && let Ok(token) = std::env::var(env_var)
             {
                 let slack = SlackAdapter::new(token, None);
-                if let Err(e) = slack.send_response(&msg.channel_id, &response).await {
+                if let Err(e) = slack.send_response(&msg.channel_id, &bridge_response.text).await {
                     warn!("Failed to send Slack response: {e}");
                 }
             }
-            ok_response(response).into_response()
+            ok_response(bridge_response.text).into_response()
         }
         Err(e) => err_response(e).into_response(),
     }

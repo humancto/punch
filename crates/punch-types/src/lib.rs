@@ -55,7 +55,7 @@ pub use cdp::{
 };
 pub use channel_notify::ChannelNotifier;
 pub use config::{ModelConfig, ModelRoutingConfig, Provider, PunchConfig};
-pub use coordinator::{AgentCoordinator, AgentInfo, AgentMessageResult};
+pub use coordinator::{AgentCoordinator, AgentInfo, AgentMessageResult, ResponseImage};
 pub use creed::{
     Creed, CreedId, DelegationRule, HeartbeatTask, InteractionStyle, LearnedBehavior, Relationship,
     SelfModel,

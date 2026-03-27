@@ -4726,6 +4726,7 @@ mod tests {
             Ok(AgentMessageResult {
                 response: format!("echo: {}", message),
                 tokens_used: 42,
+                images: vec![],
             })
         }
 

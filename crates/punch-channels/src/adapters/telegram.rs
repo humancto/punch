@@ -267,6 +267,67 @@ impl TelegramAdapter {
         Ok(bytes.to_vec())
     }
 
+    /// Send a photo via the Telegram Bot API (`sendPhoto`).
+    ///
+    /// Decodes base64 image data and sends it as a multipart upload.
+    pub async fn send_photo(
+        &self,
+        chat_id: &str,
+        base64_data: &str,
+        media_type: &str,
+    ) -> PunchResult<()> {
+        use base64::Engine;
+
+        let url = format!("https://api.telegram.org/bot{}/sendPhoto", self.bot_token);
+
+        let image_bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_data)
+            .map_err(|e| PunchError::Channel {
+                channel: "telegram".to_string(),
+                message: format!("failed to decode base64 image: {e}"),
+            })?;
+
+        let extension = match media_type {
+            "image/jpeg" | "image/jpg" => "jpg",
+            "image/png" => "png",
+            "image/gif" => "gif",
+            _ => "png",
+        };
+        let filename = format!("image.{extension}");
+
+        let part = reqwest::multipart::Part::bytes(image_bytes)
+            .file_name(filename)
+            .mime_str(media_type)
+            .map_err(|e| PunchError::Channel {
+                channel: "telegram".to_string(),
+                message: format!("invalid mime type: {e}"),
+            })?;
+
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part("photo", part);
+
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| PunchError::Channel {
+                channel: "telegram".to_string(),
+                message: format!("failed to send photo: {e}"),
+            })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            warn!("Telegram sendPhoto failed ({status}): {body_text}");
+        }
+
+        self.messages_sent.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Send a message via the Telegram Bot API.
     async fn api_send_message(&self, chat_id: &str, text: &str) -> PunchResult<()> {
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
