@@ -33,8 +33,9 @@ pub use marketplace::{
     InstalledSkill, SkillListing, SkillMarketplace, SkillSource, builtin_skills,
 };
 pub use packs::{
-    InstallResult, PackMcpServer, SkillPack, available_packs, find_bundled_pack, install_pack,
-    load_bundled_packs, load_pack_from_path,
+    InstallResult, PackMcpServer, SkillPack, available_packs, fetch_and_install_marketplace_pack,
+    find_bundled_pack, install_pack, load_bundled_packs, load_pack_from_path,
+    parse_skillpack_toml,
 };
 pub use registry::{IndexEntry, IndexMeta, ScanFinding, ScanVerdict};
 pub use scanner::SkillScanner;

@@ -304,10 +304,10 @@ pub enum MoveCommands {
     /// List available skill packs (bundled MCP server configurations)
     Packs,
 
-    /// Install a skill pack (bundled MCP server + skill prompt)
+    /// Install a skill pack (checks bundled packs, then marketplace)
     #[command(name = "add")]
     Add {
-        /// Pack name (e.g. productivity, developer, research, files)
+        /// Pack name (e.g. productivity, developer, research, files, browser)
         name: String,
     },
 }

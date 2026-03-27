@@ -282,11 +282,94 @@ pub fn install_pack(punch_home: &Path, pack: &SkillPack) -> PunchResult<InstallR
 }
 
 // ---------------------------------------------------------------------------
+// Marketplace pack fetch + install
+// ---------------------------------------------------------------------------
+
+/// Fetch a skill pack from the marketplace index, verify it, and install.
+///
+/// Flow: sync index → resolve latest version → fetch tarball → extract
+/// SKILLPACK.toml → parse → install to punch_home.
+pub async fn fetch_and_install_marketplace_pack(
+    punch_home: &Path,
+    name: &str,
+) -> PunchResult<(SkillPack, InstallResult)> {
+    use crate::client::IndexClient;
+    use crate::verifier::verify_checksum;
+
+    info!(pack = %name, "fetching skill pack from marketplace");
+
+    let client = IndexClient::with_defaults(punch_home);
+
+    // Sync index (clone or pull)
+    client.sync()?;
+
+    // Resolve to the latest version
+    let version = client.resolve_version(name, "latest")?;
+    let entry = client.get_entry(name, &version)?;
+
+    // Fetch the tarball
+    let tarball_data = client.fetch_skill(&entry).await?;
+
+    // Verify checksum
+    if !verify_checksum(&tarball_data, &entry.checksum) {
+        return Err(PunchError::Config(format!(
+            "checksum mismatch for pack '{}' v{} — tarball may be corrupted",
+            name, version
+        )));
+    }
+
+    // Extract SKILLPACK.toml from the tarball
+    let toml_content = extract_skillpack_toml_from_tarball(&tarball_data)?;
+
+    // Parse the pack
+    let pack = parse_skillpack_toml(&toml_content)?;
+
+    // Install it
+    let result = install_pack(punch_home, &pack)?;
+
+    info!(pack = %pack.name, version = %version, "marketplace pack installed");
+
+    Ok((pack, result))
+}
+
+/// Extract SKILLPACK.toml content from a tar.gz archive.
+fn extract_skillpack_toml_from_tarball(data: &[u8]) -> PunchResult<String> {
+    let decoder = flate2::read::GzDecoder::new(data);
+    let mut archive = tar::Archive::new(decoder);
+
+    for entry in archive
+        .entries()
+        .map_err(|e| PunchError::Config(format!("failed to read tarball: {}", e)))?
+    {
+        let mut entry = entry.map_err(|e| {
+            PunchError::Config(format!("failed to read tarball entry: {}", e))
+        })?;
+
+        let path = entry
+            .path()
+            .map_err(|e| PunchError::Config(format!("invalid path in tarball: {}", e)))?
+            .to_path_buf();
+
+        if path.file_name().is_some_and(|f| f == "SKILLPACK.toml") {
+            let mut content = String::new();
+            std::io::Read::read_to_string(&mut entry, &mut content).map_err(|e| {
+                PunchError::Config(format!("failed to read SKILLPACK.toml from tarball: {}", e))
+            })?;
+            return Ok(content);
+        }
+    }
+
+    Err(PunchError::Config(
+        "SKILLPACK.toml not found in tarball".to_string(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 /// Parse a SKILLPACK.toml string into a `SkillPack`.
-fn parse_skillpack_toml(content: &str) -> PunchResult<SkillPack> {
+pub fn parse_skillpack_toml(content: &str) -> PunchResult<SkillPack> {
     let parsed: SkillPackToml = toml::from_str(content)
         .map_err(|e| PunchError::Config(format!("invalid SKILLPACK.toml: {}", e)))?;
 
@@ -474,10 +557,9 @@ mod tests {
         assert_eq!(pack.name, "developer");
         assert_eq!(pack.mcp_servers[0].name, "github");
         assert!(!pack.required_env_vars.is_empty());
-        assert!(
-            pack.required_env_vars
-                .contains(&"GITHUB_PERSONAL_ACCESS_TOKEN".to_string())
-        );
+        assert!(pack
+            .required_env_vars
+            .contains(&"GITHUB_PERSONAL_ACCESS_TOKEN".to_string()));
     }
 
     #[test]

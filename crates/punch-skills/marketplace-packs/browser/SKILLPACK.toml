@@ -1,0 +1,33 @@
+[pack]
+name = "browser"
+version = "1.0.0"
+description = "Browser automation for web navigation, form filling, and data extraction"
+author = "humancto"
+category = "automation"
+tags = ["browser", "web", "scraping", "automation", "playwright", "flights", "search"]
+
+[[mcp_servers]]
+name = "playwright"
+command = "npx"
+args = ["-y", "@anthropic-ai/mcp-server-playwright"]
+install_command = "npx playwright install chromium"
+description = "Full browser automation via Playwright — navigate, click, fill forms, extract data"
+
+[skill]
+prompt = """You have full browser automation tools via the Playwright MCP server:
+- browser_navigate: Go to any URL
+- browser_click: Click elements on the page
+- browser_fill_form: Type into input fields
+- browser_snapshot: Get the current page accessibility tree (use this to understand page content)
+- browser_take_screenshot: Capture a screenshot of the current page
+- browser_press_key: Press keyboard keys (Enter, Tab, etc.)
+- browser_select_option: Select from dropdown menus
+- browser_hover: Hover over elements
+- browser_tabs: List open browser tabs
+- browser_evaluate: Run JavaScript on the page
+
+When the user asks you to search the web, find information on websites, book flights, compare prices, fill out forms, or interact with any website, USE these browser tools. Navigate to the site, interact with it like a human would, and extract the information. Don't say you can't access websites — you CAN browse the web."""
+
+[env_vars]
+required = []
+optional = []
